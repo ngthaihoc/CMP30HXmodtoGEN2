@@ -1,4 +1,4 @@
-# <img src="https://api.iconify.design/carbon/chip.svg?color=%2310b981" width="32" height="32" align="center" /> Công Cụ Mở Khoá NVIDIA CMP 30HX v3.0.0 (PCIe Gen2 x16)
+# <img src="https://api.iconify.design/carbon/chip.svg?color=%2310b981" width="32" height="32" align="center" /> Mở Khoá NVIDIA CMP 30HX v3.0.0 (PCIe Gen2 x16)
 
 [![GitHub Repo](https://img.shields.io/badge/GitHub-ngthaihoc%2FCMP30HXmodtoGEN2-181717?logo=github&logoColor=white)](https://github.com/ngthaihoc/CMP30HXmodtoGEN2)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20x64-0078D6?logo=windows&logoColor=white)](https://microsoft.com)
@@ -14,7 +14,7 @@ Giải pháp mở khoá băng thông **PCIe Gen2 x16 (~6.4 GB/s)** cho card đ�
 
 > [!TIP]
 > **Ủng hộ tác giả (Donate)**:  
-> Dự án này do em phát triển lúc còn là sinh viên. Nếu công cụ hữu ích và giúp card của các bác hoạt động mượt mà, hãy ủng hộ cho em một chút nhé! Cảm ơn mọi người rất nhiều! ❤️  
+> Dự án này do em phát triển lúc còn là sinh viên. Nếu được hãy ủng hộ cho em một chút nhé! Cảm ơn mọi người rất nhiều! ❤️  
 > 
 > <p align="center">
 >   <img src="assets/donate_momo.jpg" alt="Donate MoMo VietQR - NGUYEN THAI HOC" width="220" style="border-radius: 12px;" />
@@ -47,14 +47,18 @@ Giải pháp mở khoá băng thông **PCIe Gen2 x16 (~6.4 GB/s)** cho card đ�
 
 Trong thư mục vừa giải nén, nhấp chuột phải vào tệp **`Setup_CMP30HX.bat`** và chọn **Run as administrator** (hoặc nhấp đúp chuột, script sẽ tự động yêu cầu quyền Admin nếu cần).
 
-Script sẽ tự động thực hiện tuần tự 4 bước tối ưu hệ thống:
-1. **Tắt PCIe ASPM (Active State Power Management)**:
+Script sẽ tự động thực hiện tuần tự 6 bước tối ưu hệ thống:
+1. **Tắt PCIe ASPM (Active State Power Management) & Hybrid Sleep**:
    - Ngăn Windows tự động hạ tốc độ link PCIe từ Gen2 về Gen1 khi GPU ở trạng thái nghỉ (idle).
-2. **Kiểm tra và tắt Memory Integrity (Core Isolation / HVCI)**:
+2. **Tắt Fast Startup (Khởi động nhanh / Hiberboot)**:
+   - Ngăn Windows lưu cache phiên kernel khi tắt máy, chống lỗi kẹt link Gen1 sau khi khởi động lại máy tính.
+3. **Tắt Microsoft Vulnerable Driver Blocklist**:
+   - Ngăn Windows Defender và CI chặn nạp driver WinRing0 / ThrottleStop sau khi khởi động lại.
+4. **Kiểm tra và tắt Memory Integrity (Core Isolation / HVCI)**:
    - Vô hiệu hoá tính năng chặn driver kernel của Windows trong Registry để công cụ có thể ghi đè thanh ghi BAR0 MMIO.
-3. **Đăng ký tác vụ khởi động ngầm (`CMP30HX_Gen2_Unlock`)**:
-   - Tạo một Scheduled Task tự động kích hoạt chế độ `-gen2-30hx -silent` với quyền cao nhất mỗi khi bạn đăng nhập Windows. Bạn không cần phải mở công cụ hay thao tác thủ công sau mỗi lần bật máy.
-4. **Mở khoá Gen2 x16 & kích hoạt MRRS 512B ngay lập tức**:
+5. **Đăng ký tác vụ khởi động ngầm (`CMP30HX_Gen2_Unlock`)**:
+   - Tạo Scheduled Task với tài khoản `NT AUTHORITY\SYSTEM` tự động tắt ASPM và kích hoạt chế độ `-gen2-30hx -silent` với quyền cao nhất mỗi khi bạn đăng nhập Windows. Bạn không cần phải mở công cụ hay thao tác thủ công sau mỗi lần bật máy.
+6. **Mở khoá Gen2 x16 & kích hoạt MRRS 512B ngay lập tức**:
    - Nâng băng thông link lên Gen2 x16 và tối ưu Max Read Request Size lên 512B, card sẵn sàng hoạt động ngay mà không bắt buộc khởi động lại.
 
 > [!IMPORTANT]
@@ -68,36 +72,47 @@ Script sẽ tự động thực hiện tuần tự 4 bước tối ưu hệ th�
 
 Nếu muốn tự kiểm soát từng bước qua cửa sổ dòng lệnh (Terminal / Command Prompt / PowerShell Admin):
 
-1. **Tắt PCIe ASPM**:
+1. **Tắt PCIe ASPM & Hybrid Sleep**:
    ```cmd
    powercfg -setacvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0
    powercfg -setdcvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0
+   powercfg -setacvalueindex SCHEME_CURRENT SUB_SLEEP HYBRIDSLEEP 0
+   powercfg -setdcvalueindex SCHEME_CURRENT SUB_SLEEP HYBRIDSLEEP 0
    powercfg -setactive SCHEME_CURRENT
    ```
 
-2. **Tắt Memory Integrity (nếu đang bật)**:
+2. **Tắt Fast Startup & Microsoft Vulnerable Driver Blocklist** (chống lỗi kẹt Gen1 sau khi reboot):
+   ```cmd
+   reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" /v "HiberbootEnabled" /t REG_DWORD /d 0 /f
+   reg add "HKLM\SYSTEM\CurrentControlSet\Control\CI\Config" /v "VulnerableDriverBlocklistEnable" /t REG_DWORD /d 0 /f
+   ```
+
+3. **Tắt Memory Integrity (nếu đang bật)**:
    ```cmd
    reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" /v "Enabled" /t REG_DWORD /d 0 /f
    ```
    *(Khởi động lại máy nếu vừa thay đổi giá trị này từ 1 thành 0).*
 
-3. **Kích hoạt mở khoá Gen2 x16 ngay**:
+4. **Kích hoạt mở khoá Gen2 x16 ngay**:
    ```cmd
    cd /d "Đường_dẫn_thư_mục_giải_nén"
    .\windows-v3.0\release\40HXInstaller.exe -gen2-30hx
    ```
 
-4. **Tạo Scheduled Task để tự động kích hoạt khi đăng nhập Windows**:
-   - **Bằng PowerShell (Khuyến nghị)**:
+5. **Tạo Scheduled Task để tự động kích hoạt khi đăng nhập Windows**:
+   - **Bằng PowerShell (Khuyến nghị - chạy ngầm SYSTEM)**:
      ```powershell
-     $action = New-ScheduledTaskAction -Execute "$PWD\windows-v3.0\release\40HXInstaller.exe" -Argument '-gen2-30hx -silent'
+     $a1 = New-ScheduledTaskAction -Execute 'powercfg.exe' -Argument '-setacvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0'
+     $a2 = New-ScheduledTaskAction -Execute 'powercfg.exe' -Argument '-setdcvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0'
+     $a3 = New-ScheduledTaskAction -Execute 'powercfg.exe' -Argument '-setactive SCHEME_CURRENT'
+     $a4 = New-ScheduledTaskAction -Execute "$PWD\windows-v3.0\release\40HXInstaller.exe" -Argument '-gen2-30hx -silent'
      $trigger = New-ScheduledTaskTrigger -AtLogOn
-     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest
-     Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action $action -Trigger $trigger -Principal $principal -Force
+     $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+     Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action @($a1, $a2, $a3, $a4) -Trigger $trigger -Principal $principal -Force
      ```
    - **Bằng CMD**:
      ```cmd
-     schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%CD%\windows-v3.0\release\40HXInstaller.exe\" -gen2-30hx -silent" /sc onlogon /rl highest /f
+     schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "cmd.exe /c powercfg -setacvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0 & powercfg -setdcvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0 & powercfg -setactive SCHEME_CURRENT & \"%CD%\windows-v3.0\release\40HXInstaller.exe\" -gen2-30hx -silent" /sc onlogon /ru SYSTEM /rl highest /f
      ```
 
 ---
@@ -126,6 +141,7 @@ Sau khi kích hoạt (hoặc sau khi đăng nhập lại Windows), kiểm tra b�
 | **Bị tụt về Gen1 x16 khi card ở chế độ rảnh (Idle)** | Tính năng tiết kiệm điện PCIe ASPM của Windows đang bật | Chạy lại `Setup_CMP30HX.bat` (script tự động tắt ASPM) hoặc chỉnh trong Power Options $\rightarrow$ PCI Express $\rightarrow$ Link State Power Management: **Off**. |
 | **GPU-Z báo Gen2 x16 nhưng AIDA64 chỉ đạt ~2.5 GB/s** | Giá trị Max Read Request Size (MRRS) của card bị kẹp ở 128 Bytes mặc định | Chạy lệnh `40HXInstaller.exe -gen2-30hx` để nâng MRRS lên 512 Bytes và nạp lại hàng đợi DMA. |
 | **Không nhận diện được GPU / Mã lỗi 43** | Mối hàn trở mod lane x16 chưa tiếp xúc tốt hoặc card chưa nhận driver | 1. Kiểm tra lại mối hàn trở trên card.<br>2. Cài lại driver NVIDIA (có thể dùng DDU quét sạch driver cũ rồi cài bản mới nhất). |
+| **Đã thử mọi cách fix vẫn không được** | Driver NVIDIA bị xung đột cấu hình, profile registry lưu đè hoặc service driver lỗi | Gỡ sạch driver cũ bằng **DDU (Display Driver Uninstaller)** rồi tiến hành cài đặt lại driver NVIDIA. |
 
 ---
 
