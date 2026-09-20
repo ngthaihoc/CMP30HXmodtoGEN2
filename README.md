@@ -73,6 +73,7 @@ Công cụ tự động nâng MRRS lên **512 Bytes** (`0x2000`) và khởi đ�
 
 | Tệp | Mục đích |
 |---|---|
+| `Setup_CMP30HX.bat` | **Script AIO tự động 1-chạm** (Mở khoá Gen2 ngay + Đăng ký Scheduled Task khi Logon) |
 | `40HXInstaller.exe` | **Giao diện cài đặt và quản lý** (Mặc định mở GUI; hỗ trợ tham số dòng lệnh `-gen2-30hx`) |
 | `40HXUninstaller.exe` | **Gỡ cài đặt tự động** (Nhấp đúp $\rightarrow$ Yêu cầu quyền Administrator) |
 | `40HXCheck.exe` | **Chẩn đoán độc lập** (Kiểm tra tốc độ link PCIe Gen2; tự thu hồi driver sau khi đo) |
@@ -87,7 +88,20 @@ CMP 30HX chạy hoàn toàn trên môi trường Windows thông qua ghi đè tha
 - **KHÔNG cần nạp firmware EFI**: Không can thiệp bootloader hay firmware.
 - **KHÔNG cần GSP Firmware**: Kiến trúc TU116 không hỗ trợ và không cần GSP.
 
-### Các bước cài đặt chi tiết:
+### 3.1 Cài đặt tự động 1-chạm (Khuyến nghị)
+
+Nhấp đúp chuột vào tệp **`Setup_CMP30HX.bat`** (script tự động xin quyền Administrator nếu cần):
+1. Tự động kiểm tra và dọn dẹp các Scheduled Task cũ.
+2. Tự động đăng ký tác vụ **`CMP30HX_Gen2_Unlock`** chạy ngầm khi đăng nhập Windows (`-silent`).
+3. Kích hoạt mở khoá **PCIe Gen2 x16** và tối ưu **MRRS 512B** ngay lập tức.
+
+> *Muốn gỡ bỏ tự động khởi động: Chạy `Setup_CMP30HX.bat -uninstall`.*
+
+---
+
+### 3.2 Cài đặt thủ công bằng dòng lệnh
+
+Nếu muốn tự cấu hình từng bước:
 
 1. **Chuẩn bị môi trường & Driver**:
    - Đảm bảo card CMP 30HX đã được mod hàn trở lane vật lý x16 và nhận diện ổn định trong Device Manager (thường ở tốc độ mặc định Gen1 x16).
