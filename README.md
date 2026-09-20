@@ -91,9 +91,11 @@ CMP 30HX chạy hoàn toàn trên môi trường Windows thông qua ghi đè tha
 ### 3.1 Cài đặt tự động 1-chạm (Khuyến nghị)
 
 Nhấp đúp chuột vào tệp **`Setup_CMP30HX.bat`** (script tự động xin quyền Administrator nếu cần):
-1. Tự động kiểm tra và dọn dẹp các Scheduled Task cũ.
-2. Tự động đăng ký tác vụ **`CMP30HX_Gen2_Unlock`** chạy ngầm khi đăng nhập Windows (`-silent`).
-3. Kích hoạt mở khoá **PCIe Gen2 x16** và tối ưu **MRRS 512B** ngay lập tức.
+1. Tự động tắt tính năng tiết kiệm điện **PCIe ASPM** (chống tụt về Gen1 khi rảnh).
+2. Tự động kiểm tra và tắt **Memory Integrity** (Core Isolation / HVCI) để tránh bị Windows chặn driver kernel.
+3. Tự động kiểm tra và dọn dẹp các Scheduled Task cũ.
+4. Tự động đăng ký tác vụ **`CMP30HX_Gen2_Unlock`** chạy ngầm khi đăng nhập Windows (`-silent`).
+5. Kích hoạt mở khoá **PCIe Gen2 x16** và tối ưu **MRRS 512B** ngay lập tức.
 
 > *Muốn gỡ bỏ tự động khởi động: Chạy `Setup_CMP30HX.bat -uninstall`.*
 
@@ -173,6 +175,7 @@ Sau khi vào Windows, nhấp đúp vào **`40HXCheck.exe`**:
 | **GPU-Z báo Gen2 nhưng AIDA64 chỉ đạt 2.5 GB/s** | DEVCTL MRRS bị kẹp ở 128B mặc định | Chạy `40HXInstaller.exe -gen2-30hx` để kích hoạt tối ưu MRRS 512B và nạp lại hàng đợi DMA. |
 | **Bị treo ở vòng lặp tác vụ 40HXGen2Retry** | Do phiên bản cũ ép cờ Gen3 trên CMP 30HX | Chạy `schtasks /delete /tn "40HXGen2Retry" /f` và cập nhật bản `40HXInstaller.exe` mới nhất đã kẹp cứng Gen2. |
 | **Không nhận diện được GPU** | Chưa cắm chắc card hoặc thiếu driver NVIDIA | Cài đặt bản driver tương thích (khuyến nghị dòng 537.58 hoặc 55x/616.x) và kiểm tra Device Manager. |
+| **Kẹt ở Gen1 (GPU TLS=Gen1, Root TLS=Gen2)** | Windows bật Memory Integrity chặn driver `ThrottleStop.sys` hoặc do cáp Riser/khe cắm | Chạy `Setup_CMP30HX.bat` (tự tắt Memory Integrity & ASPM), khởi động lại máy tính; cắm trực tiếp khe PCIe x16 nối CPU. |
 
 ---
 
