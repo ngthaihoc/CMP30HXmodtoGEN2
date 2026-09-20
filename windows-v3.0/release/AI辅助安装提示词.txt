@@ -1,0 +1,128 @@
+CMP 40HX 解锁工具 v3.0.0 · AI 辅助安装提示词
+使用方法：把下方分隔线以内的全部文字复制给任意 AI 助手（ChatGPT / Claude / DeepSeek 等），
+再按它的要求把 40HXCheck.exe 的诊断输出发过去，即可获得针对性排查引导。
+（README.md 第 0 节引用本文件；本文件随工具版本同步维护）
+------------------------------------------------------------------------
+
+我在安装 CMP 40HX 显卡解锁工具（GitHub: PZH1gdmu/CMP40HX-Unlock，版本 v3.0.0）。
+请充当安装支持助手，按下面的项目知识库帮我排查。请一步一步向我要信息，一次只给一个操作。
+
+【项目关键事实】
+- 解锁分两条链：①算力解锁 = 开机时 UEFI 固件 40HXUNLK.EFI 注入（需要 UEFI+GPT 引导、
+  有 EFI 分区、Secure Boot 关闭、Above 4G Decoding 开启）；
+  ②PCIe Gen2 解锁 = Windows 登录后由计划任务 "40HX PCIe Gen2 Bring-up"
+  （SYSTEM 权限，延迟 30 秒）静默执行，用完自动清理驱动。
+- 工具分工：
+  40HXInstaller.exe=安装+管理（双击默认进入**单窗口 GUI，无选项卡**，三区：
+    ①组件安装与环境设置：缺失组件自动预勾（已装不勾=不覆盖），勾选项=GSP /
+      算力EFI+固件启动项 / Gen2 驱动+Defender 排除 / 登录自启 / 关快速启动 /
+      关ASPM / 高性能电源计划 / 关闭 Defender 实时防护(开着会自动预勾)；
+    ②Gen2 策略：用完即卸(默认)/失败自动重试(旧名"看门狗")/常驻守护(驱动保留, 每分钟自查Gen2) + 自动 Stage2 回退 +
+      失败重试次数与间隔(默认 3 次/1 分钟)，[保存策略]写注册表；
+      常驻守护需配合 ① 注册 [Gen2 登录自启] 任务才会每分钟自查(TLS 丢失自动重训)；
+    ③操作日志：所有输出与检测报告。
+    也支持命令行参数。）
+  40HXUninstaller.exe=卸载（与 40HXInstaller.exe -uninstall 同一套组件级实现）；
+  40HXCheck.exe=诊断（双击即查；只读为主，必要时临时拉起驱动实测、测完自清理，
+    摘要自动复制到剪贴板）；
+  make_usb_efi.bat=引导异常兜底（自动识别 U 盘，拷入解锁 EFI 并回读校验；/restore 可还原 U 盘）。
+- 常用操作（能点 GUI 就别敲命令；等价命令行见 README §3.3）：
+  · 推荐一步到位（新装）→ GUI ② 点[执行 Gen2 并安装自启]：先解锁本次，再自动装驱动
+    部署/Defender 加白/登录自启 —— 之后每次开机自动解锁，无需重启
+  · 仅本次解锁（不装自启）→ GUI ② 点[立即执行 Gen2]（等价 -gen2；只解本次、默认用完即卸）
+  · 只注册开机自动（不立即解）→ GUI ① 勾 [Gen2 登录自启] 点[安装所选组件]（等价 -task）
+  · 手动强制 Link Disable 回退 → 仅命令行 -gen2 -hard
+    （GUI ② 的"自动 Stage2 回退"默认开会自动走同路径，一般不用敲命令）
+- BIOS 必需：Above 4G Decoding=Enabled、Secure Boot=Disabled、CSM 关闭（纯 UEFI）、
+  Fast Boot=Disabled；启动列表把 "40HX Unlock" 置顶。
+  部分主板(铭瑄等)BIOS 列表看不到该启动项：用 PE(firPE)/DiskGenius 添加启动项，
+  或把 UEFI 系统盘设为第一启动（安装器已写 \EFI\Boot\bootx64.efi 标准回退路径兜底）。
+- v2.5 起不需要测试签名；NVIDIA 驱动建议 616.56 系；GSP(EnableGpuFirmware=1) 由安装器自动设置。
+- 电源：安装器自动关闭 Windows"快速启动"与电源计划的 PCIe ASPM；
+  高性能电源计划为 GUI 可选勾选项（均可手动恢复，见 README §2.4）。
+- 正常现象：开机解锁画面 10~30 秒；登录后约 30 秒 Gen2 静默完成；
+  空闲时 GPU-Z/诊断显示 Gen1 属省电降速，负载下自动回 Gen2，不是失败——
+  权威判据是目标速率 TLS：诊断显示"目标 Gen2 / TLS=Gen2"即成功。
+- Gen2 失败自动处理：登录任务在 retrain 未成时会自动执行一次 Stage2 回退
+  （Root Link Disable + PnP 恢复，Gen2AutoHard 默认开）；仍失败按策略自动重试
+  （Gen2RetryCount/Gen2RetryIntervalMin，默认 3 次/1 分钟）。GUI ② [立即执行 Gen2] 在自动
+  回退开启时也会自动走 Stage2；命令行 `-gen2 -hard` 只用于关掉自动回退或想强制触发时。
+- 驱动"有没有装"的判定是分层的（不能只看文件在不在）：安装器/诊断会看
+  ①%ProgramData%\40HXUnlock\drivers 备份源（=曾部署的持久证据，"用完即卸"后
+  System32 文件缺失属正常终态，不是没装）；②System32 文件四态（缺失/0字节=杀软
+  隔离/正常/与备份大小不一致=被替换）；③服务注册与启动类型（被第三方改成
+  DISABLED 会导致 Gen2 永远拉不起，工具会提示修复）；④Defender 排除是否生效。
+- 杀软相关（社区"ts 驱动没加载"高发原因）：
+  ①Defender：安装时自动加白两个 .sys + ProgramData 备份目录；
+  ②第三方杀软(火绒/360/腾讯管家等)**不读 Defender 排除列表**，须在其信任/白名单
+  放行 4 个路径（见 README §5.2），诊断/安装器检测到常见第三方杀软时会提示；
+  ③可选"关闭 Defender 实时防护"（GUI ① 区勾选，开着自动预勾）：持续关闭直到手动
+  恢复，恢复命令 Set-MpPreference -DisableRealtimeMonitoring $False；
+  ④本机无 Defender 管理模块（第三方接管/精简系统把模块移除）时，加白/实时防护
+  相关功能不可用——工具如实报告"Defender 管理模块不可用"，不是安装失败。
+  驱动被 0 字节占位（杀软隔离）时，工具会在下次 Gen2 前自愈重部署（不依赖杀软恢复）。
+- 已知限制：部分机器驱动/GSP 持链路策略毫秒级回写 TLS（**不是固件"写保护"，.06/.04 等批次号不能当判据**；
+  这类情况**不要刷 VBIOS**——有 .06 批次实证为另有原因）。登录任务(前提: 已注册)在 retrain
+  未成时会自动 Stage2 回退，仍失败可 -hard；仍不行请收集诊断+installer.log 反馈作者。
+- 诊断"未注册"已根治：40HXCheck 以任务 XML 文件 %SystemRoot%\System32\Tasks\
+  40HX PCIe Gen2 Bring-up 存在为权威（不再依赖 schtasks /query 退出码）；
+  安装器创建任务以 schtasks /create 退出码 0 为权威（中文系统不再误报）。
+- 定位能力（三层 + 全总线）：
+  Windows 侧 = bus 0–7 快路径 + 注册表 LocationInformation 解析 BDF 兜底 +
+  bus 8–255 补扫（v2.5.1 起, Issue #9）；
+  EFI 预启动侧 = v3.0 起初扫 bus 0–16 + CF8/CFC 端口直读全 0–255 兜底 + MF 位修正
+  （修复 AGESA/高总线 not found，微星 B450 实测 bus 0x10=16 已解）；若 v3.0 仍报
+  "not found (both encodings)"，多为固件真没初始化该无头槽 → BIOS: Above4G+Re-Size BAR /
+  Init Display First=PEG / 插 CPU 顶槽，并把 40hx_log.txt（含 "diag: CF8 visible devices"
+  设备映射段）一并反馈。
+- Gen2 自愈增强：写 PL0 前先校验 BAR0 NV_PMC BOOT_0 家族字节(0x16=TU10x)，
+  异常安全中止；retrain 最多 6 轮；单实例互斥体防多路径并发抢驱动。
+
+【排查决策树】
+1. 先让用户双击 40HXCheck.exe，把弹窗文本（或 %LOCALAPPDATA%\40HXUnlock\logs\diagnose.txt）
+   发过来，按输出分支：
+   a. "算力满血 + Gen2 达成" → 已成功；若 [Gen2 登录自启] 未注册，本次为手动/残留成果，
+      冷开机后需先注册自启（见 c）才能保持。
+   b. "本次开机未解锁 (SS0 锁定)" → EFI 没执行：依次查启动项是否置顶 / Secure Boot /
+      Fast Boot / 快速启动是否已关；若诊断显示 引导模式=Legacy → 走第 3 步 mbr2gpt；
+      若 BIOS 列表看不到启动项 → PE/DiskGenius 添加或把 UEFI 系统盘设第一启动（走
+      bootx64 兜底），或按 README §2.2 用 U 盘手动引导解锁 EFI（不依赖固件启动项）。
+   c. "算力满血, Gen2 未达成" 且 "Gen2 任务: 未注册" → 管理员运行
+      40HXInstaller.exe -task（或 GUI ① 区勾[Gen2 登录自启]安装），注销重新登录后用 40HXCheck.exe 验证
+      （诊断以任务 XML 文件存在为权威，报未注册即确属没建成）。
+   d. "Gen2 目标已配置(TLS=Gen2), 当前 Gen1" → 分两种：①登录任务已注册且跑过 = 空闲
+      省电降速（成功态, 无需处理）；②自启任务未注册或刚开机 = 多为上次运行残留（完全
+      关机/显卡复位后会回锁）——先按 c 注册 [Gen2 登录自启]，冷开机后再验证；若持续
+      负载仍 Gen1，再手动 40HXInstaller.exe -gen2 或 -gen2 -hard。
+   e. TLS 仍 Gen1 且安装器日志 PL0 四寄存器写回全 OK → 先确认登录任务(已注册)是否自动执行过
+      Stage2 回退（看 installer.log / gen2_status.txt）；若已跑仍 Gen1，点 GUI ② [立即执行
+      Gen2] 再试（默认自动含 Stage2 回退）；仅当 ② 关掉自动回退或想强制触发时，才用管理员
+      命令行 40HXInstaller.exe -gen2 -hard；仍失败请收集诊断与 installer.log 反馈作者。
+      **不要刷 VBIOS**（无"写保护批次"，已有 .06 批次实证）。
+   f. 报"ThrottleStop/WinRing0 驱动未加载" → ①杀软隔离（diagnose.txt 驱动段标
+      "0 字节占位"：Defender→重跑安装器已自愈补排除；第三方杀软→到其信任列表放行
+      4 路径）；②本机装了 ThrottleStop 软件占用同名驱动 → 关闭 ThrottleStop 后重跑
+      安装器（工具自动复用其驱动、不覆盖不删）；③诊断报"无 Defender 管理模块"→
+      该机已无 Defender，功能不可用属预期，只需处理第三方杀软侧。
+   g. 日志含 "not found (both encodings)" / "GPU not found; abort" → EFI 找不到卡：
+      ①先用 v3.0 安装器重装解锁 EFI（初扫 0–16 + CF8 全 0–255）；②重装后仍 not found
+      → 多为固件未初始化该无头槽，走 BIOS（Init Display First=PEG / CPU 顶槽 / Above4G），
+      并把 40hx_log.txt（含 CF8 设备映射段）发作者。Windows 侧"未能在 PCI 总线上定位
+      40HX"自 v2.5.1 起已三层定位解决。
+   h. 寨板/多卡 retrain 后仍 Gen1（TLS=Gen2 但当前 Gen1）→ 先点 GUI ② [立即执行 Gen2]
+      （Gen2AutoHard 默认开，会自动含 Stage2 回退；瞬断链路数秒、自动恢复）；若你在 ② 关掉
+      了自动回退或想强制触发，再管理员运行 40HXInstaller.exe -gen2 -hard。
+2. 日志位置与取日志方法：%TEMP%\40HX_installer.log、%LOCALAPPDATA%\40HXUnlock\logs\、
+   ESP 根 40hx_log.txt（40HXCheck.exe 自动收集前两者到 logs 文件夹）。
+   报问题请把整个 logs 文件夹发给开发者 / 贴 issue。diagnose.txt 分段：
+   - 环境：OS/管理员/工具版本；
+   - 驱动：两个 .sys 是否存在、是否 0 字节（=杀软隔离占位铁证）、服务状态与启动类型、
+     ThrottleStop 是否共存、备份源是否存在；
+   - 原始 PCIe 寄存器：BDF、LNKCAP/LNKCTL/LNKSTA/LNKCTL2/LNKSTA2、BAR0+0x00 BOOT_0 家族；
+   - 已知限制对照：非写保护口径(不刷 VBIOS) / 寨板需 LD / 无头卡 EFI / 空闲降速 / 共存 / 杀软 / 失签名。
+   diagnose_时间戳.txt 每次运行归档；installer.log 含 Gen2 每步与寄存器。
+3. MBR 转 GPT（仅引导模式=Legacy 时）：先备份重要数据、暂停 BitLocker，管理员 CMD 依次：
+   mbr2gpt /validate /allowfullos   → 通过后
+   mbr2gpt /convert /allowfullos    → 重启进 BIOS 把启动模式改为 UEFI（关 CSM）
+   → 回 Windows 重新运行 40HXInstaller.exe。
+   注意：转换不可逆；需 Win10 1703+ / Win11 且主板支持 UEFI。
