@@ -87,6 +87,7 @@ CMP 30HX chạy hoàn toàn trên môi trường Windows thông qua ghi đè tha
 - **KHÔNG cần chỉnh sửa BIOS**: Không cần tắt Secure Boot, không cần bật CSM, không bắt buộc Above 4G.
 - **KHÔNG cần nạp firmware EFI**: Không can thiệp bootloader hay firmware.
 - **KHÔNG cần GSP Firmware**: Kiến trúc TU116 không hỗ trợ và không cần GSP.
+- **Hỗ trợ mọi phiên bản Driver**: Tương thích hoàn toàn với mọi driver NVIDIA (driver chính thức, desktop, mod, hoặc bản mới nhất - không giới hạn phiên bản).
 
 ### 3.1 Cài đặt tự động 1-chạm (Khuyến nghị)
 
@@ -107,7 +108,7 @@ Nếu muốn tự cấu hình từng bước:
 
 1. **Chuẩn bị môi trường & Driver**:
    - Đảm bảo card CMP 30HX đã được mod hàn trở lane vật lý x16 và nhận diện ổn định trong Device Manager (thường ở tốc độ mặc định Gen1 x16).
-   - Cài đặt driver NVIDIA tương thích (khuyến nghị bản 537.58 hoặc driver desktop mod).
+   - Cài đặt driver NVIDIA: Hỗ trợ **mọi phiên bản driver** (driver chính thức NVIDIA, driver desktop, driver mod hoặc bản mới nhất đều được, không giới hạn phiên bản).
 
 2. **Chạy mở khoá Gen2 ngay lần đầu (Không cần khởi động lại)**:
    - Nhấp chuột phải vào nút Start menu $\rightarrow$ Chọn **Terminal (Admin)** hoặc **Command Prompt (Administrator)**.
@@ -174,7 +175,7 @@ Sau khi vào Windows, nhấp đúp vào **`40HXCheck.exe`**:
 | **Khởi động lại bị về Gen1** | Chưa đăng ký tác vụ tự khởi động khi đăng nhập | Tạo Scheduled Task tự động kích hoạt `40HXInstaller.exe -gen2-30hx -silent` khi logon theo mục 3. |
 | **GPU-Z báo Gen2 nhưng AIDA64 chỉ đạt 2.5 GB/s** | DEVCTL MRRS bị kẹp ở 128B mặc định | Chạy `40HXInstaller.exe -gen2-30hx` để kích hoạt tối ưu MRRS 512B và nạp lại hàng đợi DMA. |
 | **Bị treo ở vòng lặp tác vụ 40HXGen2Retry** | Do phiên bản cũ ép cờ Gen3 trên CMP 30HX | Chạy `schtasks /delete /tn "40HXGen2Retry" /f` và cập nhật bản `40HXInstaller.exe` mới nhất đã kẹp cứng Gen2. |
-| **Không nhận diện được GPU** | Chưa cắm chắc card hoặc thiếu driver NVIDIA | Cài đặt bản driver tương thích (khuyến nghị dòng 537.58 hoặc 55x/616.x) và kiểm tra Device Manager. |
+| **Không nhận diện được GPU** | Chưa cắm chắc card hoặc thiếu driver NVIDIA | Cài đặt driver NVIDIA (hỗ trợ mọi phiên bản driver chính thức hoặc mod) và kiểm tra Device Manager. |
 | **Kẹt ở Gen1 (GPU TLS=Gen1, Root TLS=Gen2)** | Windows bật Memory Integrity chặn driver `ThrottleStop.sys` hoặc do cáp Riser/khe cắm | Chạy `Setup_CMP30HX.bat` (tự tắt Memory Integrity & ASPM), khởi động lại máy tính; cắm trực tiếp khe PCIe x16 nối CPU. |
 
 ---

@@ -146,12 +146,13 @@ schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%CD%\windows-v3.0\release\40HX
 > - **KHÔNG nạp tệp EFI (`40HXUNLK.EFI`)**: CMP 30HX chạy hoàn toàn trên môi trường Windows thông qua MMIO override, không sử dụng firmware bootloader.
 > - **KHÔNG nhấn "Cài đặt toàn bộ" trên GUI của `40HXInstaller.exe`**: Nút bấm này sẽ cấu hình EFI và GSP dành riêng cho nhân TU106 (40HX).
 > - **KHÔNG kích hoạt GSP Firmware (`EnableGpuFirmware=1`)**: Kiến trúc TU116 của 30HX không hỗ trợ và không cần GSP.
+> - **Hỗ trợ mọi phiên bản Driver**: Tương thích với bất kỳ driver NVIDIA nào (chính thức, desktop, mod, không giới hạn phiên bản).
 
 #### Các bước cài đặt chi tiết:
 
 1. **Chuẩn bị môi trường & Driver**:
    - Đảm bảo card CMP 30HX đã được mod hàn trở lane vật lý x16 và nhận diện ổn định trong Device Manager (thường ở tốc độ mặc định Gen1 x16).
-   - Cài đặt driver NVIDIA tương thích (khuyến nghị bản 537.58 hoặc driver desktop mod).
+   - Cài đặt driver NVIDIA: Hỗ trợ **mọi phiên bản driver** (driver chính thức NVIDIA, driver desktop, driver mod hoặc bản mới nhất đều được, không giới hạn phiên bản).
 
 2. **Chạy mở khoá Gen2 ngay lần đầu (Không cần khởi động lại)**:
    - Nhấp chuột phải vào nút Start menu $\rightarrow$ Chọn **Terminal (Admin)** hoặc **Command Prompt (Administrator)**.
@@ -223,7 +224,7 @@ Sau khi vào Windows, nhấp đúp vào **`40HXCheck.exe`**:
 | **Khởi động lại bị về Gen1** | Chưa đăng ký tác vụ tự khởi động khi đăng nhập | Tạo Scheduled Task theo mục 0.3 (đối với 30HX) hoặc mục 3.1 (đối với 40HX). |
 | **GPU-Z báo Gen2 nhưng AIDA64 chỉ đạt 2.5 GB/s** | DEVCTL MRRS bị kẹp ở 128B mặc định | Chạy `40HXInstaller.exe -gen2-30hx` để kích hoạt tối ưu MRRS 512B và nạp lại hàng đợi DMA. |
 | **Bị treo ở vòng lặp tác vụ 40HXGen2Retry** | Do phiên bản cũ ép cờ Gen3 trên CMP 30HX | Chạy `schtasks /delete /tn "40HXGen2Retry" /f` và cập nhật bản `40HXInstaller.exe` mới nhất đã kẹp cứng Gen2. |
-| **Không nhận diện được GPU** | Chưa cắm chắc card hoặc thiếu driver NVIDIA | Cài đặt bản driver tương thích (khuyến nghị dòng 537.58 hoặc 55x/616.x) và kiểm tra Device Manager. |
+| **Không nhận diện được GPU** | Chưa cắm chắc card hoặc thiếu driver NVIDIA | Cài đặt driver NVIDIA (hỗ trợ mọi phiên bản driver chính thức hoặc mod) và kiểm tra Device Manager. |
 | **Màn hình đen sau khi mở khoá 40HX** | Chưa bật GSP Firmware (`EnableGpuFirmware=1`) | Chạy `40HXInstaller.exe -status` để kiểm tra cờ GSP và bật lại qua GUI. |
 
 ---
