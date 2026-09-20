@@ -1,18 +1,20 @@
-# <img src="https://api.iconify.design/carbon/chip.svg?color=%2310b981" width="32" height="32" align="center" /> Công Cụ Mở Khoá Windows Cho NVIDIA CMP 30HX v3.0.0
+# <img src="https://api.iconify.design/carbon/chip.svg?color=%2310b981" width="32" height="32" align="center" /> Công Cụ Mở Khoá NVIDIA CMP 30HX v3.0.0 (PCIe Gen2 x16)
 
 [![GitHub Repo](https://img.shields.io/badge/GitHub-ngthaihoc%2FCMP30HXmodtoGEN2-181717?logo=github&logoColor=white)](https://github.com/ngthaihoc/CMP30HXmodtoGEN2)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20x64-0078D6?logo=windows&logoColor=white)](https://microsoft.com)
 [![GPU](https://img.shields.io/badge/NVIDIA-TU116-76B900?logo=nvidia&logoColor=white)](https://nvidia.com)
 [![PCIe](https://img.shields.io/badge/PCIe-Gen2%20x16%20(~6.4%20GB%2Fs)-orange)](https://pcisig.com)
-[![Status](https://img.shields.io/badge/Test%20Signing-Not%20Required-success)](#)
+[![Test Signing](https://img.shields.io/badge/Test%20Signing-Không%20cần%20thiết-success)](#)
 
-**CMP 30HX (TU116) → Mở Khoá Băng Thông PCIe Gen2 x16 (~6.4 GB/s)**  
-Chạy trực tiếp trên Windows nguyên bản, cài đặt một chạm, tự động kích hoạt khi khởi động, không cần thao tác thủ công mỗi lần mở máy.  
-Từ bản v2.5 trở đi **không cần bật chế độ Test Signing**, hệ thống luôn sạch sẽ, không ảnh hưởng đến phần mềm chống gian lận (Anti-cheat) khi chơi game.
+Giải pháp mở khoá băng thông **PCIe Gen2 x16 (~6.4 GB/s)** cho card đồ hoạ **NVIDIA CMP 30HX (nhân TU116)** trên hệ điều hành Windows 10/11 x64.
+
+- **Cài đặt 1-chạm tự động**: Tự thiết lập môi trường, tắt tiết kiệm điện PCIe ASPM, cấu hình Memory Integrity và tự động kích hoạt khi bật máy.
+- **Tương thích mọi Driver**: Hỗ trợ toàn bộ driver NVIDIA (chính thức, desktop, mod, phiên bản mới nhất, không giới hạn bản 537.58).
+- **Hệ thống nguyên bản & sạch sẽ**: Không chỉnh sửa BIOS/VBIOS, không cần nạp bootloader EFI, không cần bật Windows Test Signing (không ảnh hưởng game hay phần mềm Anti-cheat).
 
 > [!TIP]
 > **Ủng hộ tác giả (Donate)**:  
-> Dự án này do em làm lúc còn là sinh viên. Nếu các bác thấy hữu ích và thích công cụ này thì donate ủng hộ cho em tí nhé ạ! Cảm ơn mọi người rất nhiều! ❤️  
+> Dự án này do em phát triển lúc còn là sinh viên. Nếu công cụ hữu ích và giúp card của các bác hoạt động mượt mà, hãy ủng hộ cho em một chút nhé! Cảm ơn mọi người rất nhiều! ❤️  
 > 
 > <p align="center">
 >   <img src="assets/donate_momo.jpg" alt="Donate MoMo VietQR - NGUYEN THAI HOC" width="220" style="border-radius: 12px;" />
@@ -20,187 +22,135 @@ Từ bản v2.5 trở đi **không cần bật chế độ Test Signing**, hệ 
 > 
 > - **Chủ tài khoản**: NGUYEN THAI HOC (MoMo / VietQR)
 > - **GitHub Repository**: [https://github.com/ngthaihoc/CMP30HXmodtoGEN2](https://github.com/ngthaihoc/CMP30HXmodtoGEN2)
-> - *This project is inspired by **CMP40HX-Unlock**. If you find it useful, please consider giving a star to both the original author and this repository.*
-
-**Kết quả đo thực tế trên phần cứng:**
-
-| Chỉ số | CMP 30HX (TU116 Mod x16) |
-|---|---|
-| **Hiệu năng Tính toán** | FP32/Tensor mặc định theo VBIOS gốc |
-| **Băng thông PCIe** | Gen2 ×16 (**~6.3 – 6.4 GB/s** AIDA64 sau khi chỉnh MRRS 512B) |
-| **Driver NVIDIA** | Hoạt động bình thường, không cần GSP |
 
 ---
 
-## <img src="https://api.iconify.design/lucide/folder-tree.svg?color=%230284c7" width="22" height="22" align="center" /> Cấu Trúc Kho Lưu Trữ
+## <img src="https://api.iconify.design/lucide/download.svg?color=%230284c7" width="22" height="22" align="center" /> 1. Chuẩn Bị & Tải Về
 
-Kho lưu trữ này chứa toàn bộ mã nguồn công cụ mở khoá **CMP 30HX Windows Unlock v3.0.0** (Go).
+### 1.1 Yêu cầu phần cứng & phần mềm
+1. **Phần cứng**:
+   - Card **CMP 30HX (TU116)** đã được mod hàn trở lane PCIe vật lý để nhận diện chế độ x16.
+   - Cắm card vào khe PCIe x16 nối trực tiếp CPU (hạn chế dùng cáp riser kém chất lượng hoặc khe phụ qua chipset).
+2. **Driver**:
+   - Cài đặt bất kỳ bản driver NVIDIA nào bạn muốn (Driver Game Ready / Studio từ trang chủ NVIDIA, driver desktop gán INF, hoặc driver mod).
+   - Card cần hiển thị bình thường trong **Device Manager** (mặc định ban đầu nhận Gen1 x16).
 
-- **Sử dụng trực tiếp:** Tải tệp thực thi tại [`release/`](release/) bao gồm `40HXInstaller.exe`, `40HXUninstaller.exe`, `40HXCheck.exe`.
-
-**Biên dịch từ mã nguồn** (Yêu cầu Go 1.20+, chạy trong thư mục `tools/`):
-
-```bat
-cd tools\inst40hx     && go build -a -trimpath -ldflags="-H=windowsgui -s -w" -o ..\release\40HXInstaller.exe .
-cd ..\uninstall40x    && go build -a -trimpath -ldflags="-H=windowsgui -s -w" -o ..\release\40HXUninstaller.exe .
-cd ..\check40x        && go build -a -trimpath -ldflags="-H=windowsgui -s -w" -o ..\release\40HXCheck.exe .
-```
+### 1.2 Tải bộ công cụ
+- Tải toàn bộ kho lưu trữ bằng cách bấm **Code $\rightarrow$ Download ZIP** trên GitHub (hoặc dùng `git clone`).
+- Giải nén ra một thư mục cố định trên ổ cứng (ví dụ: `C:\CMP30HX-Unlock` hoặc `D:\CMP30HX-Unlock`).
 
 ---
 
-## <img src="https://api.iconify.design/lucide/microchip.svg?color=%238b5cf6" width="22" height="22" align="center" /> 1. Bản Chất Kỹ Thuật CMP 30HX (TU116)
+## <img src="https://api.iconify.design/lucide/terminal.svg?color=%2310b981" width="22" height="22" align="center" /> 2. Hướng Dẫn Cài Đặt Chi Tiết
 
-> [!NOTE]
-> CMP 30HX (mã GPU `10DE:2189`, ví dụ Gigabyte GV-N30HXD6-6G) sau khi đã hàn trở mod vật lý các lane PCIe để nhận x16 Gen1, sử dụng công cụ này để nâng băng thông lên **PCIe Gen2 x16** (~6.4 GB/s).
+### Cách 1: Cài đặt tự động 1-chạm (Khuyến nghị cho mọi người dùng)
 
-### 1.1 Bản chất kỹ thuật: Tại sao chỉ lên được Gen2 mà không lên được Gen3?
+Trong thư mục vừa giải nén, nhấp chuột phải vào tệp **`Setup_CMP30HX.bat`** và chọn **Run as administrator** (hoặc nhấp đúp chuột, script sẽ tự động yêu cầu quyền Admin nếu cần).
+
+Script sẽ tự động thực hiện tuần tự 4 bước tối ưu hệ thống:
+1. **Tắt PCIe ASPM (Active State Power Management)**:
+   - Ngăn Windows tự động hạ tốc độ link PCIe từ Gen2 về Gen1 khi GPU ở trạng thái nghỉ (idle).
+2. **Kiểm tra và tắt Memory Integrity (Core Isolation / HVCI)**:
+   - Vô hiệu hoá tính năng chặn driver kernel của Windows trong Registry để công cụ có thể ghi đè thanh ghi BAR0 MMIO.
+3. **Đăng ký tác vụ khởi động ngầm (`CMP30HX_Gen2_Unlock`)**:
+   - Tạo một Scheduled Task tự động kích hoạt chế độ `-gen2-30hx -silent` với quyền cao nhất mỗi khi bạn đăng nhập Windows. Bạn không cần phải mở công cụ hay thao tác thủ công sau mỗi lần bật máy.
+4. **Mở khoá Gen2 x16 & kích hoạt MRRS 512B ngay lập tức**:
+   - Nâng băng thông link lên Gen2 x16 và tối ưu Max Read Request Size lên 512B, card sẵn sàng hoạt động ngay mà không bắt buộc khởi động lại.
 
 > [!IMPORTANT]
-> - **Gen2 (5.0 GT/s)**: Bị khoá mềm bởi thanh ghi bóng (VBIOS shadow registers). Công cụ can thiệp qua BAR0 MMIO để ghi đè vector tốc độ link và huấn luyện lại link thành công 100%.
-> - **Gen3 (8.0 GT/s)**: Bị **đứt eFuse ở cấp độ chip silicon (Physical Silicon eFuse Blown)** do NVIDIA cấu hình khi xuất xưởng:
->   - Ghi `0x0E` vào `LNKCAP2` (`0x0880A4`) $\rightarrow$ đọc ngược lại chỉ trả về `0x00000006` (Bit 3 bị ngắt vật lý).
->   - Ghi `0x00010003` vào `LNKCTL2` (`0x0880A8`) $\rightarrow$ đọc ngược lại chỉ trả về `0x00010002` (Target Link Speed bị kẹp ở Gen2).
->   - Xung nhịp PHY Lane 0 (`0x08C4B0`) cố định ở 5.0 GHz (`0x50000000`), không thể nâng lên 8.0 GHz.
-> - Do đó, **Gen2 x16 là giới hạn vật lý tối đa của CMP 30HX**. Không cố ép Gen3 để tránh lỗi vòng lặp retrain.
-
-### 1.2 Tinh chỉnh DEVCTL MRRS (Mở khoá toàn bộ băng thông DMA)
-Mặc định `DEVCTL` (`cap + 0x08`) có Max Read Request Size (MRRS) đặt là 128 Bytes, gây phân mảnh gói tin TLP khiến tốc độ AIDA64 Memory Copy bị nghẽn ở ~2.5 GB/s (như Gen1).  
-Công cụ tự động nâng MRRS lên **512 Bytes** (`0x2000`) và khởi động lại `NVDisplay.ContainerLocalSystem`, giúp băng thông đạt tối đa **~6.3 – 6.4 GB/s** (đạt ~98% lý thuyết của Gen2 x16).
+> **LƯU Ý VỀ KHỞI ĐỘNG LẠI MÁY (REBOOT)**:  
+> - Nếu máy tính của bạn trước đó đang **BẬT Memory Integrity (Core Isolation)**, script sẽ tắt tính năng này và hiện thông báo nhắc nhở.  
+> - Trong trường hợp này, bạn **CẦN KHỞI ĐỘNG LẠI MÁY TÍNH (Reboot)** một lần để Windows dỡ bỏ hoàn toàn hypervisor bảo vệ, sau đó khi đăng nhập vào Windows hệ thống sẽ tự động chuyển sang Gen2 x16.
 
 ---
 
-## <img src="https://api.iconify.design/lucide/package.svg?color=%23f59e0b" width="22" height="22" align="center" /> 2. Thành Phần Trong Gói Phát Hành
+### Cách 2: Cài đặt thủ công bằng dòng lệnh (Dành cho người dùng nâng cao)
 
-| Tệp | Mục đích |
-|---|---|
-| `Setup_CMP30HX.bat` | **Script AIO tự động 1-chạm** (Mở khoá Gen2 ngay + Đăng ký Scheduled Task khi Logon) |
-| `40HXInstaller.exe` | **Giao diện cài đặt và quản lý** (Mặc định mở GUI; hỗ trợ tham số dòng lệnh `-gen2-30hx`) |
-| `40HXUninstaller.exe` | **Gỡ cài đặt tự động** (Nhấp đúp $\rightarrow$ Yêu cầu quyền Administrator) |
-| `40HXCheck.exe` | **Chẩn đoán độc lập** (Kiểm tra tốc độ link PCIe Gen2; tự thu hồi driver sau khi đo) |
-| `WinRing0x64.sys` | Driver truy cập PCI Configuration Space và MMIO |
+Nếu muốn tự kiểm soát từng bước qua cửa sổ dòng lệnh (Terminal / Command Prompt / PowerShell Admin):
 
----
+1. **Tắt PCIe ASPM**:
+   ```cmd
+   powercfg -setacvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0
+   powercfg -setdcvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0
+   powercfg -setactive SCHEME_CURRENT
+   ```
 
-## <img src="https://api.iconify.design/lucide/terminal.svg?color=%2310b981" width="22" height="22" align="center" /> 3. Cài Đặt Và Sử Dụng
+2. **Tắt Memory Integrity (nếu đang bật)**:
+   ```cmd
+   reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" /v "Enabled" /t REG_DWORD /d 0 /f
+   ```
+   *(Khởi động lại máy nếu vừa thay đổi giá trị này từ 1 thành 0).*
 
-CMP 30HX chạy hoàn toàn trên môi trường Windows thông qua ghi đè thanh ghi BAR0 MMIO:
-- **KHÔNG cần chỉnh sửa BIOS**: Không cần tắt Secure Boot, không cần bật CSM, không bắt buộc Above 4G.
-- **KHÔNG cần nạp firmware EFI**: Không can thiệp bootloader hay firmware.
-- **KHÔNG cần GSP Firmware**: Kiến trúc TU116 không hỗ trợ và không cần GSP.
-- **Hỗ trợ mọi phiên bản Driver**: Tương thích hoàn toàn với mọi driver NVIDIA (driver chính thức, desktop, mod, hoặc bản mới nhất - không giới hạn phiên bản).
+3. **Kích hoạt mở khoá Gen2 x16 ngay**:
+   ```cmd
+   cd /d "Đường_dẫn_thư_mục_giải_nén"
+   .\windows-v3.0\release\40HXInstaller.exe -gen2-30hx
+   ```
 
-### 3.1 Cài đặt tự động 1-chạm (Khuyến nghị)
-
-Nhấp đúp chuột vào tệp **`Setup_CMP30HX.bat`** (script tự động xin quyền Administrator nếu cần):
-1. Tự động tắt tính năng tiết kiệm điện **PCIe ASPM** (chống tụt về Gen1 khi rảnh).
-2. Tự động kiểm tra và tắt **Memory Integrity** (Core Isolation / HVCI) để tránh bị Windows chặn driver kernel.
-3. Tự động kiểm tra và dọn dẹp các Scheduled Task cũ.
-4. Tự động đăng ký tác vụ **`CMP30HX_Gen2_Unlock`** chạy ngầm khi đăng nhập Windows (`-silent`).
-5. Kích hoạt mở khoá **PCIe Gen2 x16** và tối ưu **MRRS 512B** ngay lập tức.
-
-> *Muốn gỡ bỏ tự động khởi động: Chạy `Setup_CMP30HX.bat -uninstall`.*
-
----
-
-### 3.2 Cài đặt thủ công bằng dòng lệnh
-
-Nếu muốn tự cấu hình từng bước:
-
-1. **Chuẩn bị môi trường & Driver**:
-   - Đảm bảo card CMP 30HX đã được mod hàn trở lane vật lý x16 và nhận diện ổn định trong Device Manager (thường ở tốc độ mặc định Gen1 x16).
-   - Cài đặt driver NVIDIA: Hỗ trợ **mọi phiên bản driver** (driver chính thức NVIDIA, driver desktop, driver mod hoặc bản mới nhất đều được, không giới hạn phiên bản).
-
-2. **Chạy mở khoá Gen2 ngay lần đầu (Không cần khởi động lại)**:
-   - Nhấp chuột phải vào nút Start menu $\rightarrow$ Chọn **Terminal (Admin)** hoặc **Command Prompt (Administrator)**.
-   - Di chuyển đến thư mục dự án vừa giải nén (hoặc clone):
-     ```cmd
-     cd /d "Đường_dẫn_thư_mục_dự_án"
-     ```
-   - Chạy lệnh kích hoạt trực tiếp:
-     ```cmd
-     .\windows-v3.0\release\40HXInstaller.exe -gen2-30hx
-     ```
-   - Công cụ sẽ mở driver `WinRing0x64.sys`, ghi đè các thanh ghi bóng BAR0 (`0x08841C`, `0x08872C`, `0x08C040`, `0x08C2C0`), nâng MRRS lên 512B và gửi tín hiệu retrain. Thông báo `[Gen2-30HX] ✅ Gen2 Thành công: Link hiện tại Gen2 x16` xuất hiện.
-
-3. **Thiết lập tự động mở khoá khi đăng nhập Windows**:
-   - Do phần cứng GPU trở về trạng thái gốc Gen1 sau mỗi lần khởi động lại máy tính (cold boot / reboot), bạn chỉ cần tạo một Scheduled Task để tự động kích hoạt khi đăng nhập tài khoản.
-   - **Cách 1: Khuyến nghị cho PowerShell (Native, không lo lỗi escape ngoặc kép)**:
+4. **Tạo Scheduled Task để tự động kích hoạt khi đăng nhập Windows**:
+   - **Bằng PowerShell (Khuyến nghị)**:
      ```powershell
-     $a = New-ScheduledTaskAction -Execute "$PWD\windows-v3.0\release\40HXInstaller.exe" -Argument '-gen2-30hx -silent'
-     $t = New-ScheduledTaskTrigger -AtLogOn
-     $p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest
-     Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action $a -Trigger $t -Principal $p -Force
+     $action = New-ScheduledTaskAction -Execute "$PWD\windows-v3.0\release\40HXInstaller.exe" -Argument '-gen2-30hx -silent'
+     $trigger = New-ScheduledTaskTrigger -AtLogOn
+     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest
+     Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action $action -Trigger $trigger -Principal $principal -Force
      ```
-   - **Cách 2: Dành cho Command Prompt (CMD)**:
+   - **Bằng CMD**:
      ```cmd
      schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%CD%\windows-v3.0\release\40HXInstaller.exe\" -gen2-30hx -silent" /sc onlogon /rl highest /f
      ```
-     *(Mẹo: Nếu dùng `schtasks` trên PowerShell, thêm `--%` để tránh PowerShell nuốt ngoặc kép: `schtasks --% /create /tn "CMP30HX_Gen2_Unlock" /tr "\"$PWD\windows-v3.0\release\40HXInstaller.exe\" -gen2-30hx -silent" /sc onlogon /rl highest /f`).*
-   - **Giải thích tham số**:
-     - `-gen2-30hx`: Kích hoạt chế độ mở khoá riêng biệt cho nhân TU116 (kẹp cứng Gen2, cấm ép Gen3, tối ưu MRRS 512B).
-     - `-silent`: Chạy hoàn toàn ngầm không hiện cửa sổ, tự kết thúc sau ~1-2 giây và tự giải phóng driver `WinRing0x64.sys` khỏi RAM.
-
-4. **Dọn dẹp tác vụ lặp cũ (Nếu từng dùng bản cũ trước đây)**:
-   ```cmd
-   schtasks /delete /tn "40HXGen2Retry" /f
-   ```
-
-5. **Xác nhận tốc độ và băng thông thực tế**:
-   - Nhấp đúp vào `40HXCheck.exe`: Xác nhận mục `PCIe: Gen2 x16`.
-   - Khởi chạy **AIDA64** $\rightarrow$ **Tools** $\rightarrow$ **GPGPU Benchmark** $\rightarrow$ Đo kiểm **Memory Read / Memory Copy**: Tốc độ đạt **~6.3 – 6.4 GB/s** (gấp 2.5 lần mức ~2.5 GB/s gốc).
-
-### Các tham số dòng lệnh hữu ích
-```cmd
-40HXInstaller.exe -gen2-30hx            # Kích hoạt Gen2 cho CMP 30HX (chuẩn TU116 và tối ưu MRRS 512B)
-40HXInstaller.exe -gen2-30hx -silent    # Chạy ngầm tự động (phù hợp cho Task Scheduler)
-40HXInstaller.exe -status               # Kiểm tra toàn diện trạng thái phần cứng, driver và PCIe
-40HXInstaller.exe -uninstall            # Gỡ bỏ sạch sẽ toàn bộ dịch vụ và tác vụ
-```
 
 ---
 
-## <img src="https://api.iconify.design/lucide/check-circle.svg?color=%2306b6d4" width="22" height="22" align="center" /> 4. Kiểm Tra Và Xác Nhận (Bằng 40HXCheck.exe)
+## <img src="https://api.iconify.design/lucide/check-circle.svg?color=%2306b6d4" width="22" height="22" align="center" /> 3. Kiểm Tra & Xác Nhận Băng Thông
 
-Sau khi vào Windows, nhấp đúp vào **`40HXCheck.exe`**:
-- `WinRing0`: Báo `✓` (Driver cấu hình đã kích hoạt).
-- `PCIe`: Báo `Gen2 x16`.
-- Mở **AIDA64 GPGPU Benchmark** kiểm tra **Memory Read / Memory Copy**: Đạt khoảng **6300 – 6400 MB/s** chứng tỏ MRRS 512B đã kích hoạt thành công (nếu chỉ đạt ~2500 MB/s là đang chạy ở cấu hình 128B).
+Sau khi kích hoạt (hoặc sau khi đăng nhập lại Windows), kiểm tra bằng 2 công cụ sau:
+
+1. **Kiểm tra tốc độ link PCIe**:
+   - Chạy **`40HXCheck.exe`** (hoặc mở phần mềm **GPU-Z**):
+   - Mục **Bus Interface / PCIe**: Hiển thị chính xác **`PCIe x16 2.0 @ x16 2.0`** (hoặc `Gen2 x16`).
+2. **Kiểm tra băng thông truyền tải thực tế (Xác nhận MRRS 512B)**:
+   - Mở **AIDA64** $\rightarrow$ chọn thanh menu **Tools** $\rightarrow$ chọn **GPGPU Benchmark**.
+   - Chọn card đồ hoạ CMP 30HX và bấm **Run Benchmarks**:
+   - Kiểm tra hai dòng **Memory Read** và **Memory Copy**:
+     - **Thành công**: Đạt khoảng **6.3 – 6.4 GB/s** (đạt trần băng thông lý thuyết của Gen2 x16).
+     - **Chưa tối ưu**: Nếu chỉ đạt ~2.5 GB/s là do MRRS đang ở mức mặc định 128B (chạy lại lệnh `-gen2-30hx` để kích hoạt tối ưu 512B).
 
 ---
 
-## <img src="https://api.iconify.design/lucide/help-circle.svg?color=%23f43f5e" width="22" height="22" align="center" /> 5. Xử Lý Sự Cố Thường Gặp
+## <img src="https://api.iconify.design/lucide/help-circle.svg?color=%23f43f5e" width="22" height="22" align="center" /> 4. Xử Lý Sự Cố Thường Gặp (Troubleshooting)
 
-| Hiện tượng | Nguyên nhân | Hướng khắc phục |
+| Hiện tượng | Nguyên nhân | Hướng giải quyết |
 |---|---|---|
-| **Khởi động lại bị về Gen1** | Chưa đăng ký tác vụ tự khởi động khi đăng nhập | Tạo Scheduled Task tự động kích hoạt `40HXInstaller.exe -gen2-30hx -silent` khi logon theo mục 3. |
-| **GPU-Z báo Gen2 nhưng AIDA64 chỉ đạt 2.5 GB/s** | DEVCTL MRRS bị kẹp ở 128B mặc định | Chạy `40HXInstaller.exe -gen2-30hx` để kích hoạt tối ưu MRRS 512B và nạp lại hàng đợi DMA. |
-| **Bị treo ở vòng lặp tác vụ 40HXGen2Retry** | Do phiên bản cũ ép cờ Gen3 trên CMP 30HX | Chạy `schtasks /delete /tn "40HXGen2Retry" /f` và cập nhật bản `40HXInstaller.exe` mới nhất đã kẹp cứng Gen2. |
-| **Không nhận diện được GPU** | Chưa cắm chắc card hoặc thiếu driver NVIDIA | Cài đặt driver NVIDIA (hỗ trợ mọi phiên bản driver chính thức hoặc mod) và kiểm tra Device Manager. |
-| **Kẹt ở Gen1 (GPU TLS=Gen1, Root TLS=Gen2)** | Windows bật Memory Integrity chặn driver `ThrottleStop.sys` hoặc do cáp Riser/khe cắm | Chạy `Setup_CMP30HX.bat` (tự tắt Memory Integrity & ASPM), khởi động lại máy tính; cắm trực tiếp khe PCIe x16 nối CPU. |
+| **Kẹt ở Gen1 (GPU TLS=Gen1, Root TLS=Gen2)** | Windows bật Memory Integrity (HVCI) chặn nạp driver kernel can thiệp MMIO, hoặc cáp Riser lỏng / tiếp xúc kém | 1. Chạy `Setup_CMP30HX.bat` và **Khởi động lại máy tính (Reboot)**.<br>2. Cắm card trực tiếp vào khe PCIe x16 nối CPU, hạn chế dùng cáp riser. |
+| **Bị tụt về Gen1 x16 khi card ở chế độ rảnh (Idle)** | Tính năng tiết kiệm điện PCIe ASPM của Windows đang bật | Chạy lại `Setup_CMP30HX.bat` (script tự động tắt ASPM) hoặc chỉnh trong Power Options $\rightarrow$ PCI Express $\rightarrow$ Link State Power Management: **Off**. |
+| **GPU-Z báo Gen2 x16 nhưng AIDA64 chỉ đạt ~2.5 GB/s** | Giá trị Max Read Request Size (MRRS) của card bị kẹp ở 128 Bytes mặc định | Chạy lệnh `40HXInstaller.exe -gen2-30hx` để nâng MRRS lên 512 Bytes và nạp lại hàng đợi DMA. |
+| **Không nhận diện được GPU / Mã lỗi 43** | Mối hàn trở mod lane x16 chưa tiếp xúc tốt hoặc card chưa nhận driver | 1. Kiểm tra lại mối hàn trở trên card.<br>2. Cài lại driver NVIDIA (có thể dùng DDU quét sạch driver cũ rồi cài bản mới nhất). |
 
 ---
 
-## <img src="https://api.iconify.design/lucide/trash-2.svg?color=%23ef4444" width="22" height="22" align="center" /> 6. Gỡ Cài Đặt Hoàn Toàn
+## <img src="https://api.iconify.design/lucide/trash-2.svg?color=%23ef4444" width="22" height="22" align="center" /> 5. Gỡ Cài Đặt (Uninstall)
 
-Để đưa hệ thống về trạng thái nguyên bản:
-1. Nhấp đúp vào **`40HXUninstaller.exe`** với quyền Administrator (hoặc chạy `40HXInstaller.exe -uninstall`).
-2. Chương trình sẽ tự động xoá:
-   - Các tác vụ lịch trình Scheduled Tasks (`CMP30HX_Gen2_Unlock`, `40HXGen2Retry`, v.v.).
-   - Khoá tự khởi động Run trong Registry.
-   - Driver dịch vụ và tệp tạm trong `%ProgramData%\40HXUnlock`.
-3. Khởi động lại máy tính.
+Khi muốn đưa hệ thống về trạng thái ban đầu:
+- **Cách nhanh**: Chạy lệnh `Setup_CMP30HX.bat -uninstall`.
+- **Cách qua giao diện**: Nhấp chuột phải vào **`40HXUninstaller.exe`** $\rightarrow$ chọn **Run as administrator**.
+
+Hệ thống sẽ tự động dọn dẹp sạch sẽ:
+- Xoá Scheduled Task `CMP30HX_Gen2_Unlock` khỏi Windows.
+- Dọn dẹp các tệp driver tạm thời trong `%ProgramData%\40HXUnlock`.
 
 ---
 
-## <img src="https://api.iconify.design/lucide/shield-alert.svg?color=%23ef4444" width="22" height="22" align="center" /> 7. Quy Tắc An Toàn Phần Cứng Cốt Lõi
+## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 6. Ghi Chú Kỹ Thuật Tóm Tắt
 
-1. **Không nạp firmware 40HX lên 30HX**: Tuyệt đối không sao chép `40HXUNLK.EFI` hay blob GA102/TU106 lên CMP 30HX. Cấu trúc VBIOS và bộ điều khiển hoàn toàn khác biệt.
-2. **Không ép Gen3 trên CMP 30HX**: eFuse đã đứt vật lý, mọi thao tác ép Gen3 đều vô hiệu và kích hoạt vòng lặp lỗi retrain.
-3. **Không gọi Reset cứng**: Không kích hoạt `gen2RootLinkDisable`, `gen2HardFallback` hoặc PnP device restart trên CMP 30HX.
-4. **Nguyên tắc Fail-closed**: Luôn kiểm tra tính sẵn sàng của PCIe Capability và readback an toàn trước khi thực hiện bất kỳ lệnh ghi nào vào PCI Config hoặc MMIO.
+> [!NOTE]
+> - **Tại sao trần là Gen2 x16 mà không thể lên Gen3?**  
+>   Trên nhân TU116 của CMP 30HX, NVIDIA đã ngắt cầu chì phần cứng **Silicon eFuse (Bit 3 - 8.0 GT/s)** ngay tại nhà máy. Vì vậy, Gen2 x16 (5.0 GT/s) là giới hạn vật lý tối đa của phần cứng. Công cụ can thiệp qua BAR0 MMIO để mở khoá mức trần này an toàn 100%, tuyệt đối không cố ép Gen3 để tránh lỗi treo link huấn luyện lại.
+> - **MRRS 512B**:  
+>   Việc nâng Max Read Request Size từ 128B lên 512B giúp loại bỏ nghẽn phân mảnh gói tin TLP, giải phóng toàn bộ ~6.4 GB/s băng thông bộ nhớ DMA.
 
 ---
 
 ## <img src="https://api.iconify.design/lucide/heart.svg?color=%23f43f5e" width="22" height="22" align="center" /> Lời Cảm Ơn (Acknowledgments)
 
-> This project is inspired by **CMP40HX-Unlock**. If you find it useful, please consider giving a star to both the original author and this repository.
+> Dự án lấy cảm hứng từ công trình ban đầu của **CMP40HX-Unlock**. Nếu thấy công cụ hữu ích, xin hãy để lại 1 Star trên kho lưu trữ để ủng hộ tác giả nhé!
