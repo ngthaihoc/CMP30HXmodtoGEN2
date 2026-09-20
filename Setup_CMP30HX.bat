@@ -44,8 +44,29 @@ echo.
 :: 1. Don dep task cu (neu co)
 schtasks /delete /tn "40HXGen2Retry" /f >nul 2>&1
 
-:: 2. Dang ky Scheduled Task chay ngam khi Logon
-echo [1/2] Dang tao Scheduled Task tu dong kich hoat khi dang nhap...
+:: 2. Tat tinh nang tiet kiem dien PCIe ASPM (tranh bi ha ve Gen1 khi idle)
+echo [1/4] Dang tat tinh nang tiet kiem dien PCIe ASPM...
+powercfg -setacvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0 >nul 2>&1
+powercfg -setdcvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0 >nul 2>&1
+powercfg -setactive SCHEME_CURRENT >nul 2>&1
+echo       [OK] Da tat PCIe ASPM thanh cong.
+
+:: 3. Tat Memory Integrity (Core Isolation / HVCI) de driver ThrottleStop/WinRing0 khong bi chan
+echo [2/4] Dang kiem tra va tat Memory Integrity (Core Isolation / HVCI)...
+set "NEED_REBOOT=0"
+reg query "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" /v "Enabled" 2>nul | %SystemRoot%\System32\findstr.exe /i "0x1" >nul 2>&1
+if %errorlevel% equ 0 (
+    set "NEED_REBOOT=1"
+)
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" /v "Enabled" /t REG_DWORD /d 0 /f >nul 2>&1
+if "%NEED_REBOOT%"=="1" (
+    echo       [!] Da tat Memory Integrity. (Can khoi dong lai may de co hieu luc hoan toan!)
+) else (
+    echo       [OK] Memory Integrity da o trang thai tat (OFF).
+)
+
+:: 4. Dang ky Scheduled Task chay ngam khi Logon
+echo [3/4] Dang tao Scheduled Task tu dong kich hoat khi dang nhap...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$a = New-ScheduledTaskAction -Execute '%INSTALLER%' -Argument '-gen2-30hx -silent'; $t = New-ScheduledTaskTrigger -AtLogOn; $p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest; Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action $a -Trigger $t -Principal $p -Force" >nul 2>&1
 if %errorlevel% neq 0 (
     schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%INSTALLER%\" -gen2-30hx -silent" /sc onlogon /rl highest /f >nul 2>&1
@@ -56,16 +77,18 @@ if %errorlevel% equ 0 (
     echo       [!] Canh bao: Khong the tao Scheduled Task.
 )
 
-:: 3. Kich hoat mo khoa Gen2 ngay lap tuc
+:: 5. Kich hoat mo khoa Gen2 ngay lap tuc
 echo.
-echo [2/2] Dang kich hoat mo khoa Gen2 x16 va toi uu MRRS 512B ngay...
+echo [4/4] Dang kich hoat mo khoa Gen2 x16 va toi uu MRRS 512B ngay...
 "%INSTALLER%" -gen2-30hx
 
 echo.
 echo ================================================================
 echo  [V] HOAN TAT CAI DAT!
 echo  - PCIe Gen2 x16 va MRRS 512B da duoc kich hoat.
+echo  - PCIe ASPM da duoc tat (chong tu ha xuong Gen1 khi idle).
 echo  - He thong se tu dong mo khoa moi khi ban dang nhap Windows.
+if "%NEED_REBOOT%"=="1" call :warn_reboot
 echo  - Kiem tra lai bang 40HXCheck.exe hoac AIDA64 GPGPU Benchmark.
 echo ================================================================
 echo.
@@ -82,4 +105,12 @@ echo.
 echo [V] Da xoa toan bo tac vu Scheduled Task lien quan.
 echo.
 pause
+exit /b 0
+
+
+:warn_reboot
+echo.
+echo  [!] LUU Y: He thong vua tat Memory Integrity (Core Isolation).
+echo      Neu lan nay chua dat Gen2, hay KHOI DONG LAI MAY (Reboot)
+echo      de Windows giai phong driver ThrottleStop.sys!
 exit /b 0
