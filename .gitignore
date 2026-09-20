@@ -2,3 +2,5 @@
 .local/
 *.tmp
 *.log
+CLAUDE.md
+PROJECT_CONTEXT.md
