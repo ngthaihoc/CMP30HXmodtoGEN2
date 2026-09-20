@@ -70,9 +70,18 @@ Mặc định `DEVCTL` (`cap + 0x08`) có Max Read Request Size (MRRS) đặt l�
 Công cụ tự động nâng MRRS lên **512 Bytes** (`0x2000`) và khởi động lại `NVDisplay.ContainerLocalSystem`, giúp băng thông đạt tối đa **~6.3 – 6.4 GB/s** (đạt ~98% lý thuyết của Gen2 x16).
 
 ### 0.3 Lệnh khởi động tự động Gen2 cho CMP 30HX khi bật máy
-Chạy lệnh Command Prompt (Administrator):
+Khuyến nghị chạy script **`Setup_CMP30HX.bat`** ở thư mục gốc để tự cấu hình 1-chạm.  
+Nếu muốn cấu hình thủ công:
+- **Trên PowerShell**:
+```powershell
+$a = New-ScheduledTaskAction -Execute "$PWD\windows-v3.0\release\40HXInstaller.exe" -Argument '-gen2-30hx -silent'
+$t = New-ScheduledTaskTrigger -AtLogOn
+$p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest
+Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action $a -Trigger $t -Principal $p -Force
+```
+- **Trên Command Prompt (CMD)**:
 ```cmd
-schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"D:\ClodeGithub\CMP40HX-Unlock-main\windows-v3.0\release\40HXInstaller.exe\" -gen2-30hx -silent" /sc onlogon /rl highest /f
+schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%CD%\windows-v3.0\release\40HXInstaller.exe\" -gen2-30hx -silent" /sc onlogon /rl highest /f
 ```
 *(Nếu từng bị lỗi vòng lặp thử lại 1 phút do bản cũ, xoá bằng: `schtasks /delete /tn "40HXGen2Retry" /f`)*.
 
@@ -146,17 +155,30 @@ schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"D:\ClodeGithub\CMP40HX-Unlock-
 
 2. **Chạy mở khoá Gen2 ngay lần đầu (Không cần khởi động lại)**:
    - Nhấp chuột phải vào nút Start menu $\rightarrow$ Chọn **Terminal (Admin)** hoặc **Command Prompt (Administrator)**.
+   - Di chuyển đến thư mục dự án vừa giải nén (hoặc clone):
+     ```cmd
+     cd /d "Đường_dẫn_thư_mục_dự_án"
+     ```
    - Chạy lệnh kích hoạt trực tiếp:
      ```cmd
-     "D:\ClodeGithub\CMP40HX-Unlock-main\windows-v3.0\release\40HXInstaller.exe" -gen2-30hx
+     .\windows-v3.0\release\40HXInstaller.exe -gen2-30hx
      ```
    - Công cụ sẽ mở driver `WinRing0x64.sys`, ghi đè các thanh ghi bóng BAR0 (`0x08841C`, `0x08872C`, `0x08C040`, `0x08C2C0`), nâng MRRS lên 512B và gửi tín hiệu retrain. Thông báo `[Gen2-30HX] ✅ Gen2 Thành công: Link hiện tại Gen2 x16` xuất hiện.
 
 3. **Thiết lập tự động mở khoá khi đăng nhập Windows**:
-   - Do phần cứng GPU trở về trạng thái gốc Gen1 sau mỗi lần khởi động lại máy tính (cold boot / reboot), bạn chỉ cần tạo một Scheduled Task để tự động kích hoạt khi đăng nhập tài khoản:
-     ```cmd
-     schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"D:\ClodeGithub\CMP40HX-Unlock-main\windows-v3.0\release\40HXInstaller.exe\" -gen2-30hx -silent" /sc onlogon /rl highest /f
+   - Do phần cứng GPU trở về trạng thái gốc Gen1 sau mỗi lần khởi động lại máy tính (cold boot / reboot), bạn chỉ cần tạo một Scheduled Task để tự động kích hoạt khi đăng nhập tài khoản.
+   - **Cách 1: Khuyến nghị cho PowerShell (Native, không lo lỗi escape ngoặc kép)**:
+     ```powershell
+     $a = New-ScheduledTaskAction -Execute "$PWD\windows-v3.0\release\40HXInstaller.exe" -Argument '-gen2-30hx -silent'
+     $t = New-ScheduledTaskTrigger -AtLogOn
+     $p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest
+     Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action $a -Trigger $t -Principal $p -Force
      ```
+   - **Cách 2: Dành cho Command Prompt (CMD)**:
+     ```cmd
+     schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%CD%\windows-v3.0\release\40HXInstaller.exe\" -gen2-30hx -silent" /sc onlogon /rl highest /f
+     ```
+     *(Mẹo: Nếu dùng `schtasks` trên PowerShell, thêm `--%` để tránh PowerShell nuốt ngoặc kép: `schtasks --% /create /tn "CMP30HX_Gen2_Unlock" /tr "\"$PWD\windows-v3.0\release\40HXInstaller.exe\" -gen2-30hx -silent" /sc onlogon /rl highest /f`).*
    - **Giải thích tham số**:
      - `-gen2-30hx`: Kích hoạt chế độ mở khoá riêng biệt cho nhân TU116 (kẹp cứng Gen2, cấm ép Gen3, tối ưu MRRS 512B).
      - `-silent`: Chạy hoàn toàn ngầm không hiện cửa sổ, tự kết thúc sau ~1-2 giây và tự giải phóng driver `WinRing0x64.sys` khỏi RAM.

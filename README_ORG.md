@@ -72,16 +72,24 @@ Thư mục phát hành [`windows-v3.0/release/`](windows-v3.0/release/) bao gồ
 > CMP 30HX **không sử dụng** và **không được cài đặt** firmware EFI của 40HX. Chỉ cần cấu hình tác vụ Windows.
 
 1. **Khởi chạy tức thì (Kiểm tra ngay)**:
-   Mở Command Prompt (Administrator):
+   Mở Command Prompt (Administrator) tại thư mục dự án:
    ```cmd
-   "D:\ClodeGithub\CMP40HX-Unlock-main\windows-v3.0\release\40HXInstaller.exe" -gen2-30hx
+   .\windows-v3.0\release\40HXInstaller.exe -gen2-30hx
    ```
 
 2. **Cài đặt tự động kích hoạt khi đăng nhập Windows**:
-   ```cmd
-   schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"D:\ClodeGithub\CMP40HX-Unlock-main\windows-v3.0\release\40HXInstaller.exe\" -gen2-30hx -silent" /sc onlogon /rl highest /f
-   ```
-
+   - **Cách 1: Khuyến nghị cho PowerShell (Native, không lo lỗi escape ngoặc kép)**:
+     ```powershell
+     $a = New-ScheduledTaskAction -Execute "$PWD\windows-v3.0\release\40HXInstaller.exe" -Argument '-gen2-30hx -silent'
+     $t = New-ScheduledTaskTrigger -AtLogOn
+     $p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest
+     Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action $a -Trigger $t -Principal $p -Force
+     ```
+   - **Cách 2: Dành cho Command Prompt (CMD)**:
+     ```cmd
+     schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%CD%\windows-v3.0\release\40HXInstaller.exe\" -gen2-30hx -silent" /sc onlogon /rl highest /f
+     ```
+     *(Mẹo: Nếu dùng `schtasks` trên PowerShell, thêm `--%` để tránh PowerShell nuốt ngoặc kép: `schtasks --% /create /tn "CMP30HX_Gen2_Unlock" /tr "\"$PWD\windows-v3.0\release\40HXInstaller.exe\" -gen2-30hx -silent" /sc onlogon /rl highest /f`).*
 3. **Huỷ bỏ vòng lặp thử lại cũ (nếu có)**:
    ```cmd
    schtasks /delete /tn "40HXGen2Retry" /f
