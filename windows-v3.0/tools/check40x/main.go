@@ -574,7 +574,7 @@ func check() {
 	}
 	w("Tác vụ Gen2 : %s\n",
 		map[bool]string{true: "Đã đăng ký (" + taskStatus + ", Kết quả lần trước: " + taskResult + ")",
-			false: "Chưa đăng ký (Cách sửa: Nhấp chuột phải Run as administrator Setup_CMP30HX.bat)"}[taskOK])
+			false: "Chưa đăng ký (Cách sửa: Nhấp chuột phải Run as administrator Setup_CMP30HX_WindowsAIO.bat)"}[taskOK])
 
 	if !st.SS0OK || st.Speed < 2 {
 		if gs := hxcore.ReadGen2Status(); gs != "" {
@@ -605,7 +605,7 @@ func check() {
 			verdict = fmt.Sprintf(">>> CMP 30HX: Mục tiêu Gen%d đã cấu hình (Tốc độ liên kết hiện tại chưa đo được)", st.TLS)
 		}
 	case cmp30HX && st.Speed == 1 && st.TLS < 2:
-		verdict = ">>> CMP 30HX chưa đạt Gen2: Cả liên kết và mục tiêu đều ở Gen1. Chạy lại Setup_CMP30HX.bat với quyền Admin, kiểm tra riser/khe PCIe và khởi động lại"
+		verdict = ">>> CMP 30HX chưa đạt Gen2: Cả liên kết và mục tiêu đều ở Gen1. Chạy lại Setup_CMP30HX_WindowsAIO.bat với quyền Admin, kiểm tra riser/khe PCIe và khởi động lại"
 	case st.Unlocked && st.Speed >= 2:
 		verdict = fmt.Sprintf(">>> Mở khoá thành công: Tensor hiệu năng tối đa + Gen%d", st.Speed)
 		if st.Width >= 1 {
