@@ -8,6 +8,7 @@ package hxcore
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -18,7 +19,14 @@ import (
 const bootDesc40 = "40HX Unlock"
 
 // UninstallTaskNames: 本工具历史上用过的全部计划任务名(含 40HXGen2Retry 重试任务)
-var UninstallTaskNames = []string{"40HXGen2", "40HX PCIe Gen2 Bring-up", "40HXGen2Retry", "40HXGspEnsure"}
+var UninstallTaskNames = []string{
+	"CMP30HX_Gen2_Unlock",
+	"CMP30HX_Gen2_Unlock_User",
+	"40HXGen2",
+	"40HX PCIe Gen2 Bring-up",
+	"40HXGen2Retry",
+	"40HXGspEnsure",
+}
 
 // UninstallTasks: 删除计划任务, 返回实际删掉的名字
 func UninstallTasks() []string {
@@ -171,6 +179,9 @@ func UninstallProgramData() {
 	if entries, err := os.ReadDir(dir); err == nil && len(entries) == 0 {
 		os.Remove(dir)
 	}
+	if pf := os.Getenv("ProgramFiles"); pf != "" {
+		_ = os.RemoveAll(filepath.Join(pf, "40HXUnlock"))
+	}
 	// v2.6.0 修复: 策略键一并删除 — 否则卸载后 DriverStrategy/Gen2AutoHard 等
 	// 残留, 重装会继承旧策略而非默认(README §2.5 承诺"卸载器会一并删除")。
 	DeleteConfig()
@@ -226,7 +237,7 @@ func CheckLeftover() []string {
 	fileLeft := false
 	for _, fn := range []string{"ThrottleStop.sys", "40hx_bridge.sys", "40hx_early-d.sys", "40hx_early.sys", "WinRing0x64.sys"} {
 		if _, err := os.Stat(sysRoot + "\\System32\\drivers\\" + fn); err == nil {
-			rem = append(rem, "- Tệp driver " + fn)
+			rem = append(rem, "- Tệp driver "+fn)
 			fmt.Println("  [!] Tệp driver " + fn + " vẫn còn tàn dư (có thể đang bị chiếm dụng, hãy chạy lại gỡ cài đặt sau khi khởi động lại)")
 			fileLeft = true
 		}

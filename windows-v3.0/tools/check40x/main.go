@@ -26,9 +26,11 @@ import (
 )
 
 const (
-	appTitle     = "CMP 40HX / 30HX Chẩn Đoán Mở Khoá"
-	logsDirName  = "40HXUnlock"              // %LOCALAPPDATA%\40HXUnlock\logs
-	gen2TaskName = "40HX PCIe Gen2 Bring-up" // 与安装器 setupGen2Task 同名
+	appTitle            = "CMP 40HX / 30HX Chẩn Đoán Mở Khoá"
+	logsDirName         = "40HXUnlock"              // %LOCALAPPDATA%\40HXUnlock\logs
+	gen2TaskName        = "40HX PCIe Gen2 Bring-up" // 与安装器 setupGen2Task 同名
+	cmp30HXTaskName     = "CMP30HX_Gen2_Unlock"
+	cmp30HXUserTaskName = "CMP30HX_Gen2_Unlock_User"
 )
 
 var (
@@ -462,10 +464,18 @@ func check() {
 	// --- A. Phán đoán chính: Hiệu năng + Gen2/Gen3 ưu tiên cao nhất ---
 	selfM, drvOK, drvFail := ensureDrivers()
 	st := hxcore.ReadUnlockStateV2(6, 800)
+	prof, profOK := hxcore.FindGPUWithProfile()
+	cmp30HX := profOK && prof.DeviceID == 0x2189
 	bar := strings.Repeat("=", 46)
 	w("\n%s\n", bar)
 	state := "Không thể kiểm tra thực tế (Driver chưa sẵn sàng)"
 	switch {
+	case cmp30HX && st.Speed >= 2:
+		state = fmt.Sprintf("CMP 30HX Gen2 thành công (Liên kết hiện tại Gen%d)", st.Speed)
+	case cmp30HX && st.TLS >= 2:
+		state = fmt.Sprintf("CMP 30HX Gen2 đã cấu hình (TLS=Gen%d; hiện tại Gen%d do tiết kiệm điện/rảnh)", st.TLS, st.Speed)
+	case cmp30HX && st.Speed >= 1:
+		state = fmt.Sprintf("CMP 30HX chưa đạt Gen2 (hiện tại Gen%d, TLS=Gen%d)", st.Speed, st.TLS)
 	case st.SS0OK && st.Unlocked && st.Speed >= 2:
 		state = fmt.Sprintf("Hiệu năng tối đa + Đã đạt Gen%d", st.Speed)
 	case st.SS0OK && st.Unlocked && st.TLS >= 2:
@@ -554,10 +564,17 @@ func check() {
 		w("  └ Khởi động thất bại: %s\n", classifyLoadErr(drvFail))
 	}
 	w("\n")
-	taskOK, taskStatus, taskResult := hxcore.TaskInfo(gen2TaskName)
+	taskName := gen2TaskName
+	if cmp30HX {
+		taskName = cmp30HXTaskName
+	}
+	taskOK, taskStatus, taskResult := hxcore.TaskInfo(taskName)
+	if !taskOK && cmp30HX {
+		taskOK, taskStatus, taskResult = hxcore.TaskInfo(cmp30HXUserTaskName)
+	}
 	w("Tác vụ Gen2 : %s\n",
 		map[bool]string{true: "Đã đăng ký (" + taskStatus + ", Kết quả lần trước: " + taskResult + ")",
-			false: "Chưa đăng ký (Cách sửa: Nhấp chuột phải Run as administrator 40HXInstaller.exe -task)"}[taskOK])
+			false: "Chưa đăng ký (Cách sửa: Nhấp chuột phải Run as administrator Setup_CMP30HX.bat)"}[taskOK])
 
 	if !st.SS0OK || st.Speed < 2 {
 		if gs := hxcore.ReadGen2Status(); gs != "" {
@@ -574,6 +591,21 @@ func check() {
 	// --- D. Kết luận & Đề xuất ---
 	verdict := ""
 	switch {
+	case cmp30HX && st.Speed >= 2:
+		verdict = fmt.Sprintf(">>> CMP 30HX mở khoá thành công: PCIe Gen%d", st.Speed)
+		if st.Width >= 1 {
+			verdict += fmt.Sprintf(" ×%d", st.Width)
+		} else {
+			verdict += " (Độ rộng liên kết chưa đo được)"
+		}
+	case cmp30HX && st.TLS >= 2:
+		if st.Speed == 1 {
+			verdict = fmt.Sprintf(">>> CMP 30HX: Mục tiêu Gen%d đã cấu hình (Hiện tại Gen1 do tiết kiệm điện rảnh; khi có tải 3D/CUDA/AIDA64 sẽ tự lên Gen%d)", st.TLS, st.TLS)
+		} else {
+			verdict = fmt.Sprintf(">>> CMP 30HX: Mục tiêu Gen%d đã cấu hình (Tốc độ liên kết hiện tại chưa đo được)", st.TLS)
+		}
+	case cmp30HX && st.Speed == 1 && st.TLS < 2:
+		verdict = ">>> CMP 30HX chưa đạt Gen2: Cả liên kết và mục tiêu đều ở Gen1. Chạy lại Setup_CMP30HX.bat với quyền Admin, kiểm tra riser/khe PCIe và khởi động lại"
 	case st.Unlocked && st.Speed >= 2:
 		verdict = fmt.Sprintf(">>> Mở khoá thành công: Tensor hiệu năng tối đa + Gen%d", st.Speed)
 		if st.Width >= 1 {

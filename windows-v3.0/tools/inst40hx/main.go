@@ -121,7 +121,11 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "-gen2", "-gen3", "-force-root-gen2", "-force-root-gen3", "-gen2-30hx", "-gen3-30hx":
+			gen2Succeeded = false
 			gen2Main()
+			if !gen2Succeeded {
+				os.Exit(1)
+			}
 			// v3.0.1: 常驻守护 — 由登录任务带 -guard 启动; 驱动保留并每分钟自查 Gen2
 			if hasArg("-guard") && hxcore.DriverStrategy() == hxcore.DriverStrategyResident {
 				residentGuard()
@@ -190,6 +194,7 @@ func selfElevate() {
 
 var (
 	procShellExecuteW = syscall.NewLazyDLL("shell32.dll").NewProc("ShellExecuteW")
+	gen2Succeeded     bool
 )
 
 const (
@@ -1202,6 +1207,7 @@ func gen2Main() {
 	// 放在最前: 拿不到锁直接退出, 绝不进入驱动加载临界区。
 	owned, release := gen2AcquireSingleInstance()
 	if !owned {
+		gen2Succeeded = true
 		fmt.Println("[Gen2] 另一 Gen2 实例正在运行, 跳过(单实例保护)")
 		hxcore.WriteGen2Status("⏭️ 跳过: 另一 Gen2 实例正在运行(单实例保护, 避免并发抢驱动)")
 		return
@@ -1312,6 +1318,7 @@ func gen2Main() {
 			targetGen, rd(cap+0x0C), rd(cap+0x10), rd(cap+0x30), rd(cap+0x30)&0xF)
 	}
 	if cur >= targetGen {
+		gen2Succeeded = true
 		fmt.Printf("[Gen%d] Đã đạt Gen%d, không cần thao tác thêm.\n", targetGen, cur)
 		hxcore.WriteGen2Status(fmt.Sprintf("✅ Gen%d không cần thao tác: Băng thông hiện tại đã là Gen%d\nQuyền thực thi: %s\nVị trí %s: %02x:%02x.%x\n",
 			targetGen, cur, map[bool]string{true: "Quản trị viên (Admin)/SYSTEM", false: "Người dùng thường (Bị hạn chế)"}[isAdmin()],
@@ -1532,6 +1539,7 @@ func gen2Main() {
 	}
 	// v2.6.0: 成功清掉遗留重试任务; 失败按策略安排自动重试(次数/间隔见 hxcore config)。
 	// v3.0.1: 常驻守护模式不排一次性重试任务 — 守护进程每分钟自行重试。
+	gen2Succeeded = unlocked
 	if unlocked {
 		deleteGen2Retry()
 	} else if hxcore.DriverStrategy() != hxcore.DriverStrategyResident {
@@ -1793,12 +1801,17 @@ func gen2MainCMP30HX(wh syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUProf
 		}
 		fmt.Printf("[Gen%d-30HX] Khởi động lại service NVDisplay để nạp lại hàng đợi DMA driver...\n", targetGen)
 		gen2RestartNVDisplay()
-	} else if tls >= targetGen {
+	} else if tls >= targetGen || rootTls >= targetGen {
 		ok = true
-		verdict = fmt.Sprintf("🟢 Gen%d đã cấu hình (TLS=Gen%d): Hiện đang Gen%d x%d do trạng thái tiết kiệm điện PCIe rảnh", targetGen, tls, cur, width)
+		if tls >= targetGen {
+			verdict = fmt.Sprintf("🟢 Gen%d đã cấu hình (TLS=Gen%d): Hiện đang Gen%d x%d do trạng thái tiết kiệm điện PCIe rảnh", targetGen, tls, cur, width)
+		} else {
+			verdict = fmt.Sprintf("🟢 Gen%d đã cấu hình (Root TLS=Gen%d): Hiện đang Gen%d x%d do GPU rảnh/không giữ TLS", targetGen, rootTls, cur, width)
+		}
 	}
 	fmt.Printf("[Gen%d-30HX] %s\n", targetGen, verdict)
 
+	gen2Succeeded = ok
 	if ok {
 		deleteGen2Retry()
 	} else if hxcore.DriverStrategy() != hxcore.DriverStrategyResident {
@@ -1818,9 +1831,12 @@ func gen2MainCMP30HX(wh syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUProf
 		icon := uint(mbIconInfo)
 		txt := fmt.Sprintf("Băng thông PCIe: Hiện tại Gen%d x%d (GPU TLS=Gen%d, Root TLS=Gen%d)\n", cur, width, tls, rootTls)
 		if ok {
-			txt += fmt.Sprintf("=== MỞ KHOÁ GEN%d THÀNH CÔNG ===", targetGen)
+			if cur < targetGen {
+				txt += fmt.Sprintf("\nGen1 lúc nhàn rỗi là tiết kiệm điện bình thường; hãy chạy GPU-Z Render Test hoặc tải 3D/CUDA để xác nhận Gen%d.", targetGen)
+			}
+			txt += fmt.Sprintf("\n=== MỞ KHOÁ GEN%d THÀNH CÔNG ===", targetGen)
 		} else {
-			txt += fmt.Sprintf("Vẫn ở Gen%d, chưa đạt Gen%d (xem chi tiết trong file log).", cur, targetGen)
+			txt += fmt.Sprintf("\nVẫn ở Gen%d, chưa đạt Gen%d. Xem %s và kiểm tra HVCI, riser/khe PCIe, BIOS; sau đó thử lại.", cur, targetGen, filepath.Join(os.TempDir(), "40HX_installer.log"))
 			icon = mbIconError
 		}
 		msgbox(fmt.Sprintf("CMP 30HX Gen%d", targetGen), txt, icon)
@@ -2162,6 +2178,7 @@ func gen2HardFallback(th, wh *syscall.Handle, gpuBDF uint32, bar0Phys uint64, ro
 }
 
 func gen2VerdictHard(gpuBDF uint32, cur uint32, success bool) {
+	gen2Succeeded = success
 	if success {
 		deleteGen2Retry()
 	} else {
