@@ -170,6 +170,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$schemes = powercfg -lis
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$base = 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}'; Get-ChildItem $base -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue; if ($p.ProviderName -match 'NVIDIA' -or $p.DriverDesc -match 'NVIDIA|CMP') { Set-ItemProperty -Path $_.PSPath -Name 'DisableAspm' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue; Set-ItemProperty -Path $_.PSPath -Name 'RMDisableLinkDownshift' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue } }" >nul 2>&1
 
+where nvidia-smi >nul 2>&1 && nvidia-smi -pm 1 >nul 2>&1
+sc config NVDisplay.ContainerLocalSystem start= auto >nul 2>&1
+sc start NVDisplay.ContainerLocalSystem >nul 2>&1
+
 echo       [OK] Da vo hieu hoa Fast Startup (Hiberboot) va PCIe ASPM toan he thong.
 
 :: 3. Tat Microsoft Vulnerable Driver Blocklist (tranh Windows chan driver sau reboot)
