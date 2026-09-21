@@ -56,8 +56,13 @@ Script sẽ tự động thực hiện tuần tự 6 bước tối ưu hệ th�
    - Ngăn Windows Defender và CI chặn nạp driver WinRing0 / ThrottleStop sau khi khởi động lại.
 4. **Kiểm tra và tắt Memory Integrity (Core Isolation / HVCI)**:
    - Vô hiệu hoá tính năng chặn driver kernel của Windows trong Registry để công cụ có thể ghi đè thanh ghi BAR0 MMIO.
-5. **Đăng ký tác vụ khởi động ngầm (`CMP30HX_Gen2_Unlock`)**:
-   - Tạo Scheduled Task với tài khoản `NT AUTHORITY\SYSTEM` tự động tắt ASPM và kích hoạt chế độ `-gen2-30hx -silent` với quyền cao nhất mỗi khi bạn đăng nhập Windows. Bạn không cần phải mở công cụ hay thao tác thủ công sau mỗi lần bật máy.
+5. **Triển khai cố định & đăng ký đa cơ chế duy trì Gen2 (`CMP30HX_Gen2_Unlock`)**:
+   - Tự động sao chép bộ công cụ vào `%ProgramFiles%\40HXUnlock\` để tránh lỗi mất file sau khi reboot.
+   - Tạo Scheduled Task chạy dưới quyền `NT AUTHORITY\SYSTEM` với 3 bộ kích hoạt (Multi-triggers):
+     + **AtStartup** (Delay 15s sau khi nạp kernel).
+     + **AtLogOn** (Delay 5s khi người dùng đăng nhập).
+     + **Wake from Sleep** (Kích hoạt khi máy tỉnh dậy từ chế độ ngủ/Modern Standby qua Event ID 1 của Power-Troubleshooter).
+   - Tích hợp thêm bảo hiểm kép qua Registry Run Key (`HKLM` và `HKCU`), đảm bảo vĩnh viễn không bị tụt về Gen1 sau mỗi lần khởi động lại máy hoặc thức dậy từ Sleep.
 6. **Mở khoá Gen2 x16 & kích hoạt MRRS 512B ngay lập tức**:
    - Nâng băng thông link lên Gen2 x16 và tối ưu Max Read Request Size lên 512B, card sẵn sàng hoạt động ngay mà không bắt buộc khởi động lại.
 
@@ -99,20 +104,26 @@ Nếu muốn tự kiểm soát từng bước qua cửa sổ dòng lệnh (Termi
    .\windows-v3.0\release\40HXInstaller.exe -gen2-30hx
    ```
 
-5. **Tạo Scheduled Task để tự động kích hoạt khi đăng nhập Windows**:
-   - **Bằng PowerShell (Khuyến nghị - chạy ngầm SYSTEM)**:
-     ```powershell
-     $a1 = New-ScheduledTaskAction -Execute 'powercfg.exe' -Argument '-setacvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0'
-     $a2 = New-ScheduledTaskAction -Execute 'powercfg.exe' -Argument '-setdcvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0'
-     $a3 = New-ScheduledTaskAction -Execute 'powercfg.exe' -Argument '-setactive SCHEME_CURRENT'
-     $a4 = New-ScheduledTaskAction -Execute "$PWD\windows-v3.0\release\40HXInstaller.exe" -Argument '-gen2-30hx -silent'
-     $trigger = New-ScheduledTaskTrigger -AtLogOn
-     $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-     Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action @($a1, $a2, $a3, $a4) -Trigger $trigger -Principal $principal -Force
-     ```
-   - **Bằng CMD**:
+5. **Thiết lập tự động duy trì Gen2 sau Reboot & Wake from Sleep**:
+   - **Triển khai bộ cài vào thư mục hệ thống**:
      ```cmd
-     schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "cmd.exe /c powercfg -setacvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0 & powercfg -setdcvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0 & powercfg -setactive SCHEME_CURRENT & \"%CD%\windows-v3.0\release\40HXInstaller.exe\" -gen2-30hx -silent" /sc onlogon /ru SYSTEM /rl highest /f
+     if not exist "%ProgramFiles%\40HXUnlock" mkdir "%ProgramFiles%\40HXUnlock"
+     copy /y ".\windows-v3.0\release\40HXInstaller.exe" "%ProgramFiles%\40HXUnlock\"
+     copy /y ".\windows-v3.0\release\40HXCheck.exe" "%ProgramFiles%\40HXUnlock\"
+     ```
+   - **Đăng ký Scheduled Task SYSTEM với Multi-trigger (Startup + Logon + Wake) bằng PowerShell**:
+     ```powershell
+     $action = New-ScheduledTaskAction -Execute "$env:ProgramFiles\40HXUnlock\40HXInstaller.exe" -Argument '-gen2-30hx -silent' -WorkingDirectory "$env:ProgramFiles\40HXUnlock"
+     $t1 = New-ScheduledTaskTrigger -AtStartup; $t1.Delay = 'PT15S'
+     $t2 = New-ScheduledTaskTrigger -AtLogOn; $t2.Delay = 'PT5S'
+     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
+     $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+     Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action $action -Trigger @($t1, $t2) -Settings $settings -Principal $principal -Force
+     ```
+   - **Thêm bảo hiểm kép qua Registry Run Key (HKLM & HKCU)**:
+     ```cmd
+     reg add "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "CMP30HX_Gen2" /t REG_SZ /d "\"%ProgramFiles%\40HXUnlock\40HXInstaller.exe\" -gen2-30hx -silent" /f
+     reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "40HXGen2" /t REG_SZ /d "\"%ProgramFiles%\40HXUnlock\40HXInstaller.exe\" -gen2-30hx -silent" /f
      ```
 
 ---
@@ -181,7 +192,9 @@ Khi muốn đưa hệ thống về trạng thái ban đầu:
 
 Hệ thống sẽ tự động dọn dẹp sạch sẽ:
 - Xoá Scheduled Task `CMP30HX_Gen2_Unlock` khỏi Windows.
-- Dọn dẹp các tệp driver tạm thời trong `%ProgramData%\40HXUnlock`.
+- Xoá các khoá khởi động ngầm Registry Run Key (`HKLM` và `HKCU`).
+- Xoá thư mục chương trình `%ProgramFiles%\40HXUnlock`.
+- Dọn dẹp các tệp driver và trạng thái tạm thời trong `%ProgramData%\40HXUnlock`.
 
 ---
 

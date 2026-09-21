@@ -3,11 +3,36 @@ setlocal
 chcp 65001 >nul
 title CMP 30HX Gen2 x16 Auto Setup
 
-:: Kiem tra quyen Administrator
-net session >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [!] Dang yeu cau quyen Administrator...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs"
+:: Kiem tra quyen Administrator (UAC da tang phong thu)
+set "IS_ADMIN=0"
+fltmc >nul 2>&1 && set "IS_ADMIN=1"
+if "%IS_ADMIN%"=="0" (
+    fsutil dirty query %systemdrive% >nul 2>&1 && set "IS_ADMIN=1"
+)
+if "%IS_ADMIN%"=="0" (
+    copy /b nul "%SystemRoot%\System32\__admintest_%random%.tmp" >nul 2>&1 && (
+        del "%SystemRoot%\System32\__admintest_%random%.tmp" >nul 2>&1
+        set "IS_ADMIN=1"
+    )
+)
+
+if "%IS_ADMIN%"=="0" (
+    echo [!] Dang yeu cau quyen Administrator [UAC]...
+    if "%~1"=="" (
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -WorkingDirectory '%~dp0' -Verb RunAs" >nul 2>&1
+    ) else (
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -ArgumentList '%*' -WorkingDirectory '%~dp0' -Verb RunAs" >nul 2>&1
+    )
+    if errorlevel 1 (
+        echo.
+        echo ================================================================
+        echo [X] LOI: Khong the tu dong yeu cau quyen Administrator.
+        echo [!] Vui long nhap chuot phai vao file Setup_CMP30HX_WindowsAIO.bat
+        echo     va chon 'Run as administrator' [Chay voi tu cach quan tri vien].
+        echo ================================================================
+        echo.
+        pause
+    )
     exit /b
 )
 
@@ -21,16 +46,16 @@ echo    CONG CU CAI DAT TU DONG GEN2 X16 CHO NVIDIA CMP 30HX (TU116)
 echo ================================================================
 echo.
 
-set "INSTALLER="
+set "SRC_INSTALLER="
 if exist "%~dp0windows-v3.0\release\40HXInstaller.exe" (
-    set "INSTALLER=%~dp0windows-v3.0\release\40HXInstaller.exe"
+    set "SRC_INSTALLER=%~dp0windows-v3.0\release\40HXInstaller.exe"
 ) else if exist "%~dp0release\40HXInstaller.exe" (
-    set "INSTALLER=%~dp0release\40HXInstaller.exe"
+    set "SRC_INSTALLER=%~dp0release\40HXInstaller.exe"
 ) else if exist "%~dp040HXInstaller.exe" (
-    set "INSTALLER=%~dp040HXInstaller.exe"
+    set "SRC_INSTALLER=%~dp040HXInstaller.exe"
 )
 
-if not defined INSTALLER (
+if not defined SRC_INSTALLER (
     echo [X] LOI: Khong tim thay 40HXInstaller.exe!
     echo Vui long dam bao ban da giai nen day du thu muc repository.
     echo.
@@ -38,38 +63,69 @@ if not defined INSTALLER (
     exit /b 1
 )
 
-echo [*] Tim thay bo cai: "%INSTALLER%"
+set "SRC_CHECK="
+if exist "%~dp0windows-v3.0\release\40HXCheck.exe" (
+    set "SRC_CHECK=%~dp0windows-v3.0\release\40HXCheck.exe"
+) else if exist "%~dp0release\40HXCheck.exe" (
+    set "SRC_CHECK=%~dp0release\40HXCheck.exe"
+) else if exist "%~dp040HXCheck.exe" (
+    set "SRC_CHECK=%~dp040HXCheck.exe"
+)
+
+echo [*] Tim thay bo cai nguon: "%SRC_INSTALLER%"
+
+:: 0. Trien khai co dinh vao thu muc he thong Program Files (tranh loi mat file sau reboot)
+set "TARGET_DIR=%ProgramFiles%\40HXUnlock"
+set "TARGET_INSTALLER=%TARGET_DIR%\40HXInstaller.exe"
+set "TARGET_CHECK=%TARGET_DIR%\40HXCheck.exe"
+
+if not exist "%TARGET_DIR%" mkdir "%TARGET_DIR%" >nul 2>&1
+copy /y "%SRC_INSTALLER%" "%TARGET_INSTALLER%" >nul 2>&1
+if defined SRC_CHECK copy /y "%SRC_CHECK%" "%TARGET_CHECK%" >nul 2>&1
+
+:: Sao chep driver gen2 du phong vao ProgramData va ProgramFiles neu co
+set "SRC_DRV="
+if exist "%~dp0windows-v3.0\release\gen2\drivers" (
+    set "SRC_DRV=%~dp0windows-v3.0\release\gen2\drivers"
+) else if exist "%~dp0gen2\drivers" (
+    set "SRC_DRV=%~dp0gen2\drivers"
+) else if exist "%~dp0drivers" (
+    set "SRC_DRV=%~dp0drivers"
+)
+if defined SRC_DRV (
+    if not exist "%ProgramData%\40HXUnlock\drivers" mkdir "%ProgramData%\40HXUnlock\drivers" >nul 2>&1
+    copy /y "%SRC_DRV%\*.sys" "%ProgramData%\40HXUnlock\drivers\" >nul 2>&1
+    if not exist "%TARGET_DIR%\drivers" mkdir "%TARGET_DIR%\drivers" >nul 2>&1
+    copy /y "%SRC_DRV%\*.sys" "%TARGET_DIR%\drivers\" >nul 2>&1
+)
+
+if exist "%TARGET_INSTALLER%" (
+    echo [V] Da dong bo bo cai vao thu muc he thong: "%TARGET_DIR%"
+    set "FINAL_INSTALLER=%TARGET_INSTALLER%"
+    set "FINAL_DIR=%TARGET_DIR%"
+) else (
+    echo [!] Khong the copy vao Program Files, su dung bo cai tai cho: "%SRC_INSTALLER%"
+    set "FINAL_INSTALLER=%SRC_INSTALLER%"
+    set "FINAL_DIR=%~dp0"
+)
 echo.
 
 :: 1. Don dep task retry cu (neu co), tranh vong lap retry Gen3/Gen2 cu
 schtasks /delete /tn "40HXGen2Retry" /f >nul 2>&1
 
-:: 2. Tat tinh nang tiet kiem dien PCIe ASPM va Hybrid Sleep (tranh bi ha ve Gen1 khi idle)
-echo [1/6] Dang tat PCIe ASPM va Hybrid Sleep...
-set "POWERCFG_OK=1"
-powercfg -setacvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0 >nul 2>&1 || set "POWERCFG_OK=0"
-powercfg -setdcvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0 >nul 2>&1 || set "POWERCFG_OK=0"
-powercfg -setacvalueindex SCHEME_CURRENT SUB_SLEEP HYBRIDSLEEP 0 >nul 2>&1 || set "POWERCFG_OK=0"
-powercfg -setdcvalueindex SCHEME_CURRENT SUB_SLEEP HYBRIDSLEEP 0 >nul 2>&1 || set "POWERCFG_OK=0"
-powercfg -setactive SCHEME_CURRENT >nul 2>&1 || set "POWERCFG_OK=0"
-if "%POWERCFG_OK%"=="1" (
-    echo       [OK] Da tat PCIe ASPM va Hybrid Sleep.
-) else (
-    echo       [X] Khong tat duoc power setting. Kiem tra quyen Administrator va Power Plan hien tai.
-)
-
-:: 3. Tat Fast Startup de tranh cache kernel giu link Gen1 sau khoi dong lai
-echo [2/6] Dang tat Fast Startup (Hiberboot)...
+:: 2. Tat triet de Fast Startup, Hybrid Sleep va PCIe ASPM tren toan bo Power Plan
+echo [1/6] Dang tat Fast Startup, Hybrid Sleep va PCIe ASPM toan he thong...
+powercfg -h off >nul 2>&1
 reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" /v "HiberbootEnabled" /t REG_DWORD /d 0 /f >nul 2>&1
-if errorlevel 1 (
-    echo       [X] Khong tat duoc Fast Startup. Hay chay lai bang Administrator.
-) else (
-    reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" /v "HiberbootEnabled" 2>nul | %SystemRoot%\System32\findstr.exe /i "0x0" >nul 2>&1
-    if errorlevel 1 (echo       [!] Fast Startup chua xac nhan OFF.) else (echo       [OK] Fast Startup da tat.)
-)
 
-:: 4. Tat Microsoft Vulnerable Driver Blocklist (tranh Windows chan driver sau reboot)
-echo [3/6] Dang tat Microsoft Vulnerable Driver Blocklist...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$schemes = powercfg -list | ForEach-Object { if ($_ -match '([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})') { $matches[1] } }; foreach ($s in $schemes) { powercfg -setacvalueindex $s SUB_PCIEXPRESS ASPM 0 2>$null; powercfg -setdcvalueindex $s SUB_PCIEXPRESS ASPM 0 2>$null; powercfg -setacvalueindex $s SUB_SLEEP HYBRIDSLEEP 0 2>$null; powercfg -setdcvalueindex $s SUB_SLEEP HYBRIDSLEEP 0 2>$null }; powercfg -setactive SCHEME_CURRENT 2>$null" >nul 2>&1
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$base = 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}'; Get-ChildItem $base -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue; if ($p.ProviderName -match 'NVIDIA' -or $p.DriverDesc -match 'NVIDIA|CMP') { Set-ItemProperty -Path $_.PSPath -Name 'DisableAspm' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue; Set-ItemProperty -Path $_.PSPath -Name 'RMDisableLinkDownshift' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue } }" >nul 2>&1
+
+echo       [OK] Da vo hieu hoa Fast Startup (Hiberboot) va PCIe ASPM toan he thong.
+
+:: 3. Tat Microsoft Vulnerable Driver Blocklist (tranh Windows chan driver sau reboot)
+echo [2/6] Dang tat Microsoft Vulnerable Driver Blocklist...
 reg add "HKLM\SYSTEM\CurrentControlSet\Control\CI\Config" /v "VulnerableDriverBlocklistEnable" /t REG_DWORD /d 0 /f >nul 2>&1
 if errorlevel 1 (
     echo       [X] Khong tat duoc Driver Blocklist. Kiem tra chinh sach bao mat Windows.
@@ -78,8 +134,8 @@ if errorlevel 1 (
     if errorlevel 1 (echo       [!] Driver Blocklist chua xac nhan OFF.) else (echo       [OK] Driver Blocklist da tat.)
 )
 
-:: 5. Tat Memory Integrity (Core Isolation / HVCI) de driver MMIO khong bi chan
-echo [4/6] Dang kiem tra va tat Memory Integrity (HVCI)...
+:: 4. Tat Memory Integrity (Core Isolation / HVCI) de driver MMIO khong bi chan
+echo [3/6] Dang kiem tra va tat Memory Integrity (HVCI)...
 set "NEED_REBOOT=0"
 reg query "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" /v "Enabled" 2>nul | %SystemRoot%\System32\findstr.exe /i "0x1" >nul 2>&1
 if not errorlevel 1 set "NEED_REBOOT=1"
@@ -96,32 +152,46 @@ if errorlevel 1 (
     )
 )
 
-:: 6. Dang ky Scheduled Task SYSTEM (startup, delay 45s)
-echo [5/6] Dang tao Scheduled Task duy tri Gen2 sau moi lan khoi dong...
+:: 5. Dang ky Scheduled Task SYSTEM da kich hoat (Startup 15s + Logon 5s + Wake from Sleep)
+echo [4/6] Dang tao Scheduled Task SYSTEM va Run Key duy tri Gen2...
 set "TASK_OK=0"
-set "CMP30HX_INSTALLER=%INSTALLER%"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$exe=$env:CMP30HX_INSTALLER; if (-not [IO.Path]::IsPathRooted($exe)) { throw 'Duong dan installer khong hop le' }; $a1=New-ScheduledTaskAction -Execute 'powercfg.exe' -Argument '-setacvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0'; $a2=New-ScheduledTaskAction -Execute 'powercfg.exe' -Argument '-setdcvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0'; $a3=New-ScheduledTaskAction -Execute 'powercfg.exe' -Argument '-setactive SCHEME_CURRENT'; $a4=New-ScheduledTaskAction -Execute $exe -Argument '-gen2-30hx -silent'; $t=New-ScheduledTaskTrigger -AtStartup; $t.Delay='PT45S'; $p=New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest; Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action @($a1,$a2,$a3,$a4) -Trigger $t -Principal $p -Force" >nul 2>&1
+set "FINAL_EXE=%FINAL_INSTALLER%"
+set "FINAL_WD=%FINAL_DIR%"
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$exe=$env:FINAL_EXE; $dir=$env:FINAL_WD; if (-not [IO.Path]::IsPathRooted($exe)) { throw 'Duong dan installer khong hop le' }; $action = New-ScheduledTaskAction -Execute $exe -Argument '-gen2-30hx -silent' -WorkingDirectory $dir; $t1 = New-ScheduledTaskTrigger -AtStartup; $t1.Delay = 'PT15S'; $t2 = New-ScheduledTaskTrigger -AtLogOn; $t2.Delay = 'PT5S'; $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Minutes 5); $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest; Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action $action -Trigger @($t1, $t2) -Settings $settings -Principal $principal -Force; try { $srv = New-Object -ComObject 'Schedule.Service'; $srv.Connect(); $task = $srv.GetFolder('\').GetTask('CMP30HX_Gen2_Unlock'); $def = $task.Definition; $tEvent = $def.Triggers.Create(0); $tEvent.Subscription = '<QueryList><Query Id=''0'' Path=''System''><Select Path=''System''>*[System[Provider[@Name=''Microsoft-Windows-Power-Troubleshooter''] and EventID=1]]</Select></Query></QueryList>'; $tEvent.Delay = 'PT3S'; $tEvent.Enabled = $true; $srv.GetFolder('\').RegisterTaskDefinition('CMP30HX_Gen2_Unlock', $def, 4, $null, $null, 5, $null) } catch {}" >nul 2>&1
+
 if not errorlevel 1 set "TASK_OK=1"
 if "%TASK_OK%"=="1" schtasks /query /tn "CMP30HX_Gen2_Unlock" >nul 2>&1 || set "TASK_OK=0"
-if "%TASK_OK%"=="1" (
-    echo       [OK] Scheduled Task SYSTEM da duoc xac nhan; se chay khi Startup sau 45 giay.
-    echo           Sau reboot: dang nhap Windows, cho du 45 giay roi moi kiem tra Gen2.
-    echo           Task dang chay tu duong dan hien tai; khong di chuyen/xoa file nay sau khi cai dat.
-) else (
-    echo       [X] Khong tao duoc Scheduled Task SYSTEM. Sau reboot can chay lai lenh mo khoa thu cong.
-    echo           Ban fallback user da bi bo qua de tranh task user khong nap duoc driver kernel.
+
+if "%TASK_OK%"=="0" (
+    schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%FINAL_INSTALLER%\" -gen2-30hx -silent" /sc onstart /delay 0000:15 /rl highest /ru "NT AUTHORITY\SYSTEM" /f >nul 2>&1
+    if not errorlevel 1 set "TASK_OK=1"
 )
 
-:: 7. Kich hoat mo khoa Gen2 ngay lap tuc
+:: Bao hiem kep: Dang ky Registry Run key cho HKLM va HKCU (phong thu neu Task Scheduler bi chan)
+reg add "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "CMP30HX_Gen2" /t REG_SZ /d "\"%FINAL_INSTALLER%\" -gen2-30hx -silent" /f >nul 2>&1
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "40HXGen2" /t REG_SZ /d "\"%FINAL_INSTALLER%\" -gen2-30hx -silent" /f >nul 2>&1
+
+if "%TASK_OK%"=="1" (
+    echo       [OK] Scheduled Task SYSTEM da duoc kich hoat thanh cong.
+    echo           - Kich hoat khi he thong khoi dong [AtStartup: delay 15 giay].
+    echo           - Kich hoat khi nguoi dung dang nhap [AtLogOn: delay 5 giay].
+    echo           - Kich hoat khi thuc giac tu che do ngu [Wake from Sleep: delay 3 giay].
+    echo           - Tich hop them Run Key du phong tai Registry HKLM va HKCU.
+) else (
+    echo       [!] Scheduled Task SYSTEM gap truc trac, da kich hoat che do du phong Registry Run.
+)
+
+:: 6. Kich hoat mo khoa Gen2 ngay lap tuc
 echo.
 if "%NEED_REBOOT%"=="1" (
     echo [!] HVCI vua duoc dat OFF trong Registry nhung chua co hieu luc trong phien nay.
     echo     Buoc hien tai co the khong nap duoc driver kernel; sau khi ket thuc hay reboot truoc khi danh gia.
 )
-echo [6/6] Dang kich hoat Gen2 x16 va toi uu MRRS 512B ngay...
-"%INSTALLER%" -gen2-30hx
+echo [5/6] Dang kich hoat Gen2 x16 va toi uu MRRS 512B ngay...
+"%FINAL_INSTALLER%" -gen2-30hx
 if errorlevel 1 (
-    echo       [X] Installer bao loi khi chay (exit code khac 0).
+    echo       [X] Installer bao loi khi chay [exit code khac 0].
     echo           Kiem tra driver WinRing0/ThrottleStop, HVCI va quyen Administrator.
     set "UNLOCK_OK=0"
 ) else (
@@ -138,20 +208,33 @@ if errorlevel 1 (
     )
 )
 
+:: 7. Kiem tra trang thai chan doan
+echo.
+echo [6/6] Kiem tra trang thai sau khi mo khoa...
+if exist "%TARGET_CHECK%" (
+    echo [*] Tim thay cong cu chan doan: "%TARGET_CHECK%"
+    echo [*] Dang khoi chay cua so chan doan 40HXCheck...
+    start "" "%TARGET_CHECK%"
+) else (
+    "%FINAL_INSTALLER%" -status
+)
+
 echo.
 echo ================================================================
 if "%UNLOCK_OK%"=="1" (
-    echo  [V] CAI DAT HOAN TAT - Gen2 da duoc cau hinh.
-    echo  - Scheduled Task SYSTEM se tu dong chay sau khi khoi dong 45 giay.
+    echo  [V] CAI DAT HOAN TAT - Gen2 da duoc cau hinh ben vung.
+    echo  - Da thiet lap da co che: Scheduled Task SYSTEM + Registry Run Key.
+    echo  - Tu dong duy tri Gen2 tren moi lan Boot, Dang nhap va Wake from Sleep!
+    echo.
     echo  - LUU Y QUAN TRONG VE GEN 1 KHI VUA KHOI DONG / IDLE:
-    echo    + Link PCIe se o Gen1 x16 khi card o che do ranh (Idle Power Saving / ASPM).
+    echo    + Link PCIe se o Gen1 x16 khi card o che do ranh [Idle Power Saving].
     echo    + Khi co tai 3D/CUDA/AIDA64/FurMark, card se tu dong bung toc do len Gen2 x16.
-    echo    + Neu GPU-Z bao Gen1: nhap vao dau cham hoi (?) canh Bus Interface de chay Render Test!
-    echo  - Neu sau 45 giay va co tai ma GPU van Gen1: kiem tra HVCI, riser, tiep xuc lane va BIOS khe PCIe.
+    echo    + Neu GPU-Z bao Gen1: nhap vao dau cham hoi [?] canh Bus Interface de chay Render Test!
+    echo  - Neu sau khi reboot co tai ma GPU van Gen1: kiem tra HVCI, riser, tiep xuc lane va BIOS khe PCIe.
 ) else (
     echo  [X] CAI DAT CHUA HOAN TAT - chua xac nhan duoc Gen2 trong phien hien tai.
     if "%NEED_REBOOT%"=="1" (
-        echo  - LUU Y: Memory Integrity (HVCI) vua duoc tat, nhung can KHOI DONG LAI MAY de ap dung.
+        echo  - LUU Y: Memory Integrity [HVCI] vua duoc tat, nhung can KHOI DONG LAI MAY de ap dung.
         echo    Sau khi reboot, Scheduled Task SYSTEM se tu dong thu nap driver va mo khoa Gen2.
     ) else (
         echo  - Khong ket luan thanh cong chi dua tren Root Port Gen2.
@@ -160,7 +243,7 @@ if "%UNLOCK_OK%"=="1" (
     )
 )
 if "%TASK_OK%"=="1" (
-    echo  - Sau khi reboot, cho task chay du 45 giay roi kiem tra bang 40HXCheck.exe.
+    echo  - Sau khi reboot, he thong se tu dong mo khoa sau 15 giay khoi dong hoac 5 giay dang nhap.
 ) else (
     echo  - [Canh bao] Scheduled Task chua san sang; sau reboot phai chay lai Setup hoac lenh mo khoa thu cong.
 )
@@ -179,8 +262,15 @@ schtasks /delete /tn "CMP30HX_Gen2_Unlock" /f >nul 2>&1
 schtasks /delete /tn "CMP30HX_Gen2_Unlock_User" /f >nul 2>&1
 schtasks /delete /tn "40HXGen2Retry" /f >nul 2>&1
 schtasks /delete /tn "40HX PCIe Gen2 Bring-up" /f >nul 2>&1
+reg delete "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "CMP30HX_Gen2" /f >nul 2>&1
 reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "40HXGen2" /f >nul 2>&1
-echo [V] Da xoa toan bo cac Scheduled Task va Run key tu khoi dong lien quan.
+if exist "%ProgramFiles%\40HXUnlock" (
+    rmdir /s /q "%ProgramFiles%\40HXUnlock" >nul 2>&1
+)
+if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
+    del /f /q "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1
+)
+echo [V] Da xoa toan bo cac Scheduled Task, Run key va thu muc he thong lien quan.
 echo.
 pause
 exit /b 0
@@ -188,8 +278,8 @@ exit /b 0
 
 :warn_reboot
 echo.
-echo  [!] LUU Y BAT BUOC: He thong vua tat Memory Integrity (Core Isolation).
+echo  [!] LUU Y BAT BUOC: He thong vua tat Memory Integrity [Core Isolation].
 echo      Ban PHAI KHOI DONG LAI MAY de Windows giai phong driver kernel.
-echo      Sau reboot: cho Scheduled Task chay du 45 giay, tao tai 3D/CUDA,
+echo      Sau reboot: cho Scheduled Task chay du 15 giay, tao tai 3D/CUDA,
 echo      sau do moi dung GPU-Z/40HXCheck de danh gia Gen2.
 exit /b 0

@@ -3,11 +3,12 @@
 # CONG CU CAI DAT TU DONG GEN2 X16 CHO NVIDIA CMP 30HX (TU116) TREN LINUX (AIO)
 # Ho tro: Ubuntu, Debian, HiveOS, RaveOS, Fedora, Arch Linux, v.v.
 # Tac gia: ngthaihoc (https://github.com/ngthaihoc/CMP30HXmodtoGEN2)
+# Phien ban: 3.1.0
 # ==============================================================================
 
 set -uo pipefail
 
-VERSION="3.0.0"
+VERSION="3.1.0"
 SYSTEMD_SVC_NAME="cmp30hx-gen2-unlock.service"
 SYSTEMD_SVC_PATH="/etc/systemd/system/${SYSTEMD_SVC_NAME}"
 BIN_INSTALL_PATH="/usr/local/bin/cmp30hx-unlock"
@@ -29,6 +30,20 @@ else
     C_BLUE=""
     C_RED=""
 fi
+
+# ------------------------------------------------------------------------------
+# Ham tien ich: Chuyen doi chuoi hex sang thap phan an toan (tranh loi syntax bash)
+# ------------------------------------------------------------------------------
+parse_hex() {
+    local raw="${1:-}"
+    local clean
+    clean=$(echo "${raw}" | tr -dc '0-9a-fA-F')
+    if [[ -z "${clean}" ]]; then
+        echo "0"
+    else
+        echo "$((16#$clean))"
+    fi
+}
 
 # ------------------------------------------------------------------------------
 # Kiem tra quyen root / sudo
@@ -80,32 +95,35 @@ check_dependencies() {
 }
 
 # ------------------------------------------------------------------------------
-# Tim offset cua PCIe Capability (Cap ID 0x10)
+# Tim offset cua PCIe Capability (Cap ID 0x10) - Kiem tra an toan gia tri tra ve
 # ------------------------------------------------------------------------------
 get_pcie_cap_offset() {
     local bdf="$1"
-    # Truong hop 1: setpci ho tro truc tiep alias CAP_EXP
-    if setpci -s "${bdf}" CAP_EXP+0x00.b >/dev/null 2>&1; then
+    # Truong hop 1: setpci ho tro truc tiep alias CAP_EXP va doc dung Cap ID 0x10 (16)
+    local test_exp
+    test_exp=$(setpci -s "${bdf}" CAP_EXP+0x00.b 2>/dev/null || true)
+    if [[ "$(parse_hex "${test_exp}")" -eq 16 ]]; then
         echo "CAP_EXP"
         return 0
     fi
 
-    # Truong hop 2: Quet danh sach PCI Capabilities thu cong
+    # Truong hop 2: Quet danh sach PCI Capabilities thu cong tu offset 0x34
     local ptr
-    ptr=$(setpci -s "${bdf}" 0x34.b 2>/dev/null || echo "00")
-    local cur=$((16#$ptr))
+    ptr=$(setpci -s "${bdf}" 0x34.b 2>/dev/null || true)
+    local cur
+    cur=$(parse_hex "${ptr}")
     local safety=0
 
     while [[ ${cur} -gt 0 && ${cur} -lt 256 && ${safety} -lt 48 ]]; do
-        local cap_id
-        cap_id=$(setpci -s "${bdf}" "${cur}".b 2>/dev/null || echo "00")
-        if [[ "$((16#$cap_id))" -eq 16 ]]; then # 0x10 = PCI Express
+        local cap_id_raw
+        cap_id_raw=$(setpci -s "${bdf}" "$(printf "%x" "${cur}")".b 2>/dev/null || true)
+        if [[ "$(parse_hex "${cap_id_raw}")" -eq 16 ]]; then # 0x10 = PCI Express
             printf "0x%02x\n" "${cur}"
             return 0
         fi
-        local next_ptr
-        next_ptr=$(setpci -s "${bdf}" "$((cur + 1))".b 2>/dev/null || echo "00")
-        cur=$((16#$next_ptr))
+        local next_ptr_raw
+        next_ptr_raw=$(setpci -s "${bdf}" "$(printf "%x" "$((cur + 1))")".b 2>/dev/null || true)
+        cur=$(parse_hex "${next_ptr_raw}")
         safety=$((safety + 1))
     done
 
@@ -178,6 +196,7 @@ disable_aspm() {
 
 # ------------------------------------------------------------------------------
 # Buoc 2: Inject MMIO BAR0 (XVE_OVR, LINK_CONFIG_0, PRIV_MISC_1, LNKCAP/LNKCTL2)
+# Su dung Python mmap (hoac lseek fallback) dam bao ghi atomic 32-bit Dword
 # ------------------------------------------------------------------------------
 inject_bar0_mmio() {
     local gpu_bdf="$1"
@@ -199,40 +218,44 @@ inject_bar0_mmio() {
 
     echo -e "      [*] Dang kiem tra va ghi de thanh ghi BAR0 MMIO (TU116 XVE)..."
     python3 - <<EOF
-import sys, os, struct
+import sys, os, struct, mmap
 
 res_path = "${res0}"
+fd = -1
+mm = None
 try:
     fd = os.open(res_path, os.O_RDWR | os.O_SYNC)
-except Exception as e:
-    print(f"      [!] Khong the mo {res_path} ({e}); co the driver kernel dang lock IORESOURCE_BUSY.")
-    sys.exit(0)
-
-try:
-    # 1. Doc BOOT_0 @ offset 0x0
-    os.lseek(fd, 0, os.SEEK_SET)
-    boot0_raw = os.read(fd, 4)
-    if len(boot0_raw) < 4:
-        print("      [!] Khong doc duoc BOOT_0 tu BAR0.")
-        sys.exit(0)
-    boot0 = struct.unpack('<I', boot0_raw)[0]
-
-    # TU116 / TU10x family byte la 0x16 (0x16xxxxxx)
-    if (boot0 & 0xFF000000) != 0x16000000:
-        print(f"      [!] BOOT_0=0x{boot0:08X} khong phai TU116/TU10x (ky vong 0x16xxxxxx), bo qua ghi PL0.")
-        sys.exit(0)
-
-    print(f"      [OK] BAR0 hop le (BOOT_0=0x{boot0:08X}, Nhan TU116).")
+    # Thu dung mmap de ghi dung memory-mapped IO (atomic 32-bit Dword)
+    try:
+        mm = mmap.mmap(fd, 0x100000, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE)
+    except Exception:
+        mm = None
 
     def read_u32(off):
+        if mm is not None:
+            return struct.unpack_from('<I', mm, off)[0]
         os.lseek(fd, off, os.SEEK_SET)
-        return struct.unpack('<I', os.read(fd, 4))[0]
+        raw = os.read(fd, 4)
+        if len(raw) < 4:
+            raise IOError("EOF reading offset 0x%X" % off)
+        return struct.unpack('<I', raw)[0]
 
     def write_u32(off, val):
+        if mm is not None:
+            struct.pack_into('<I', mm, off, val)
+            return
         os.lseek(fd, off, os.SEEK_SET)
         os.write(fd, struct.pack('<I', val))
 
-    # Ghi thanh ghi XVE & Shadow Override
+    boot0 = read_u32(0x0)
+    if (boot0 & 0xFF000000) != 0x16000000:
+        print(f"      [!] BOOT_0=0x{boot0:08X} khong phai TU116/TU10x (ky vong 0x16xxxxxx), bo qua inject MMIO.")
+        sys.exit(0)
+
+    method = "mmap" if mm is not None else "lseek"
+    print(f"      [OK] BAR0 hop le (BOOT_0=0x{boot0:08X}, Nhan TU116, che do {method}).")
+
+    # 1. Ghi XVE hardware override va cau hinh (tuong dong Windows 40hxcore)
     # 0x0008841C: PRIV_MISC_1 (tat write protection shadow registers)
     write_u32(0x0008841C, 0xE0B42D00)
     # 0x0008872C: XVE_OVR = 6 (Gen2 override)
@@ -244,6 +267,7 @@ try:
     # 0x0008872C: XVE_OVR confirm
     write_u32(0x0008872C, 0x00000006)
 
+    # 2. Ghi thanh ghi PCIe Capability shadow
     # LNKCAP @ 0x088084 (dat Max Link Speed = Gen2)
     orig_cap = read_u32(0x00088084)
     write_u32(0x00088084, (orig_cap & 0xFFFFFFF0) | 2)
@@ -258,11 +282,24 @@ try:
     orig_ctl2 = read_u32(0x000880A8)
     write_u32(0x000880A8, (orig_ctl2 & 0xFFFFFFF0) | 2)
 
-    print("      [OK] Da inject thanh ghi BAR0 MMIO (XVE_OVR, LNKCAP/CTL2).")
+    # 3. Kiem tra PHY Lane 0 status (0x08C4B0)
+    try:
+        phy_l0 = read_u32(0x0008C4B0)
+        phy_desc = "Gen2 (5.0 GT/s)" if (phy_l0 & 0xFF000000) == 0x50000000 else ("Gen1 (2.5 GT/s)" if (phy_l0 & 0xFF000000) == 0x25000000 else "Khac")
+        print(f"      [OK] Da inject MMIO BAR0. PHY Lane 0: 0x{phy_l0:08X} ({phy_desc}).")
+    except Exception:
+        print("      [OK] Da inject thanh ghi BAR0 MMIO (XVE_OVR, LNKCAP/CTL2).")
+
 except Exception as e:
-    print(f"      [!] Loi khi thao tac MMIO BAR0: {e}")
+    print(f"      [!] Khong the can thiep BAR0 MMIO: {e}")
+    print("          (Driver nvidia co the dang khoa resource0; se tiep tuc dieu khien qua Root Port & setpci).")
 finally:
-    os.close(fd)
+    if mm is not None:
+        try: mm.close()
+        except Exception: pass
+    if fd >= 0:
+        try: os.close(fd)
+        except Exception: pass
 EOF
 }
 
@@ -295,49 +332,59 @@ unlock_gpu_pcie() {
     inject_bar0_mmio "${gpu_bdf}"
 
     # 2. Cai dat Target Link Speed = Gen2 (TLS=2) tren GPU LNKCTL2 (Cap + 0x30)
+    local cur_gpu_ctl2_raw
+    cur_gpu_ctl2_raw=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x30.w 2>/dev/null || true)
     local cur_gpu_ctl2
-    cur_gpu_ctl2=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x30.w 2>/dev/null || echo "0000")
+    cur_gpu_ctl2=$(parse_hex "${cur_gpu_ctl2_raw}")
     local new_gpu_ctl2
-    new_gpu_ctl2=$(printf "%04x" $(( (16#$cur_gpu_ctl2 & ~0xF) | 2 )))
+    new_gpu_ctl2=$(printf "%04x" $(( (cur_gpu_ctl2 & ~0xF) | 2 )))
     setpci -s "${gpu_bdf}" "${gpu_cap}"+0x30.w="${new_gpu_ctl2}" 2>/dev/null || true
-    echo -e "    [OK] GPU LNKCTL2 TLS -> Gen2 (0x${cur_gpu_ctl2} -> 0x${new_gpu_ctl2})"
+    echo -e "    [OK] GPU LNKCTL2 TLS -> Gen2 (0x$(printf "%04x" ${cur_gpu_ctl2}) -> 0x${new_gpu_ctl2})"
 
     # 3. Cai dat Target Link Speed = Gen2 (TLS=2) tren Root Port LNKCTL2
     if [[ -n "${root_bdf}" && -n "${root_cap}" ]]; then
+        local cur_root_ctl2_raw
+        cur_root_ctl2_raw=$(setpci -s "${root_bdf}" "${root_cap}"+0x30.w 2>/dev/null || true)
         local cur_root_ctl2
-        cur_root_ctl2=$(setpci -s "${root_bdf}" "${root_cap}"+0x30.w 2>/dev/null || echo "0000")
+        cur_root_ctl2=$(parse_hex "${cur_root_ctl2_raw}")
         local new_root_ctl2
-        new_root_ctl2=$(printf "%04x" $(( (16#$cur_root_ctl2 & ~0xF) | 2 )))
+        new_root_ctl2=$(printf "%04x" $(( (cur_root_ctl2 & ~0xF) | 2 )))
         setpci -s "${root_bdf}" "${root_cap}"+0x30.w="${new_root_ctl2}" 2>/dev/null || true
-        echo -e "    [OK] Root Port LNKCTL2 TLS -> Gen2 (0x${cur_root_ctl2} -> 0x${new_root_ctl2})"
+        echo -e "    [OK] Root Port LNKCTL2 TLS -> Gen2 (0x$(printf "%04x" ${cur_root_ctl2}) -> 0x${new_root_ctl2})"
     fi
 
     # 4. Toi uu Max Read Request Size (MRRS) len 512 Bytes (DEVCTL, Cap + 0x08)
     # Bits [14:12] = 010b = 512B (2 << 12 = 0x2000)
+    local cur_devctl_raw
+    cur_devctl_raw=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x08.w 2>/dev/null || true)
     local cur_devctl
-    cur_devctl=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x08.w 2>/dev/null || echo "0000")
-    local cur_mrrs=$(( (16#$cur_devctl >> 12) & 0x7 ))
+    cur_devctl=$(parse_hex "${cur_devctl_raw}")
+    local cur_mrrs=$(( (cur_devctl >> 12) & 0x7 ))
     if [[ ${cur_mrrs} -lt 2 ]]; then
         local new_devctl
-        new_devctl=$(printf "%04x" $(( (16#$cur_devctl & ~0x7000) | 0x2000 )))
+        new_devctl=$(printf "%04x" $(( (cur_devctl & ~0x7000) | 0x2000 )))
         setpci -s "${gpu_bdf}" "${gpu_cap}"+0x08.w="${new_devctl}" 2>/dev/null || true
-        echo -e "    [OK] Tối ưu MRRS GPU: 128B -> 512B (DEVCTL: 0x${cur_devctl} -> 0x${new_devctl})"
+        echo -e "    [OK] Tối ưu MRRS GPU: 128B -> 512B (DEVCTL: 0x$(printf "%04x" ${cur_devctl}) -> 0x${new_devctl})"
     else
-        echo -e "    [OK] MRRS GPU hien tai da toi uu (>= 512B, DEVCTL=0x${cur_devctl})"
+        echo -e "    [OK] MRRS GPU hien tai da toi uu (>= 512B, DEVCTL=0x$(printf "%04x" ${cur_devctl}))"
     fi
 
-    # 5. Khoi phuc / Tat ASPM tren LNKCTL (Cap + 0x10) va dat Common Clock Configuration (bit 6 = 1)
+    # 5. Khoi phuc / Tat ASPM tren LNKCTL (Cap + 0x10) va bat Common Clock (bit 6) + Extended Synch (bit 8) = 0x0140
+    local cur_gpu_lnkctl_raw
+    cur_gpu_lnkctl_raw=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x10.w 2>/dev/null || true)
     local cur_gpu_lnkctl
-    cur_gpu_lnkctl=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x10.w 2>/dev/null || echo "0000")
+    cur_gpu_lnkctl=$(parse_hex "${cur_gpu_lnkctl_raw}")
     local new_gpu_lnkctl
-    new_gpu_lnkctl=$(printf "%04x" $(( (16#$cur_gpu_lnkctl & ~0x3) | 0x0040 )))
+    new_gpu_lnkctl=$(printf "%04x" $(( (cur_gpu_lnkctl & ~0x3) | 0x0140 )))
     setpci -s "${gpu_bdf}" "${gpu_cap}"+0x10.w="${new_gpu_lnkctl}" 2>/dev/null || true
 
     if [[ -n "${root_bdf}" && -n "${root_cap}" ]]; then
+        local cur_root_lnkctl_raw
+        cur_root_lnkctl_raw=$(setpci -s "${root_bdf}" "${root_cap}"+0x10.w 2>/dev/null || true)
         local cur_root_lnkctl
-        cur_root_lnkctl=$(setpci -s "${root_bdf}" "${root_cap}"+0x10.w 2>/dev/null || echo "0000")
+        cur_root_lnkctl=$(parse_hex "${cur_root_lnkctl_raw}")
         local new_root_lnkctl
-        new_root_lnkctl=$(printf "%04x" $(( (16#$cur_root_lnkctl & ~0x3) | 0x0040 )))
+        new_root_lnkctl=$(printf "%04x" $(( (cur_root_lnkctl & ~0x3) | 0x0140 )))
         setpci -s "${root_bdf}" "${root_cap}"+0x10.w="${new_root_lnkctl}" 2>/dev/null || true
     fi
 
@@ -350,31 +397,37 @@ unlock_gpu_pcie() {
         local target_cap="${gpu_cap}"
         local tag="GPU"
 
+        # Uu tien phat xung retrain tu Root Port truoc (attempt le) vi Root Port dieu khien LTSSM
         if [[ $((attempt % 2)) -ne 0 && -n "${root_bdf}" && -n "${root_cap}" ]]; then
             target_bdf="${root_bdf}"
             target_cap="${root_cap}"
             tag="ROOT"
         fi
 
-        # Nhip phat retrain: Xoa bit 5 -> sleep -> Dat bit 5
+        # Nhip phat retrain: Xoa bit 5 -> sleep 300ms -> Dat bit 5 -> sleep 2.2s
+        local ctl_val_raw
+        ctl_val_raw=$(setpci -s "${target_bdf}" "${target_cap}"+0x10.w 2>/dev/null || true)
         local ctl_val
-        ctl_val=$(setpci -s "${target_bdf}" "${target_cap}"+0x10.w 2>/dev/null || echo "0000")
+        ctl_val=$(parse_hex "${ctl_val_raw}")
         local ctl_clear
-        ctl_clear=$(printf "%04x" $(( 16#$ctl_val & ~0x0020 )))
+        ctl_clear=$(printf "%04x" $(( ctl_val & ~0x0020 )))
         setpci -s "${target_bdf}" "${target_cap}"+0x10.w="${ctl_clear}" 2>/dev/null || true
-        sleep 0.2
+        sleep 0.3
 
         local ctl_set
-        ctl_set=$(printf "%04x" $(( 16#$ctl_clear | 0x0020 )))
+        ctl_set=$(printf "%04x" $(( (ctl_val & ~0x0020) | 0x0020 )))
         setpci -s "${target_bdf}" "${target_cap}"+0x10.w="${ctl_set}" 2>/dev/null || true
 
-        sleep 1.2
+        # Cho 2.2 giay de LTSSM PCIe thoa thuan toc do (tuong dong ban Windows)
+        sleep 2.2
 
         # Doc lai toc do hien tai tu LNKSTA (Cap + 0x12)
+        local cur_lnksta_raw
+        cur_lnksta_raw=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x12.w 2>/dev/null || true)
         local cur_lnksta
-        cur_lnksta=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x12.w 2>/dev/null || echo "0000")
-        local cur_speed=$(( 16#$cur_lnksta & 0xF ))
-        local cur_width=$(( (16#$cur_lnksta >> 4) & 0x3F ))
+        cur_lnksta=$(parse_hex "${cur_lnksta_raw}")
+        local cur_speed=$(( cur_lnksta & 0xF ))
+        local cur_width=$(( (cur_lnksta >> 4) & 0x3F ))
 
         if [[ ${cur_speed} -ge 2 ]]; then
             echo -e "    ${C_GREEN}[V] Luot #${attempt} (${tag}): DA DAT GEN${cur_speed} x${cur_width}!${C_RESET}"
@@ -386,7 +439,22 @@ unlock_gpu_pcie() {
         attempt=$((attempt + 1))
     done
 
-    return 0
+    # Doc lai ket qua cuoi cung
+    local final_sta_raw
+    final_sta_raw=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x12.w 2>/dev/null || true)
+    local final_speed=$(( $(parse_hex "${final_sta_raw}") & 0xF ))
+
+    local final_ctl2_raw
+    final_ctl2_raw=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x30.w 2>/dev/null || true)
+    local final_tls=$(( $(parse_hex "${final_ctl2_raw}") & 0xF ))
+
+    if [[ ${final_speed} -ge 2 ]]; then
+        return 0
+    elif [[ ${final_tls} -ge 2 ]]; then
+        return 2  # Da cau hinh TLS=2, link co the tam o Gen1 do che do tiet kiem dien khi idle
+    else
+        return 1  # That bai hoan toan
+    fi
 }
 
 # ------------------------------------------------------------------------------
@@ -405,13 +473,13 @@ install_systemd_service() {
         echo -e "      [OK] Da sao chep script den: ${BIN_INSTALL_PATH}"
     fi
 
-    # Tao file systemd service
+    # Tao file systemd service (chay truoc display-manager de tranh xung dot driver)
     cat <<EOF > "${SYSTEMD_SVC_PATH}"
 [Unit]
 Description=NVIDIA CMP 30HX PCIe Gen2 x16 Unlock Service
-After=network.target multi-user.target
-Before=graphical.target
 DefaultDependencies=no
+After=local-fs.target systemd-modules-load.service
+Before=display-manager.service graphical.target multi-user.target
 
 [Service]
 Type=oneshot
@@ -478,23 +546,64 @@ show_status() {
     echo -e "${C_BOLD}        TRANG THAI PCIE LINK CUA NVIDIA CMP 30HX / 40HX        ${C_RESET}"
     echo -e "${C_BOLD}================================================================${C_RESET}"
 
-    local gpus
-    gpus=$(lspci -d 10de:2189 2>/dev/null | awk '{print $1}')
-    if [[ -z "${gpus}" ]]; then
-        # Kiem tra ca 40HX (10de:1f0b)
-        gpus=$(lspci -d 10de:1f0b 2>/dev/null | awk '{print $1}')
+    local gpus=()
+    while IFS= read -r line; do
+        if [[ -n "${line}" ]]; then
+            gpus+=("${line}")
+        fi
+    done < <(lspci -d 10de:2189 2>/dev/null | awk '{print $1}')
+
+    if [[ ${#gpus[@]} -eq 0 ]]; then
+        while IFS= read -r line; do
+            if [[ -n "${line}" ]]; then
+                gpus+=("${line}")
+            fi
+        done < <(lspci -d 10de:1f0b 2>/dev/null | awk '{print $1}')
     fi
 
-    if [[ -z "${gpus}" ]]; then
-        echo -e "${C_YELLOW}[!] Khong tim thay card NVIDIA CMP 30HX (10de:2189) tren may!${C_RESET}"
+    if [[ ${#gpus[@]} -eq 0 ]]; then
+        echo -e "${C_YELLOW}[!] Khong tim thay card NVIDIA CMP 30HX (10de:2189) hoac 40HX (10de:1f0b)!${C_RESET}"
         exit 0
     fi
 
-    for gpu in ${gpus}; do
+    for gpu in "${gpus[@]}"; do
         echo -e "\n${C_BLUE}--- GPU BDF: ${gpu} ---${C_RESET}"
         lspci -s "${gpu}"
         echo ""
-        lspci -s "${gpu}" -vv 2>/dev/null | grep -E "LnkCap:|LnkCtl:|LnkSta:|DevCtl:" | while read -r line; do
+
+        local cap
+        cap=$(get_pcie_cap_offset "${gpu}")
+        if [[ -n "${cap}" ]]; then
+            local sta_raw
+            sta_raw=$(setpci -s "${gpu}" "${cap}"+0x12.w 2>/dev/null || true)
+            local speed=$(( $(parse_hex "${sta_raw}") & 0xF ))
+            local width=$(( ($(parse_hex "${sta_raw}") >> 4) & 0x3F ))
+
+            local ctl2_raw
+            ctl2_raw=$(setpci -s "${gpu}" "${cap}"+0x30.w 2>/dev/null || true)
+            local tls=$(( $(parse_hex "${ctl2_raw}") & 0xF ))
+
+            local devctl_raw
+            devctl_raw=$(setpci -s "${gpu}" "${cap}"+0x08.w 2>/dev/null || true)
+            local mrrs_val=$(( ($(parse_hex "${devctl_raw}") >> 12) & 0x7 ))
+            local mrrs_bytes=$(( 128 << mrrs_val ))
+
+            local lnkctl_raw
+            lnkctl_raw=$(setpci -s "${gpu}" "${cap}"+0x10.w 2>/dev/null || true)
+            local aspm_bits=$(( $(parse_hex "${lnkctl_raw}") & 0x3 ))
+            local aspm_str="Tat (Disabled)"
+            if [[ ${aspm_bits} -eq 1 ]]; then aspm_str="L0s Bat"; elif [[ ${aspm_bits} -eq 2 ]]; then aspm_str="L1 Bat"; elif [[ ${aspm_bits} -eq 3 ]]; then aspm_str="L0s & L1 Bat"; fi
+
+            echo -e "  - Link Speed hien tai    : Gen${speed} (${speed}.0 GT/s)"
+            echo -e "  - Link Width hien tai    : x${width}"
+            echo -e "  - Target Link Speed (TLS): Gen${tls}"
+            echo -e "  - Max Read Request Size  : ${mrrs_bytes} Bytes (DEVCTL: 0x${devctl_raw})"
+            echo -e "  - PCIe ASPM trang thai   : ${aspm_str}"
+        fi
+
+        echo ""
+        echo "  Chi tiet thanh ghi PCIe (lspci):"
+        lspci -s "${gpu}" -vv 2>/dev/null | grep -E "LnkCap:|LnkCtl:|LnkSta:|DevCtl:|LnkCtl2:" | while read -r line; do
             echo "    ${line}"
         done
     done
@@ -581,10 +690,22 @@ main() {
 
     echo -e "      ${C_GREEN}[OK]${C_RESET} Phat hien ${#gpus[@]} card CMP tren he thong: ${gpus[*]}"
 
-    # 3 & 4. Tien hanh mo khoa tung card
+    # 3 & 4. Tien hanh mo khoa tung card va thu thap ket qua
     echo -e "\n${C_BOLD}[3/6 & 4/6] Dang mo khoa Gen2 x16 va toi uu MRRS 512B cho tung card...${C_RESET}"
+    local count_gen2=0
+    local count_idle=0
+    local count_fail=0
+
     for gpu_bdf in "${gpus[@]}"; do
-        unlock_gpu_pcie "${gpu_bdf}"
+        local res=0
+        unlock_gpu_pcie "${gpu_bdf}" || res=$?
+        if [[ ${res} -eq 0 ]]; then
+            count_gen2=$((count_gen2 + 1))
+        elif [[ ${res} -eq 2 ]]; then
+            count_idle=$((count_idle + 1))
+        else
+            count_fail=$((count_fail + 1))
+        fi
     done
 
     # 5. Cai dat Systemd Service
@@ -601,14 +722,14 @@ main() {
         local cap
         cap=$(get_pcie_cap_offset "${gpu_bdf}")
         if [[ -n "${cap}" ]]; then
-            local sta
-            sta=$(setpci -s "${gpu_bdf}" "${cap}"+0x12.w 2>/dev/null || echo "0000")
-            local speed=$(( 16#$sta & 0xF ))
-            local width=$(( (16#$sta >> 4) & 0x3F ))
+            local sta_raw
+            sta_raw=$(setpci -s "${gpu_bdf}" "${cap}"+0x12.w 2>/dev/null || true)
+            local speed=$(( $(parse_hex "${sta_raw}") & 0xF ))
+            local width=$(( ($(parse_hex "${sta_raw}") >> 4) & 0x3F ))
 
-            local ctl2
-            ctl2=$(setpci -s "${gpu_bdf}" "${cap}"+0x30.w 2>/dev/null || echo "0000")
-            local tls=$(( 16#$ctl2 & 0xF ))
+            local ctl2_raw
+            ctl2_raw=$(setpci -s "${gpu_bdf}" "${cap}"+0x30.w 2>/dev/null || true)
+            local tls=$(( $(parse_hex "${ctl2_raw}") & 0xF ))
 
             if [[ ${speed} -ge 2 ]]; then
                 echo -e "  [${gpu_bdf}] ${C_GREEN}${C_BOLD}[V] HOAN TAT:${C_RESET} PCIe Gen${speed} x${width} (~6.4 GB/s)"
@@ -623,12 +744,27 @@ main() {
 
     echo -e "${C_BOLD}================================================================${C_RESET}"
     if [[ ${is_daemon} -eq 0 ]]; then
-        echo -e "${C_GREEN}[V] CAI DAT HOAN TAT TREN LINUX!${C_RESET}"
-        echo "  - Systemd Service se tu dong chay moi khi khoi dong he thong."
-        echo "  - Khi ranh, PCIe co the ha ve Gen1 x16 de tiet kiem dien."
-        echo "  - De kiem tra trang thai bat cu luc nao, chay: sudo $0 --status"
-        echo ""
+        if [[ ${count_fail} -eq 0 ]]; then
+            echo -e "${C_GREEN}[V] CAI DAT HOAN TAT TREN LINUX!${C_RESET}"
+            echo "  - Systemd Service se tu dong chay moi khi khoi dong he thong."
+            echo "  - Khi ranh, PCIe co the ha ve Gen1 x16 de tiet kiem dien."
+            echo "  - De kiem tra trang thai bat cu luc nao, chay: sudo $0 --status"
+            echo ""
+            exit 0
+        else
+            echo -e "${C_RED}[!] CANH BAO: Co ${count_fail}/${#gpus[@]} card chua the thiet lap TLS Gen2.${C_RESET}"
+            echo "  - Vui long kiem tra lai khe cam PCIe, tiep xuc chan, hoac BIOS tren bo mach chu."
+            echo "  - Chay: sudo $0 --status de kiem tra chi tiet."
+            echo ""
+            exit 1
+        fi
     fi
+
+    # Neu la daemon mode
+    if [[ ${count_fail} -gt 0 ]]; then
+        exit 1
+    fi
+    exit 0
 }
 
 main "$@"
