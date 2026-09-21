@@ -3,32 +3,38 @@ setlocal
 chcp 65001 >nul
 title CMP 30HX Gen2 x16 Auto Setup
 
-:: Kiem tra quyen Administrator (UAC da tang phong thu)
-set "IS_ADMIN=0"
-fltmc >nul 2>&1 && set "IS_ADMIN=1"
-if "%IS_ADMIN%"=="0" (
-    fsutil dirty query %systemdrive% >nul 2>&1 && set "IS_ADMIN=1"
-)
-if "%IS_ADMIN%"=="0" (
-    copy /b nul "%SystemRoot%\System32\__admintest_%random%.tmp" >nul 2>&1 && (
-        del "%SystemRoot%\System32\__admintest_%random%.tmp" >nul 2>&1
-        set "IS_ADMIN=1"
+:: Cho phep bo qua kiem tra quyen neu truyen co -noadmin hoac /noadmin
+if /i "%~1"=="-noadmin" set "IS_ADMIN=1"
+if /i "%~1"=="/noadmin" set "IS_ADMIN=1"
+
+:: Kiem tra quyen Administrator (UAC da tang phong thu, thay the net session cu)
+if not defined IS_ADMIN (
+    set "IS_ADMIN=0"
+    fltmc >nul 2>&1 && set "IS_ADMIN=1"
+    if "%IS_ADMIN%"=="0" (
+        fsutil dirty query %systemdrive% >nul 2>&1 && set "IS_ADMIN=1"
+    )
+    if "%IS_ADMIN%"=="0" (
+        copy /b nul "%SystemRoot%\System32\__admintest_%random%.tmp" >nul 2>&1 && (
+            del "%SystemRoot%\System32\__admintest_%random%.tmp" >nul 2>&1
+            set "IS_ADMIN=1"
+        )
     )
 )
 
 if "%IS_ADMIN%"=="0" (
     echo [!] Dang yeu cau quyen Administrator [UAC]...
-    if "%~1"=="" (
-        powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -WorkingDirectory '%~dp0' -Verb RunAs" >nul 2>&1
-    ) else (
-        powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -ArgumentList '%*' -WorkingDirectory '%~dp0' -Verb RunAs" >nul 2>&1
-    )
+    set "CURRENT_SCRIPT=%~f0"
+    set "CURRENT_DIR=%~dp0"
+    set "SCRIPT_ARGS=%*"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$script=$env:CURRENT_SCRIPT; $dir=$env:CURRENT_DIR; $args=$env:SCRIPT_ARGS; $procArgs = if ($args) { '/c `\"' + $script + '`\" ' + $args } else { '/c `\"' + $script + '`\"' }; Start-Process -FilePath $env:ComSpec -ArgumentList $procArgs -WorkingDirectory $dir -Verb RunAs" >nul 2>&1
     if errorlevel 1 (
         echo.
         echo ================================================================
-        echo [X] LOI: Khong the tu dong yeu cau quyen Administrator.
+        echo [X] LOI: Khong the tu dong yeu cau quyen Administrator qua UAC.
         echo [!] Vui long nhap chuot phai vao file Setup_CMP30HX_WindowsAIO.bat
         echo     va chon 'Run as administrator' [Chay voi tu cach quan tri vien].
+        echo     Hoac chay qua CMD Admin: Setup_CMP30HX_WindowsAIO.bat -noadmin
         echo ================================================================
         echo.
         pause
