@@ -3,9 +3,26 @@ setlocal
 chcp 65001 >nul
 title CMP 30HX Gen2 x16 Auto Setup
 
-:: Cho phep bo qua kiem tra quyen neu truyen co -noadmin hoac /noadmin
-if /i "%~1"=="-noadmin" set "IS_ADMIN=1"
-if /i "%~1"=="/noadmin" set "IS_ADMIN=1"
+:: Phan tich toan bo tham so dong lenh
+set "IS_MOCK=0"
+set "NO_CHECK=0"
+set "NO_WAIT=0"
+for %%a in (%*) do (
+    if /i "%%~a"=="-noadmin" set "IS_ADMIN=1"
+    if /i "%%~a"=="/noadmin" set "IS_ADMIN=1"
+    if /i "%%~a"=="-test" set "IS_MOCK=1"
+    if /i "%%~a"=="/test" set "IS_MOCK=1"
+    if /i "%%~a"=="-mock" set "IS_MOCK=1"
+    if /i "%%~a"=="/mock" set "IS_MOCK=1"
+    if /i "%%~a"=="-nocheck" set "NO_CHECK=1"
+    if /i "%%~a"=="/nocheck" set "NO_CHECK=1"
+    if /i "%%~a"=="-nowait" set "NO_WAIT=1"
+    if /i "%%~a"=="-uninstall" set "DO_UNINSTALL=1"
+    if /i "%%~a"=="/uninstall" set "DO_UNINSTALL=1"
+    if /i "%%~a"=="-u" set "DO_UNINSTALL=1"
+    if /i "%%~a"=="/u" set "DO_UNINSTALL=1"
+)
+if "%DO_UNINSTALL%"=="1" goto :uninstall
 
 :: Kiem tra quyen Administrator (UAC da tang phong thu, thay the net session cu)
 if not defined IS_ADMIN (
@@ -44,13 +61,16 @@ if "%IS_ADMIN%"=="0" (
 
 cd /d "%~dp0"
 
-if /i "%~1"=="-uninstall" goto :uninstall
-if /i "%~1"=="/u" goto :uninstall
-if /i "%~2"=="-uninstall" goto :uninstall
-if /i "%~2"=="/u" goto :uninstall
-
 echo ================================================================
-echo    CONG CU CAI DAT TU DONG GEN2 X16 CHO NVIDIA CMP 30HX (TU116)
+if "%IS_MOCK%"=="1" (
+    echo    CONG CU KIEM THU MO PHONG [MOCK TEST] GEN2 X16 CHO CMP 30HX
+    echo    - Mo phong GPU CMP 30HX [TU116] ket Gen1 o lan goi dau
+    echo    - Kich hoat chu trinh Soft Reset tu dong qua PnP
+    echo    - Mo phong khoi phuc thanh cong Gen2 x16 [5.0 GT/s] o lan 2
+    echo    - He thong: Powercfg, ASPM, Blocklist, Task SYSTEM chay that 100%%
+) else (
+    echo    CONG CU CAI DAT TU DONG GEN2 X16 CHO NVIDIA CMP 30HX (TU116)
+)
 echo ================================================================
 echo.
 
@@ -218,23 +238,38 @@ if "%NEED_REBOOT%"=="1" (
     echo     Buoc hien tai co the khong nap duoc driver kernel; sau khi ket thuc hay reboot truoc khi danh gia.
 )
 echo [5/6] Dang kich hoat Gen2 x16 va toi uu MRRS 512B ngay...
-"%FINAL_INSTALLER%" -gen2-30hx -silent
-if errorlevel 1 (
-    echo       [X] Installer bao loi khi chay [exit code khac 0].
-    echo           Kiem tra driver WinRing0/ThrottleStop, HVCI va quyen Administrator.
+if "%IS_MOCK%"=="1" (
+    echo       [*] [MOCK TEST] Mo phong Installer lan 1: Phat hien CMP 30HX nhung dang bi ket Gen1...
+    if not exist "%ProgramData%\40HXUnlock" mkdir "%ProgramData%\40HXUnlock" >nul 2>&1
+    (
+        echo ==== 40HX Gen2 Ket qua [MOCK TEST - LAN 1] ====
+        echo GPU: NVIDIA CMP 30HX [TU116] [DEV_2189]
+        echo PCIe Link Width: x16
+        echo PCIe Link Speed: GPU TLS=Gen1 [2.5 GT/s]
+        echo Trang thai: chua dat muc tieu Gen2! [Driver mod / iGPU dang giu DMA context]
+        echo Quyen thuc thi: Quan tri vien / SYSTEM
+    ) > "%ProgramData%\40HXUnlock\gen2_status.txt"
     set "UNLOCK_OK=0"
 ) else (
-    set "UNLOCK_OK=1"
-    if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
-        echo       [OK] Chi tiet ket qua tu installer:
-        echo       --------------------------------------------------------
-        type "%ProgramData%\40HXUnlock\gen2_status.txt"
-        echo.
-        echo       --------------------------------------------------------
+    "%FINAL_INSTALLER%" -gen2-30hx -silent
+    if errorlevel 1 (
+        echo       [X] Installer bao loi khi chay [exit code khac 0].
+        echo           Kiem tra driver WinRing0/ThrottleStop, HVCI va quyen Administrator.
+        set "UNLOCK_OK=0"
     ) else (
-        echo       [!] Canh bao: Installer chay xong nhung khong tim thay file gen2_status.txt.
-        echo           Hay chay lai 40HXInstaller.exe -status de kiem tra.
+        set "UNLOCK_OK=1"
     )
+)
+
+if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
+    echo       [OK] Chi tiet ket qua tu installer:
+    echo       --------------------------------------------------------
+    type "%ProgramData%\40HXUnlock\gen2_status.txt"
+    echo.
+    echo       --------------------------------------------------------
+) else (
+    echo       [!] Canh bao: Installer chay xong nhung khong tim thay file gen2_status.txt.
+    echo           Hay chay lai 40HXInstaller.exe -status de kiem tra.
 )
 
 :: Kiem tra chu trinh Soft Reset neu GPU TLS bi ket o Gen1 (dac biet tren he thong GPU kep iGPU + CMP 30HX hoac driver mod)
@@ -252,43 +287,73 @@ if "%NEED_DEV_RESET%"=="1" (
     echo       [*] Dang tu dong thuc hien chu trinh Soft Reset [Disable - Enable qua PnP]...
     powershell -NoProfile -ExecutionPolicy Bypass -Command "$devs = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -match 'VEN_10DE&(DEV_2189|DEV_1F0B)' }; if ($devs) { foreach ($d in $devs) { try { pnputil /restart-device $d.InstanceId >$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {} }; Start-Sleep -Seconds 2 } else { Write-Host 'Khong tim thay Instance ID qua PnP' }" >nul 2>&1
     echo       [*] Dang chay lai lenh mo khoa Gen2 sau khi Soft Reset card...
-    "%FINAL_INSTALLER%" -gen2-30hx -silent
-    if not errorlevel 1 (
+    if "%IS_MOCK%"=="1" (
+        echo       [*] [MOCK TEST] Mo phong Installer lan 2: Soft Reset thanh cong, GPU bung Gen2 x16 [5.0 GT/s]!
+        (
+            echo ==== 40HX Gen2 Ket qua [MOCK TEST - LAN 2 SAU SOFT RESET] ====
+            echo GPU: NVIDIA CMP 30HX [TU116] [DEV_2189]
+            echo PCIe Link Width: x16
+            echo PCIe Link Speed: GPU TLS=Gen2 [5.0 GT/s]
+            echo Ket qua: da dat muc tieu Gen2 thanh cong!
+            echo MRRS: 512B [Da toi uu]
+            echo Quyen thuc thi: Quan tri vien / SYSTEM
+        ) > "%ProgramData%\40HXUnlock\gen2_status.txt"
         set "UNLOCK_OK=1"
-        if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
-            echo.
-            echo       [OK] Ket qua sau khi Soft Reset:
-            echo       --------------------------------------------------------
-            type "%ProgramData%\40HXUnlock\gen2_status.txt"
-            echo.
-            echo       --------------------------------------------------------
-        )
+    ) else (
+        "%FINAL_INSTALLER%" -gen2-30hx -silent
+        if not errorlevel 1 set "UNLOCK_OK=1"
+    )
+    if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
+        echo.
+        echo       [OK] Ket qua sau khi Soft Reset:
+        echo       --------------------------------------------------------
+        type "%ProgramData%\40HXUnlock\gen2_status.txt"
+        echo.
+        echo       --------------------------------------------------------
     )
 )
 
 :: 7. Kiem tra trang thai chan doan
 echo.
 echo [6/6] Kiem tra trang thai sau khi mo khoa...
-if exist "%TARGET_CHECK%" (
-    echo [*] Tim thay cong cu chan doan: "%TARGET_CHECK%"
-    echo [*] Dang khoi chay cua so chan doan 40HXCheck...
-    start "" "%TARGET_CHECK%"
+if not "%NO_CHECK%"=="1" (
+    if exist "%TARGET_CHECK%" (
+        echo [*] Tim thay cong cu chan doan: "%TARGET_CHECK%"
+        echo [*] Dang khoi chay cua so chan doan 40HXCheck...
+        start "" "%TARGET_CHECK%"
+    ) else (
+        "%FINAL_INSTALLER%" -status
+    )
 ) else (
-    "%FINAL_INSTALLER%" -status
+    echo [*] Bo qua khoi chay 40HXCheck [-nocheck].
 )
 
 echo.
 echo ================================================================
 if "%UNLOCK_OK%"=="1" (
-    echo  [V] CAI DAT HOAN TAT - Gen2 da duoc cau hinh ben vung.
-    echo  - Da thiet lap da co che: Scheduled Task SYSTEM + Registry Run Key.
-    echo  - Tu dong duy tri Gen2 tren moi lan Boot, Dang nhap va Wake from Sleep!
-    echo.
-    echo  - LUU Y QUAN TRONG VE GEN 1 KHI VUA KHOI DONG / IDLE:
-    echo    + Link PCIe se o Gen1 x16 khi card o che do ranh [Idle Power Saving].
-    echo    + Khi co tai 3D/CUDA/AIDA64/FurMark, card se tu dong bung toc do len Gen2 x16.
-    echo    + Neu GPU-Z bao Gen1: nhap vao dau cham hoi [?] canh Bus Interface de chay Render Test!
-    echo  - Neu sau khi reboot co tai ma GPU van Gen1: kiem tra HVCI, riser, tiep xuc lane va BIOS khe PCIe.
+    if "%IS_MOCK%"=="1" (
+        echo  [V] KIEM THU MO PHONG [MOCK TEST] HOAN TAT MY MAN:
+        echo  - Mo phong phat hien GPU CMP 30HX ket Gen1 o lan chay 1: [THANH CONG].
+        echo  - Tu dong kich hoat chu trinh Soft Reset card qua PnP: [THANH CONG].
+        echo  - Mo phong tai bung toc do Gen2 x16 [5.0 GT/s] o lan chay 2: [THANH CONG].
+        echo  - Toan bo cac buoc he thong da thuc hien that 100%%:
+        echo    + Powercfg: Tat Fast Startup, Hybrid Sleep, PCIe ASPM tat ca Power Plan.
+        echo    + CI Policy: Tat Microsoft Vulnerable Driver Blocklist.
+        echo    + HVCI: Kiem tra trang thai Memory Integrity.
+        echo    + Persistence: Scheduled Task SYSTEM va Registry Run Key duy tri Gen2.
+        echo.
+        echo  - Ban co the dung: Setup_CMP30HX_WindowsAIO.bat -uninstall de don dep sau kiem thu.
+    ) else (
+        echo  [V] CAI DAT HOAN TAT - Gen2 da duoc cau hinh ben vung.
+        echo  - Da thiet lap da co che: Scheduled Task SYSTEM + Registry Run Key.
+        echo  - Tu dong duy tri Gen2 tren moi lan Boot, Dang nhap va Wake from Sleep!
+        echo.
+        echo  - LUU Y QUAN TRONG VE GEN 1 KHI VUA KHOI DONG / IDLE:
+        echo    + Link PCIe se o Gen1 x16 khi card o che do ranh [Idle Power Saving].
+        echo    + Khi co tai 3D/CUDA/AIDA64/FurMark, card se tu dong bung toc do len Gen2 x16.
+        echo    + Neu GPU-Z bao Gen1: nhap vao dau cham hoi [?] canh Bus Interface de chay Render Test!
+        echo  - Neu sau khi reboot co tai ma GPU van Gen1: kiem tra HVCI, riser, tiep xuc lane va BIOS khe PCIe.
+    )
 ) else (
     echo  [X] CAI DAT CHUA HOAN TAT - chua xac nhan duoc Gen2 trong phien hien tai.
     if "%NEED_REBOOT%"=="1" (
@@ -308,7 +373,7 @@ if "%TASK_OK%"=="1" (
 if "%NEED_REBOOT%"=="1" call :warn_reboot
 echo ================================================================
 echo.
-pause
+if not "%NO_WAIT%"=="1" pause
 if "%UNLOCK_OK%"=="1" exit /b 0
 exit /b 1
 
@@ -330,7 +395,7 @@ if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
 )
 echo [V] Da xoa toan bo cac Scheduled Task, Run key va thu muc he thong lien quan.
 echo.
-pause
+if not "%NO_WAIT%"=="1" pause
 exit /b 0
 
 
