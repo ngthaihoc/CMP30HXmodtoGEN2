@@ -93,8 +93,8 @@ schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%CD%\windows-v3.0\release\40HX
 |---|---|
 | `40HXInstaller.exe` | **Giao diện cài đặt và quản lý** (Mặc định mở GUI; hỗ trợ tham số dòng lệnh) |
 | `40HXUninstaller.exe` | **Gỡ cài đặt tự động** (Nhấp đúp $\rightarrow$ Yêu cầu quyền Administrator) |
-| `40HXCheck.exe` | **Chẩn đoán độc lập** (Kiểm tra算力/Hashrate + Tốc độ link PCIe Gen2; tự thu hồi driver sau khi đo) |
-| `OpenCL.exe` | **Kiểm tra算力 (CMP 40HX)** (So sánh hiệu năng FP16/FP32 trước và sau khi mở khoá) |
+| `40HXCheck.exe` | **Chẩn đoán độc lập** (Kiểm tra Hashrate/Năng lực tính toán + Tốc độ link PCIe Gen2; tự thu hồi driver sau khi đo) |
+| `OpenCL.exe` | **Kiểm tra năng lực tính toán (CMP 40HX)** (So sánh hiệu năng FP16/FP32 trước và sau khi mở khoá) |
 | `files\40HXUNLK.EFI` | Firmware EFI mở khoá (Chỉ dành cho CMP 40HX TU106; không nạp cho 30HX) |
 | `WinRing0x64.sys` | Driver truy cập PCI Configuration Space và MMIO |
 

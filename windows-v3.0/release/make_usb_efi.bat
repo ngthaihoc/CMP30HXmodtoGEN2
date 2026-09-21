@@ -1,18 +1,18 @@
 @echo off
 chcp 65001 >nul 2>&1
-title 40HX Unlock - 制作解锁 U 盘 v3.0.0
+title 40HX Unlock - Tao USB boot cuu ho mo khoa v3.0.0
 setlocal EnableDelayedExpansion
 
 rem ============================================================
-rem  CMP 40HX Windows Unlock - U 盘手动引导解锁制作工具 v3.0.0
-rem  用途: 固件看不到 40HX Unlock 启动项 / 引导链异常时的兜底方案
-rem  用法: 双击运行               -> 制作解锁 U 盘
-rem        make_usb_efi.bat /restore -> 还原 U 盘到制作前状态
-rem  注意: 本脚本只写 U 盘, 不改本机硬盘的任何引导项
-rem  详见: README 2.2 节
+rem  CMP 40HX Windows Unlock - Cong cu tao USB boot thu cong v3.0.0
+rem  Muc dich: Du phong khi BIOS/firmware khong thay muc boot 40HX Unlock / loi chuoi boot
+rem  Cach dung: Nhap dup chuot de chay     -> Tao USB mo khoa
+rem             make_usb_efi.bat /restore -> Khoi phuc USB ve trang thai ban dau
+rem  Luu y: Script chi ghi len USB, khong thay doi bat ky muc boot nao tren o cung
+rem  Chi tiet: Xem README muc 2.2
 rem ============================================================
 
-rem ---- 0. 定位解锁 EFI(主流程与还原流程都要用) ----
+rem ---- 0. Dinh vi file EFI mo khoa (dung cho ca quy trinh tao va khoi phuc) ----
 set "SRC=%~dp0files\40HXUNLK.EFI"
 if not exist "%SRC%" set "SRC=%~dp0gen2\40HXUNLK.EFI"
 if not exist "%SRC%" set "SRC=%~dp040HXUNLK.EFI"
@@ -22,17 +22,17 @@ if /i "%~1"=="restore" goto RESTORE
 if /i "%~1"=="/r" goto RESTORE
 
 echo ============================================================
-echo   40HX U 盘手动引导解锁 - 制作工具 v3.0.0
-echo   用途: 固件看不到 40HX Unlock 启动项 / 引导链出问题时,
-echo         把解锁 EFI 拷到 U 盘, 手动从 U 盘引导解锁。
-echo   说明: 本脚本只写 U 盘, 不改本机硬盘的任何引导项。
+echo   40HX - Cong cu tao USB boot mo khoa thu cong v3.0.0
+echo   Muc dich: Khi BIOS khong nhan muc boot 40HX Unlock hoac loi boot,
+echo         sao chep EFI mo khoa vao USB de boot thu cong tu USB.
+echo   Luu y: Script chi ghi len USB, khong sua o cung may tinh.
 echo ============================================================
 echo.
 
-rem ---- 1. 校验解锁 EFI ----
+rem ---- 1. Kiem tra file EFI mo khoa ----
 if not exist "%SRC%" (
-    echo [!!] 找不到 40HXUNLK.EFI ^(应在 files\ 或 gen2\ 目录^)
-    echo      请确认本脚本与发布包放在同一文件夹。
+    echo [!!] Khong tim thay 40HXUNLK.EFI ^(trong thu muc files\ hoac gen2\^)
+    echo      Vui long dam bao script nay nam cung thu muc voi bo phat hanh.
     echo.
     pause
     exit /b 1
@@ -40,16 +40,16 @@ if not exist "%SRC%" (
 set "SRC_SIZE=0"
 for %%F in ("%SRC%") do set "SRC_SIZE=%%~zF"
 if !SRC_SIZE! LSS 65536 (
-    echo [!!] 解锁 EFI 只有 !SRC_SIZE! 字节, 疑似损坏, 已中止。
+    echo [!!] File EFI mo khoa chi co !SRC_SIZE! bytes, nghi ngo bi loi, da dung lai.
     echo.
     pause
     exit /b 1
 )
-echo 解锁 EFI: %SRC%
-echo          大小 !SRC_SIZE! 字节
+echo EFI mo khoa: %SRC%
+echo          Kich thuoc !SRC_SIZE! bytes
 echo.
 
-rem ---- 2. 自动扫描 U 盘(可移动 + 有文件系统) ----
+rem ---- 2. Tu dong quet o USB (Removable + co he thong tep) ----
 set "TMPL=%TEMP%\40hx_usb_list.tmp"
 if exist "%TMPL%" del /f /q "%TMPL%" >nul 2>&1
 powershell -NoProfile -Command "Get-Volume | Where-Object { $_.DriveType -eq 'Removable' -and $_.DriveLetter -and $_.FileSystem } | ForEach-Object { Write-Output ($_.DriveLetter.ToString() + ';' + $_.FileSystem + ';' + $_.DriveType + ';' + [string][math]::Round($_.SizeRemaining/1GB,1)) }" > "%TMPL%" 2>nul
@@ -61,7 +61,7 @@ set "PICK_FREE="
 if exist "%TMPL%" (
     for /f "usebackq tokens=1-4 delims=;" %%a in ("%TMPL%") do (
         set /a CNT+=1
-        echo   候选 !CNT!: %%a:   文件系统=%%b   可用=%%d GB
+        echo   O dia !CNT!: %%a:   Dinh dang=%%b   Trong=%%d GB
         if "!CNT!"=="1" (
             set "PICK=%%a"
             set "PICK_FS=%%b"
@@ -73,28 +73,28 @@ if exist "%TMPL%" (
 
 echo.
 if "%CNT%"=="0" (
-    echo [i] 没有自动识别到可移动磁盘。
-    echo    常见原因: U 盘没插 / 没格式化 / 被识别成本地磁盘。
-    echo    没关系, 下面手动输入盘符即可。
+    echo [i] Khong tu dong phat hien o dia di dong nao.
+    echo    Nguyen nhan: Chua cam USB / chua format / bi nhan dien la o cung local.
+    echo    Khong sao ca, ban co the nhap truc tiep ky tu o dia o ben duoi.
     echo.
 ) else (
-    echo [i] 自动扫描到 !CNT! 个可移动磁盘 ^(上面列出的候选^)。
+    echo [i] Da tu dong quet duoc !CNT! o dia di dong ^(danh sach o tren^).
     echo.
 )
 
-rem ---- 3. 确定盘符(自动选中或手动输入) ----
+rem ---- 3. Xac dinh ky tu o dia (tu dong chon hoac nhap thu cong) ----
 set "DRV=%~1"
 if defined PICK if not defined DRV set "DRV=!PICK!"
 if not defined DRV (
-    set /p "DRV=请输入 U 盘盘符 (只输字母, 例: E) 后回车: "
+    set /p "DRV=Vui long nhap ky tu o USB (chi nhap 1 chu cai, vi du: E) roi Enter: "
 ) else (
     if not "%~1"=="" (
-        rem 命令行传入, 直接使用
+        rem Truyen tu command line, dung truc tiep
     ) else (
         if defined PICK (
-            set /p "DRV=U 盘盘符 (直接回车使用 !PICK!:, 或输入其它字母): "
+            set /p "DRV=Ky tu o USB (nhan Enter de dung !PICK!:, hoac nhap chu cai khac): "
         ) else (
-            set /p "DRV=请输入 U 盘盘符 (只输字母, 例: E) 后回车: "
+            set /p "DRV=Vui long nhap ky tu o USB (chi nhap 1 chu cai, vi du: E) roi Enter: "
         )
     )
 )
@@ -106,7 +106,7 @@ set "DRV=%DRV: =%"
 set "DRV=%DRV:"=%"
 if not defined DRV (
     echo.
-    echo [!!] 未输入盘符, 退出。
+    echo [!!] Chua nhap ky tu o dia, thoat.
     pause
     exit /b 1
 )
@@ -116,24 +116,24 @@ set "USR=%DRV%:"
 
 if not exist "%USR%\" (
     echo.
-    echo [!!] 盘符 %USR% 不存在, 请核对后重试。
+    echo [!!] O dia %USR% khong ton tai, vui long kiem tra va thu lai.
     pause
     exit /b 1
 )
 if /i "%DRV%"=="C" (
     echo.
-    echo [!!] 不能写入系统盘 C:, 请选择 U 盘盘符。
+    echo [!!] Khong duoc phep ghi vao o he thong C:, vui long chon o USB.
     pause
     exit /b 1
 )
 if /i "%USR%"=="%SystemDrive%" (
     echo.
-    echo [!!] %USR% 是系统所在盘, 已中止。
+    echo [!!] %USR% la o chua he dieu hanh, da huy thao tac.
     pause
     exit /b 1
 )
 
-rem ---- 4. 查询该盘的文件系统与类型 ----
+rem ---- 4. Kiem tra dinh dang he thong tep va loai o dia ----
 set "TMPF=%TEMP%\40hx_usb_vol.tmp"
 set "VINFO="
 powershell -NoProfile -Command "$v=Get-Volume -DriveLetter '%DRV%' -ErrorAction SilentlyContinue; if($v){ Write-Output ($v.FileSystem + ';' + $v.DriveType) }" > "%TMPF%" 2>nul
@@ -149,54 +149,54 @@ if not defined V_FS set "V_FS=UNKNOWN"
 if not defined V_TYPE set "V_TYPE=UNKNOWN"
 
 echo.
-echo 目标盘: %USR%\   文件系统: %V_FS%   类型: %V_TYPE%
+echo O muc tieu: %USR%\   Dinh dang: %V_FS%   Loai: %V_TYPE%
 echo.
 
 set "WARN=0"
 if /i not "%V_FS%"=="FAT32" (
     set "WARN=1"
-    echo [!!] 该盘不是 FAT32 ^(当前: %V_FS%^)。UEFI 固件一般只能从 FAT32 盘引导,
-    echo      建议先备份数据、格式化为 FAT32 再来。
+    echo [!!] O dia nay khong phai FAT32 ^(hien tai: %V_FS%^). Firmware UEFI thuong chi boot duoc tu FAT32,
+    echo      Khuyen nghi nen sao luu du lieu va format USB sang FAT32 truoc khi tiep tuc.
 )
 if /i not "%V_TYPE%"=="Removable" (
     set "WARN=1"
-    echo [!]  该盘未被识别为可移动磁盘 ^(当前: %V_TYPE%^), 请确认它不是本机硬盘。
+    echo [!]  O dia khong phai la Removable ^(hien tai: %V_TYPE%^), hay dam bao day khong phai o cung trong may.
 )
 if /i "%V_TYPE%"=="CD-ROM" (
     set "WARN=1"
-    echo [!]  该盘是光驱, 无法写入。
+    echo [!]  Day la o CD-ROM, khong the ghi du lieu.
 )
 
 if "%WARN%"=="1" (
     echo.
     set "GO="
-    set /p "GO=仍要继续写入 %USR%\ ? 输入 Y 继续, 其它键取消: "
+    set /p "GO=Ban van muon ghi vao %USR%\ ? Nhap Y de tiep tuc, phim khac de huy: "
     if /i not "!GO!"=="Y" (
-        echo 已取消, 未做任何改动。
+        echo Da huy thao tac, khong co thay doi nao.
         echo.
         pause
         exit /b 0
     )
 ) else (
     set "GO="
-    set /p "GO=确认写入 %USR%\ ? [Y/N]: "
+    set /p "GO=Xac nhan ghi vao %USR%\ ? [Y/N]: "
     if /i not "!GO!"=="Y" (
-        echo 已取消, 未做任何改动。
+        echo Da huy thao tac, khong co thay doi nao.
         echo.
         pause
         exit /b 0
     )
 )
 
-rem ---- 5. 写入 ----
+rem ---- 5. Ghi du lieu ----
 echo.
 mkdir "%USR%\EFI" >nul 2>&1
 mkdir "%USR%\EFI\40HX" >nul 2>&1
 mkdir "%USR%\EFI\Boot" >nul 2>&1
 if not exist "%USR%\EFI\Boot\" (
-    echo [!!] 无法创建 %USR%\EFI\Boot
-    echo      常见原因: U 盘写保护 / 没有权限 / 盘符选错。
-    echo      可右键本脚本 - 以管理员身份运行 再试一次。
+    echo [!!] Khong the tao thu muc %USR%\EFI\Boot
+    echo      Nguyen nhan: USB bi khoa chong ghi (write-protected) / khong co quyen / chon sai o.
+    echo      Hay nhap chuot phai vao script va chon Run as administrator de thu lai.
     echo.
     pause
     exit /b 1
@@ -208,12 +208,12 @@ if exist "%USR%\EFI\Boot\bootx64.efi" (
     if errorlevel 1 (
         if not exist "%BAK%" (
             copy /y "%USR%\EFI\Boot\bootx64.efi" "%BAK%" >nul
-            echo [i] 已备份 U 盘原 bootx64.efi 为 bootx64.efi.40hx.bak
+            echo [i] Da sao luu file bootx64.efi cu tren USB thanh bootx64.efi.40hx.bak
         ) else (
-            echo [i] 已存在旧备份 bootx64.efi.40hx.bak, 未覆盖。
+            echo [i] Da co ban sao luu cu bootx64.efi.40hx.bak, bo qua ghi de.
         )
     ) else (
-        echo [i] U 盘 bootx64.efi 已是本解锁 EFI, 跳过备份。
+        echo [i] File bootx64.efi tren USB da la ban EFI mo khoa nay, bo qua sao luu.
     )
 )
 
@@ -222,31 +222,31 @@ if errorlevel 1 goto COPYFAIL
 copy /y "%SRC%" "%USR%\EFI\Boot\bootx64.efi" >nul
 if errorlevel 1 goto COPYFAIL
 
-rem ---- 6. 回读校验 ----
+rem ---- 6. Kiem tra lai sau khi ghi ----
 set "FAIL=0"
 echo.
-echo [1/2] 校验 \EFI\40HX\40HXUNLK.EFI ...
+echo [1/2] Kiem tra \EFI\40HX\40HXUNLK.EFI ...
 fc /b "%SRC%" "%USR%\EFI\40HX\40HXUNLK.EFI" >nul 2>&1
 if not errorlevel 1 (
-    echo       校验 OK
+    echo       Kiem tra OK
 ) else (
-    echo       [!!] 校验失败
+    echo       [!!] Kiem tra THAT BAI
     set "FAIL=1"
 )
-echo [2/2] 校验 \EFI\Boot\bootx64.efi ...
+echo [2/2] Kiem tra \EFI\Boot\bootx64.efi ...
 fc /b "%SRC%" "%USR%\EFI\Boot\bootx64.efi" >nul 2>&1
 if not errorlevel 1 (
-    echo       校验 OK
+    echo       Kiem tra OK
 ) else (
-    echo       [!!] 校验失败
+    echo       [!!] Kiem tra THAT BAI
     set "FAIL=1"
 )
 
 if "%FAIL%"=="1" (
     echo.
-    echo [!!] 写入校验未通过, 请勿使用该 U 盘引导解锁。
-    echo      常见原因: U 盘写保护 / 空间不足 / 接触不良。
-    echo      可换一个 U 盘, 或运行 make_usb_efi.bat /restore 还原后重试。
+    echo [!!] Kiem tra ghi file khong dat, vui long khong dung USB nay de boot mo khoa.
+    echo      Nguyen nhan: USB chong ghi / dung luong day / tiep xuc kem.
+    echo      Co the doi USB khac, hoac chay make_usb_efi.bat /restore de khoi phuc roi thu lai.
     echo.
     pause
     exit /b 1
@@ -254,18 +254,18 @@ if "%FAIL%"=="1" (
 
 echo.
 echo ============================================================
-echo   制作完成! 使用方法:
-echo   1. 关机后插着这个 U 盘开机, 按启动菜单键
-echo      (华硕/技嘉 F8, 微星 F11, 联想 F12)
-echo      选择名称以 UEFI: 开头的 U 盘项
-echo   2. 出现 40HX 解锁文字约 10~30 秒 = 解锁注入成功
-echo   3. 若没自动进 Windows: 重启, 启动菜单选 Windows 硬盘项
-echo   4. 进系统后运行 40HXCheck.exe 验证(SS0=0x88888888 即成功)
+echo   Tao USB thanh cong! Huong dan su dung:
+echo   1. Tat may, cam USB nay vao may va bat nguon, an phim Boot Menu
+echo      (Asus/Gigabyte: F8, MSI: F11, Lenovo: F12)
+echo      Chon muc USB co chu dau la UEFI:
+echo   2. Xuat hien dong chu mo khoa 40HX khoang 10~30 giay = mo khoa thanh cong
+echo   3. Neu khong tu vao Windows: Khoi dong lai, vao Boot Menu chon o cung Windows
+echo   4. Vao Windows chay 40HXCheck.exe de kiem tra (SS0=0x88888888 la thanh cong)
 echo.
-echo   注意: 主板开了 Secure Boot 的话, 未签名 EFI 不会被执行,
-echo         需先在 BIOS 里关闭 Secure Boot, 否则 U 盘会被跳过。
+echo   Luu y: Neu mainboard dang bat Secure Boot, EFI khong chung thuc se bi chan,
+echo         can vao BIOS tat Secure Boot truoc, neu khong USB se bi bo qua.
 echo.
-echo   用完执行 make_usb_efi.bat /restore 可把 U 盘还原原样。
+echo   Sau khi dung xong chay make_usb_efi.bat /restore de khoi phuc lai USB.
 echo ============================================================
 echo.
 pause
@@ -273,29 +273,29 @@ exit /b 0
 
 :COPYFAIL
 echo.
-echo [!!] 复制失败: %USR% 无法写入。
-echo      常见原因: U 盘写保护 / 空间不足 / 没有权限 / 盘符选错。
-echo      可右键本脚本 - 以管理员身份运行 再试一次。
+echo [!!] Sao chep that bai: %USR% khong the ghi du lieu.
+echo      Nguyen nhan: USB chong ghi / day dung luong / thieu quyen / chon sai o.
+echo      Hay nhap chuot phai vao script - Run as administrator de thu lai.
 echo.
 pause
 exit /b 1
 
 :RESTORE
 echo ============================================================
-echo   40HX 解锁 U 盘 - 还原
-echo   把 U 盘恢复成本工具写入前的状态
+echo   40HX - Khoi phuc USB mo khoa
+echo   Dua USB ve trang thai truoc khi cong cu ghi du lieu
 echo ============================================================
 echo.
 
 set "DRV=%~2"
-if not defined DRV set /p "DRV=请输入 U 盘盘符 (只输字母, 例: E) 后回车: "
+if not defined DRV set /p "DRV=Vui long nhap ky tu o USB (chi nhap 1 chu cai, vi du: E) roi Enter: "
 set "DRV=%DRV::=%"
 set "DRV=%DRV:\=%"
 set "DRV=%DRV:/=%"
 set "DRV=%DRV: =%"
 set "DRV=%DRV:"=%"
 if not defined DRV (
-    echo [!!] 未输入盘符, 退出。
+    echo [!!] Chua nhap ky tu o dia, thoat.
     pause
     exit /b 1
 )
@@ -304,17 +304,17 @@ for %%L in (A B C D E F G H I J K L M N O P Q R S T U V W X Y Z) do if /i "%DRV%
 set "USR=%DRV%:"
 
 if not exist "%USR%\" (
-    echo [!!] 盘符 %USR% 不存在, 请核对后重试。
+    echo [!!] O dia %USR% khong ton tai, vui long kiem tra va thu lai.
     pause
     exit /b 1
 )
 if /i "%DRV%"=="C" (
-    echo [!!] 拒绝操作系统盘 C:。
+    echo [!!] Tu choi thao tac tren o he thong C:.
     pause
     exit /b 1
 )
 if /i "%USR%"=="%SystemDrive%" (
-    echo [!!] %USR% 是系统所在盘, 已中止。
+    echo [!!] %USR% la o he thong, da dung thao tac.
     pause
     exit /b 1
 )
@@ -323,39 +323,39 @@ set "BAK=%USR%\EFI\Boot\bootx64.efi.40hx.bak"
 if exist "%BAK%" (
     copy /y "%BAK%" "%USR%\EFI\Boot\bootx64.efi" >nul
     if errorlevel 1 (
-        echo [!!] 还原失败, 备份文件仍在: %BAK%
+        echo [!!] Khoi phuc that bai, file sao luu van con tai: %BAK%
     ) else (
         del /f /q "%BAK%" >nul 2>&1
-        echo [i] 已还原 U 盘原 bootx64.efi
+        echo [i] Da khoi phuc lai bootx64.efi goc tren USB
     )
 ) else (
     if exist "%USR%\EFI\Boot\bootx64.efi" (
         if exist "%SRC%" (
             fc /b "%SRC%" "%USR%\EFI\Boot\bootx64.efi" >nul 2>&1
             if errorlevel 1 (
-                echo [i] bootx64.efi 不是本工具写入的文件, 保持不动。
+                echo [i] bootx64.efi khong phai file do cong cu nay tao, giu nguyen.
             ) else (
                 del /f /q "%USR%\EFI\Boot\bootx64.efi" >nul 2>&1
-                echo [i] 已删除本工具写入的 bootx64.efi
+                echo [i] Da xoa file bootx64.efi do cong cu tao
             )
         ) else (
-            echo [i] 找不到本地 40HXUNLK.EFI, 无法判断 bootx64.efi 来源, 保持不动。
+            echo [i] Khong tim thay 40HXUNLK.EFI goc tren may de so sanh, giu nguyen.
         )
     ) else (
-        echo [i] U 盘上没有 bootx64.efi, 无需还原。
+        echo [i] Tren USB khong co bootx64.efi, khong can khoi phuc.
     )
 )
 
 if exist "%USR%\EFI\40HX\40HXUNLK.EFI" (
     del /f /q "%USR%\EFI\40HX\40HXUNLK.EFI" >nul 2>&1
-    echo [i] 已删除 \EFI\40HX\40HXUNLK.EFI
+    echo [i] Da xoa \EFI\40HX\40HXUNLK.EFI
 )
 rmdir "%USR%\EFI\40HX" >nul 2>&1
 rmdir "%USR%\EFI\Boot" >nul 2>&1
 rmdir "%USR%\EFI" >nul 2>&1
 
 echo.
-echo [ok] 还原流程结束, U 盘已恢复普通状态。
+echo [ok] Qua trinh khoi phuc hoan tat, USB da tro ve trang thai binh thuong.
 echo.
 pause
 exit /b 0
