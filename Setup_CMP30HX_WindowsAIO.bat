@@ -114,6 +114,19 @@ if exist "%TARGET_INSTALLER%" (
     set "FINAL_INSTALLER=%SRC_INSTALLER%"
     set "FINAL_DIR=%~dp0"
 )
+
+:: Tao script runner tu dong polling va Soft Reset neu bi ket Gen1 sau reboot
+set "FINAL_RUNNER=%FINAL_DIR%\RunUnlock.bat"
+powershell -NoProfile -ExecutionPolicy Bypass -Command @"
+@'
+@echo off
+setlocal
+cd /d "%~dp0"
+"40HXInstaller.exe" -gen2-30hx -silent
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 15; `$statusFile = [System.IO.Path]::Combine(`$env:ProgramData, '40HXUnlock\gen2_status.txt'); if (Test-Path `$statusFile) { `$c = Get-Content `$statusFile -Raw; if (`$c -match 'GPU TLS=Gen1|chua dat|chưa đạt') { `$devs = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { `$_.HardwareID -match 'VEN_10DE&(DEV_2189|DEV_1F0B)' }; foreach (`$d in `$devs) { try { pnputil /restart-device `$d.InstanceId >`$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId `$d.InstanceId -Confirm:`$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId `$d.InstanceId -Confirm:`$false -ErrorAction SilentlyContinue } catch {} }; Start-Sleep -Seconds 2; Start-Process -FilePath (Join-Path `$pwd.Path '40HXInstaller.exe') -ArgumentList '-gen2-30hx -silent' -Wait } }" >nul 2>&1
+endlocal
+'@ | Set-Content -Path $env:FINAL_RUNNER -Encoding ASCII -Force
+"@ >nul 2>&1
 echo.
 
 :: 1. Don dep task retry cu (neu co), tranh vong lap retry Gen3/Gen2 cu
@@ -161,22 +174,23 @@ if errorlevel 1 (
 :: 5. Dang ky Scheduled Task SYSTEM da kich hoat (Startup 15s + Logon 5s + Wake from Sleep)
 echo [4/6] Dang tao Scheduled Task SYSTEM va Run Key duy tri Gen2...
 set "TASK_OK=0"
-set "FINAL_EXE=%FINAL_INSTALLER%"
+set "FINAL_EXE=%FINAL_RUNNER%"
+if not exist "%FINAL_EXE%" set "FINAL_EXE=%FINAL_INSTALLER%"
 set "FINAL_WD=%FINAL_DIR%"
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$exe=$env:FINAL_EXE; $dir=$env:FINAL_WD; if (-not [IO.Path]::IsPathRooted($exe)) { throw 'Duong dan installer khong hop le' }; $action = New-ScheduledTaskAction -Execute $exe -Argument '-gen2-30hx -silent' -WorkingDirectory $dir; $t1 = New-ScheduledTaskTrigger -AtStartup; $t1.Delay = 'PT15S'; $t2 = New-ScheduledTaskTrigger -AtLogOn; $t2.Delay = 'PT5S'; $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Minutes 5); $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest; Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action $action -Trigger @($t1, $t2) -Settings $settings -Principal $principal -Force; try { $srv = New-Object -ComObject 'Schedule.Service'; $srv.Connect(); $task = $srv.GetFolder('\').GetTask('CMP30HX_Gen2_Unlock'); $def = $task.Definition; $tEvent = $def.Triggers.Create(0); $tEvent.Subscription = '<QueryList><Query Id=''0'' Path=''System''><Select Path=''System''>*[System[Provider[@Name=''Microsoft-Windows-Power-Troubleshooter''] and EventID=1]]</Select></Query></QueryList>'; $tEvent.Delay = 'PT3S'; $tEvent.Enabled = $true; $srv.GetFolder('\').RegisterTaskDefinition('CMP30HX_Gen2_Unlock', $def, 4, $null, $null, 5, $null) } catch {}" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$exe=$env:FINAL_EXE; $dir=$env:FINAL_WD; if (-not [IO.Path]::IsPathRooted($exe)) { throw 'Duong dan installer khong hop le' }; $action = if ($exe -match '\.bat$') { New-ScheduledTaskAction -Execute $env:ComSpec -Argument ('/c `\"' + $exe + '`\"') -WorkingDirectory $dir } else { New-ScheduledTaskAction -Execute $exe -Argument '-gen2-30hx -silent' -WorkingDirectory $dir }; $t1 = New-ScheduledTaskTrigger -AtStartup; $t1.Delay = 'PT15S'; $t2 = New-ScheduledTaskTrigger -AtLogOn; $t2.Delay = 'PT5S'; $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Minutes 5); $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest; Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action $action -Trigger @($t1, $t2) -Settings $settings -Principal $principal -Force; try { $srv = New-Object -ComObject 'Schedule.Service'; $srv.Connect(); $task = $srv.GetFolder('\').GetTask('CMP30HX_Gen2_Unlock'); $def = $task.Definition; $tEvent = $def.Triggers.Create(0); $tEvent.Subscription = '<QueryList><Query Id=''0'' Path=''System''><Select Path=''System''>*[System[Provider[@Name=''Microsoft-Windows-Power-Troubleshooter''] and EventID=1]]</Select></Query></QueryList>'; $tEvent.Delay = 'PT3S'; $tEvent.Enabled = $true; $srv.GetFolder('\').RegisterTaskDefinition('CMP30HX_Gen2_Unlock', $def, 4, $null, $null, 5, $null) } catch {}" >nul 2>&1
 
 if not errorlevel 1 set "TASK_OK=1"
 if "%TASK_OK%"=="1" schtasks /query /tn "CMP30HX_Gen2_Unlock" >nul 2>&1 || set "TASK_OK=0"
 
 if "%TASK_OK%"=="0" (
-    schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%FINAL_INSTALLER%\" -gen2-30hx -silent" /sc onstart /delay 0000:15 /rl highest /ru "NT AUTHORITY\SYSTEM" /f >nul 2>&1
+    schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%FINAL_RUNNER%\"" /sc onstart /delay 0000:15 /rl highest /ru "NT AUTHORITY\SYSTEM" /f >nul 2>&1
     if not errorlevel 1 set "TASK_OK=1"
 )
 
 :: Bao hiem kep: Dang ky Registry Run key cho HKLM va HKCU (phong thu neu Task Scheduler bi chan)
-reg add "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "CMP30HX_Gen2" /t REG_SZ /d "\"%FINAL_INSTALLER%\" -gen2-30hx -silent" /f >nul 2>&1
-reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "40HXGen2" /t REG_SZ /d "\"%FINAL_INSTALLER%\" -gen2-30hx -silent" /f >nul 2>&1
+reg add "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "CMP30HX_Gen2" /t REG_SZ /d "\"%FINAL_RUNNER%\"" /f >nul 2>&1
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "40HXGen2" /t REG_SZ /d "\"%FINAL_RUNNER%\"" /f >nul 2>&1
 
 if "%TASK_OK%"=="1" (
     echo       [OK] Scheduled Task SYSTEM da duoc kich hoat thanh cong.
@@ -211,6 +225,35 @@ if errorlevel 1 (
     ) else (
         echo       [!] Canh bao: Installer chay xong nhung khong tim thay file gen2_status.txt.
         echo           Hay chay lai 40HXInstaller.exe -status de kiem tra.
+    )
+)
+
+:: Kiem tra chu trinh Soft Reset neu GPU TLS bi ket o Gen1 (dac biet tren he thong GPU kep iGPU + CMP 30HX hoac driver mod)
+set "NEED_DEV_RESET=0"
+if "%UNLOCK_OK%"=="0" set "NEED_DEV_RESET=1"
+if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
+    findstr /i "GPU TLS=Gen1" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "NEED_DEV_RESET=1"
+    findstr /i "chua dat" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "NEED_DEV_RESET=1"
+    findstr /i "chưa đạt" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "NEED_DEV_RESET=1"
+)
+
+if "%NEED_DEV_RESET%"=="1" (
+    echo.
+    echo       [!] Phat hien GPU TLS van o Gen1 [driver mod / iGPU dang giu DMA context].
+    echo       [*] Dang tu dong thuc hien chu trinh Soft Reset [Disable - Enable qua PnP]...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$devs = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -match 'VEN_10DE&(DEV_2189|DEV_1F0B)' }; if ($devs) { foreach ($d in $devs) { try { pnputil /restart-device $d.InstanceId >$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {} }; Start-Sleep -Seconds 2 } else { Write-Host 'Khong tim thay Instance ID qua PnP' }" >nul 2>&1
+    echo       [*] Dang chay lai lenh mo khoa Gen2 sau khi Soft Reset card...
+    "%FINAL_INSTALLER%" -gen2-30hx
+    if not errorlevel 1 (
+        set "UNLOCK_OK=1"
+        if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
+            echo.
+            echo       [OK] Ket qua sau khi Soft Reset:
+            echo       --------------------------------------------------------
+            type "%ProgramData%\40HXUnlock\gen2_status.txt"
+            echo.
+            echo       --------------------------------------------------------
+        )
     )
 )
 
