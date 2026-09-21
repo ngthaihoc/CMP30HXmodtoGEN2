@@ -1400,6 +1400,7 @@ func gen2Main() {
 			{0x8872C, 0x6, "XVE_OVR=6"},
 			{0x8C040, 0x80085800, "LINK_CONFIG_0"},
 			{0x8841C, 0xE0B42D00, "PRIV_MISC_1"},
+			{0x8C1C0, 0x00240036, "PL_LINK_RATE"},
 			{0x8C2C0, 0x068731B3, "CYA_0"},
 		}
 		bar0raw, _ := hxcore.PciRd(wh, gpuBDF, 0x10)
@@ -1427,10 +1428,14 @@ func gen2Main() {
 				fmt.Printf("  [!] %s 写失败: %v\n", p.name, werr)
 				continue
 			}
-			if rb, rerr := hxcore.TSRead(th, bar0Phys+p.off); rerr != nil || rb != p.val {
+			rb, rerr := hxcore.TSRead(th, bar0Phys+p.off)
+			if rerr != nil || rb != p.val {
 				fmt.Printf("  [warn] %s 读回 0x%08x (期望 0x%08x)\n", p.name, rb, p.val)
 			} else {
 				fmt.Printf("  %s OK (0x%08X)\n", p.name, rb)
+			}
+			if p.off == 0x8C2C0 && (rb&(1<<2)) != 0 {
+				fmt.Printf("  [warn] CYA_0 bit 2 (DIS_G2) vẫn bật (0x%08X), có thể cản trở Gen2!\n", rb)
 			}
 		}
 	}
@@ -1484,8 +1489,15 @@ func gen2Main() {
 		}
 		fmt.Printf("[Gen2] 链路重训 #%d (%s端)...\n", attempt+1, tag)
 		retrain(bdf)
-		time.Sleep(2200 * time.Millisecond)
-		cur = hxcore.LinkSpeed(wh, gpuBDF)
+		// Fast polling: kiểm tra link speed mỗi 75ms (tối đa 25 lần = 1.875s)
+		// Ngay khi khoá link Gen2 thì nhận diện ngay, tránh bị ASPM hạ tốc về Gen1 khi rảnh
+		for poll := 0; poll < 25; poll++ {
+			time.Sleep(75 * time.Millisecond)
+			cur = hxcore.LinkSpeed(wh, gpuBDF)
+			if cur >= 2 {
+				break
+			}
+		}
 		if cur >= 2 {
 			break
 		}
@@ -1627,6 +1639,7 @@ func gen2MainCMP30HX(pWh *syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUPr
 					{0x0008841C, 0xE0B42D00, "PRIV_MISC_1"},
 					{0x0008872C, xveOvrVal, fmt.Sprintf("XVE_OVR=%d", xveOvrVal)},
 					{0x0008C040, 0x80085800, "LINK_CONFIG_0"},
+					{0x0008C1C0, 0x00240036, "PL_LINK_RATE"},
 					{0x0008C2C0, 0x068731B3, "CYA_0"},
 					{0x0008872C, xveOvrVal, fmt.Sprintf("XVE_OVR=%d_CONFIRM", xveOvrVal)},
 				}
@@ -1635,6 +1648,9 @@ func gen2MainCMP30HX(pWh *syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUPr
 					_ = hxcore.TSWrite(th, bar0Phys+p.off, p.val)
 					rb, _ := hxcore.TSRead(th, bar0Phys+p.off)
 					fmt.Printf("[Gen%d-30HX] [MMIO] %-14s (0x%06X): Ghi 0x%08X -> Đọc lại 0x%08X\n", targetGen, p.name, p.off, p.val, rb)
+					if p.off == 0x0008C2C0 && (rb&(1<<2)) != 0 {
+						fmt.Printf("[Gen%d-30HX][warn] CYA_0 bit 2 (DIS_G2) vẫn được bật (0x%08X), có thể cản trở Gen2!\n", targetGen, rb)
+					}
 				}
 
 				// 2. PCIe Capability register injection:
@@ -1773,8 +1789,15 @@ func gen2MainCMP30HX(pWh *syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUPr
 		if err := retrain(bdf); err != nil {
 			fmt.Printf("[Gen%d-30HX][!] Huấn luyện lại link phía %s thất bại: %v\n", targetGen, tag, err)
 		}
-		time.Sleep(2200 * time.Millisecond)
-		cur = hxcore.LinkSpeed(wh, gpuBDF)
+		// Fast polling: kiểm tra link speed mỗi 75ms (tối đa 25 lần = 1.875s)
+		// Ngay khi khoá link Gen2 thì nhận diện ngay, tránh bị ASPM hạ tốc về Gen1 khi rảnh
+		for poll := 0; poll < 25; poll++ {
+			time.Sleep(75 * time.Millisecond)
+			cur = hxcore.LinkSpeed(wh, gpuBDF)
+			if cur >= targetGen {
+				break
+			}
+		}
 		if cur >= targetGen {
 			break
 		}
@@ -1795,6 +1818,7 @@ func gen2MainCMP30HX(pWh *syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUPr
 				_ = hxcore.TSWrite(th, bar0Phys+0x0008841C, 0xE0B42D00)
 				_ = hxcore.TSWrite(th, bar0Phys+0x0008872C, xveOvrVal)
 				_ = hxcore.TSWrite(th, bar0Phys+0x0008C040, 0x80085800)
+				_ = hxcore.TSWrite(th, bar0Phys+0x0008C1C0, 0x00240036)
 				_ = hxcore.TSWrite(th, bar0Phys+0x0008C2C0, 0x068731B3)
 				if origCap != 0 {
 					_ = hxcore.TSWrite(th, bar0Phys+0x00088084, (origCap&0xFFFFFFF0)|targetGen)
@@ -1817,8 +1841,14 @@ func gen2MainCMP30HX(pWh *syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUPr
 				}
 				fmt.Printf("[Gen%d-30HX] [PnP Reset] Huấn luyện lại sau Soft Reset #%d (%s)...\n", targetGen, attempt+1, tag)
 				_ = retrain(bdf)
-				time.Sleep(2000 * time.Millisecond)
-				cur = hxcore.LinkSpeed(wh, gpuBDF)
+				// Fast polling: kiểm tra link speed mỗi 75ms (tối đa 25 lần = 1.875s)
+				for poll := 0; poll < 25; poll++ {
+					time.Sleep(75 * time.Millisecond)
+					cur = hxcore.LinkSpeed(wh, gpuBDF)
+					if cur >= targetGen {
+						break
+					}
+				}
 				if cur >= targetGen {
 					break
 				}
@@ -1958,6 +1988,7 @@ func probe30HX() {
 		{0x00088720, "NV_XVE_0x720"},
 		{0x0008872C, "NV_XVE_OVR (0x72C)"},
 		{0x0008C040, "NV_XVE_LINK_CONFIG_0"},
+		{0x0008C1C0, "NV_XVE_PL_LINK_RATE"},
 		{0x0008C2C0, "NV_XVE_CYA_0"},
 		{0x0008C4B0, "PHY_LANE0_SPEED (2.5G/5G)"},
 		{0x0008C4B4, "PHY_LANE1_SPEED"},
@@ -1971,7 +2002,15 @@ func probe30HX() {
 		if rerr != nil {
 			fmt.Printf("  0x%06X (%-26s): Đọc thất bại (%v)\n", r.off, r.name, rerr)
 		} else {
-			fmt.Printf("  0x%06X (%-26s): 0x%08X\n", r.off, r.name, val)
+			extra := ""
+			if r.off == 0x0008C2C0 {
+				if (val & (1 << 2)) != 0 {
+					extra = " [bit2=1 DIS_G2 bật -> khóa Gen2!]"
+				} else {
+					extra = " [bit2=0 DIS_G2 tắt -> cho phép Gen2]"
+				}
+			}
+			fmt.Printf("  0x%06X (%-26s): 0x%08X%s\n", r.off, r.name, val, extra)
 		}
 	}
 	fmt.Println("======================================================")
@@ -2011,6 +2050,7 @@ func gen2WritePL0(th syscall.Handle, bar0Phys uint64) {
 		{0x8872C, 0x6, "XVE_OVR=6"},
 		{0x8C040, 0x80085800, "LINK_CONFIG_0"},
 		{0x8841C, 0xE0B42D00, "PRIV_MISC_1"},
+		{0x8C1C0, 0x00240036, "PL_LINK_RATE"},
 		{0x8C2C0, 0x068731B3, "CYA_0"},
 	}
 	for _, p := range pl0 {
@@ -2018,10 +2058,14 @@ func gen2WritePL0(th syscall.Handle, bar0Phys uint64) {
 			fmt.Printf("  [!] %s 写失败: %v\n", p.name, werr)
 			continue
 		}
-		if rb, rerr := hxcore.TSRead(th, bar0Phys+p.off); rerr != nil || rb != p.val {
+		rb, rerr := hxcore.TSRead(th, bar0Phys+p.off)
+		if rerr != nil || rb != p.val {
 			fmt.Printf("  [warn] %s 读回 0x%08x (期望 0x%08x)\n", p.name, rb, p.val)
 		} else {
 			fmt.Printf("  %s OK (0x%08X)\n", p.name, rb)
+		}
+		if p.off == 0x8C2C0 && (rb&(1<<2)) != 0 {
+			fmt.Printf("  [warn] CYA_0 bit 2 (DIS_G2) vẫn bật (0x%08X), có thể cản trở Gen2!\n", rb)
 		}
 	}
 }
@@ -2194,8 +2238,13 @@ func gen2HardFallback(th, wh *syscall.Handle, gpuBDF uint32, bar0Phys uint64, ro
 			}
 			fmt.Printf("[Gen2 -hard] Huấn luyện lại #%d (%s)...\n", i+1, tag)
 			gen2RetrainPulse(*wh, bdf)
-			time.Sleep(2200 * time.Millisecond)
-			cur = hxcore.LinkSpeed(*wh, gpuBDF)
+			for poll := 0; poll < 25; poll++ {
+				time.Sleep(75 * time.Millisecond)
+				cur = hxcore.LinkSpeed(*wh, gpuBDF)
+				if cur >= 2 {
+					break
+				}
+			}
 			if cur >= 2 {
 				break
 			}
@@ -2221,16 +2270,21 @@ func gen2HardFallback(th, wh *syscall.Handle, gpuBDF uint32, bar0Phys uint64, ro
 		gen2SetTLS(*wh, root, 2)
 		gen2SetTLS(*wh, gpuBDF, 2)
 		for i := 0; i < 6; i++ {
-			cur = hxcore.LinkSpeed(*wh, gpuBDF)
-			if cur >= 2 {
-				break
-			}
 			bdf := gpuBDF
 			if root != 0xFFFFFFFF && i%2 == 0 {
 				bdf = root
 			}
 			gen2RetrainPulse(*wh, bdf)
-			time.Sleep(2200 * time.Millisecond)
+			for poll := 0; poll < 25; poll++ {
+				time.Sleep(75 * time.Millisecond)
+				cur = hxcore.LinkSpeed(*wh, gpuBDF)
+				if cur >= 2 {
+					break
+				}
+			}
+			if cur >= 2 {
+				break
+			}
 		}
 		gen2RestoreGPULnkctl(*wh, gpuBDF)
 		gen2RestartNVDisplay()
