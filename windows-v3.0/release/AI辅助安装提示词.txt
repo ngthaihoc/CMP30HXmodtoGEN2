@@ -1,128 +1,82 @@
-CMP 40HX 解锁工具 v3.0.0 · AI 辅助安装提示词
-使用方法：把下方分隔线以内的全部文字复制给任意 AI 助手（ChatGPT / Claude / DeepSeek 等），
-再按它的要求把 40HXCheck.exe 的诊断输出发过去，即可获得针对性排查引导。
-（README.md 第 0 节引用本文件；本文件随工具版本同步维护）
+Bộ Công Cụ Mở Khoá CMP 40HX v3.0.0 · Prompt AI Hỗ Trợ Cài Đặt & Chẩn Đoán
+Cách dùng: Sao chép toàn bộ văn bản bên dưới đường phân cách gửi cho bất kỳ trợ lý AI nào (ChatGPT / Claude / DeepSeek...),
+sau đó gửi kèm kết quả chẩn đoán từ 40HXCheck.exe khi AI yêu cầu để nhận được hướng dẫn xử lý chính xác theo từng bước.
+(README.md mục 0 dẫn chiếu đến tệp này; tệp này được duy trì đồng bộ cùng phiên bản công cụ)
 ------------------------------------------------------------------------
 
-我在安装 CMP 40HX 显卡解锁工具（GitHub: PZH1gdmu/CMP40HX-Unlock，版本 v3.0.0）。
-请充当安装支持助手，按下面的项目知识库帮我排查。请一步一步向我要信息，一次只给一个操作。
+Tôi đang cài đặt bộ công cụ mở khoá card đồ hoạ CMP 40HX (GitHub: PZH1gdmu/CMP40HX-Unlock, phiên bản v3.0.0).
+Hãy đóng vai trò là chuyên gia hỗ trợ kỹ thuật cài đặt dự án này, dựa trên cơ sở tri thức kỹ thuật bên dưới để giúp tôi chẩn đoán và khắc phục sự cố. Vui lòng hỏi thông tin theo từng bước, mỗi lần chỉ đưa ra một thao tác cụ thể.
 
-【项目关键事实】
-- 解锁分两条链：①算力解锁 = 开机时 UEFI 固件 40HXUNLK.EFI 注入（需要 UEFI+GPT 引导、
-  有 EFI 分区、Secure Boot 关闭、Above 4G Decoding 开启）；
-  ②PCIe Gen2 解锁 = Windows 登录后由计划任务 "40HX PCIe Gen2 Bring-up"
-  （SYSTEM 权限，延迟 30 秒）静默执行，用完自动清理驱动。
-- 工具分工：
-  40HXInstaller.exe=安装+管理（双击默认进入**单窗口 GUI，无选项卡**，三区：
-    ①组件安装与环境设置：缺失组件自动预勾（已装不勾=不覆盖），勾选项=GSP /
-      算力EFI+固件启动项 / Gen2 驱动+Defender 排除 / 登录自启 / 关快速启动 /
-      关ASPM / 高性能电源计划 / 关闭 Defender 实时防护(开着会自动预勾)；
-    ②Gen2 策略：用完即卸(默认)/失败自动重试(旧名"看门狗")/常驻守护(驱动保留, 每分钟自查Gen2) + 自动 Stage2 回退 +
-      失败重试次数与间隔(默认 3 次/1 分钟)，[保存策略]写注册表；
-      常驻守护需配合 ① 注册 [Gen2 登录自启] 任务才会每分钟自查(TLS 丢失自动重训)；
-    ③操作日志：所有输出与检测报告。
-    也支持命令行参数。）
-  40HXUninstaller.exe=卸载（与 40HXInstaller.exe -uninstall 同一套组件级实现）；
-  40HXCheck.exe=诊断（双击即查；只读为主，必要时临时拉起驱动实测、测完自清理，
-    摘要自动复制到剪贴板）；
-  make_usb_efi.bat=引导异常兜底（自动识别 U 盘，拷入解锁 EFI 并回读校验；/restore 可还原 U 盘）。
-- 常用操作（能点 GUI 就别敲命令；等价命令行见 README §3.3）：
-  · 推荐一步到位（新装）→ GUI ② 点[执行 Gen2 并安装自启]：先解锁本次，再自动装驱动
-    部署/Defender 加白/登录自启 —— 之后每次开机自动解锁，无需重启
-  · 仅本次解锁（不装自启）→ GUI ② 点[立即执行 Gen2]（等价 -gen2；只解本次、默认用完即卸）
-  · 只注册开机自动（不立即解）→ GUI ① 勾 [Gen2 登录自启] 点[安装所选组件]（等价 -task）
-  · 手动强制 Link Disable 回退 → 仅命令行 -gen2 -hard
-    （GUI ② 的"自动 Stage2 回退"默认开会自动走同路径，一般不用敲命令）
-- BIOS 必需：Above 4G Decoding=Enabled、Secure Boot=Disabled、CSM 关闭（纯 UEFI）、
-  Fast Boot=Disabled；启动列表把 "40HX Unlock" 置顶。
-  部分主板(铭瑄等)BIOS 列表看不到该启动项：用 PE(firPE)/DiskGenius 添加启动项，
-  或把 UEFI 系统盘设为第一启动（安装器已写 \EFI\Boot\bootx64.efi 标准回退路径兜底）。
-- v2.5 起不需要测试签名；NVIDIA 驱动建议 616.56 系；GSP(EnableGpuFirmware=1) 由安装器自动设置。
-- 电源：安装器自动关闭 Windows"快速启动"与电源计划的 PCIe ASPM；
-  高性能电源计划为 GUI 可选勾选项（均可手动恢复，见 README §2.4）。
-- 正常现象：开机解锁画面 10~30 秒；登录后约 30 秒 Gen2 静默完成；
-  空闲时 GPU-Z/诊断显示 Gen1 属省电降速，负载下自动回 Gen2，不是失败——
-  权威判据是目标速率 TLS：诊断显示"目标 Gen2 / TLS=Gen2"即成功。
-- Gen2 失败自动处理：登录任务在 retrain 未成时会自动执行一次 Stage2 回退
-  （Root Link Disable + PnP 恢复，Gen2AutoHard 默认开）；仍失败按策略自动重试
-  （Gen2RetryCount/Gen2RetryIntervalMin，默认 3 次/1 分钟）。GUI ② [立即执行 Gen2] 在自动
-  回退开启时也会自动走 Stage2；命令行 `-gen2 -hard` 只用于关掉自动回退或想强制触发时。
-- 驱动"有没有装"的判定是分层的（不能只看文件在不在）：安装器/诊断会看
-  ①%ProgramData%\40HXUnlock\drivers 备份源（=曾部署的持久证据，"用完即卸"后
-  System32 文件缺失属正常终态，不是没装）；②System32 文件四态（缺失/0字节=杀软
-  隔离/正常/与备份大小不一致=被替换）；③服务注册与启动类型（被第三方改成
-  DISABLED 会导致 Gen2 永远拉不起，工具会提示修复）；④Defender 排除是否生效。
-- 杀软相关（社区"ts 驱动没加载"高发原因）：
-  ①Defender：安装时自动加白两个 .sys + ProgramData 备份目录；
-  ②第三方杀软(火绒/360/腾讯管家等)**不读 Defender 排除列表**，须在其信任/白名单
-  放行 4 个路径（见 README §5.2），诊断/安装器检测到常见第三方杀软时会提示；
-  ③可选"关闭 Defender 实时防护"（GUI ① 区勾选，开着自动预勾）：持续关闭直到手动
-  恢复，恢复命令 Set-MpPreference -DisableRealtimeMonitoring $False；
-  ④本机无 Defender 管理模块（第三方接管/精简系统把模块移除）时，加白/实时防护
-  相关功能不可用——工具如实报告"Defender 管理模块不可用"，不是安装失败。
-  驱动被 0 字节占位（杀软隔离）时，工具会在下次 Gen2 前自愈重部署（不依赖杀软恢复）。
-- 已知限制：部分机器驱动/GSP 持链路策略毫秒级回写 TLS（**不是固件"写保护"，.06/.04 等批次号不能当判据**；
-  这类情况**不要刷 VBIOS**——有 .06 批次实证为另有原因）。登录任务(前提: 已注册)在 retrain
-  未成时会自动 Stage2 回退，仍失败可 -hard；仍不行请收集诊断+installer.log 反馈作者。
-- 诊断"未注册"已根治：40HXCheck 以任务 XML 文件 %SystemRoot%\System32\Tasks\
-  40HX PCIe Gen2 Bring-up 存在为权威（不再依赖 schtasks /query 退出码）；
-  安装器创建任务以 schtasks /create 退出码 0 为权威（中文系统不再误报）。
-- 定位能力（三层 + 全总线）：
-  Windows 侧 = bus 0–7 快路径 + 注册表 LocationInformation 解析 BDF 兜底 +
-  bus 8–255 补扫（v2.5.1 起, Issue #9）；
-  EFI 预启动侧 = v3.0 起初扫 bus 0–16 + CF8/CFC 端口直读全 0–255 兜底 + MF 位修正
-  （修复 AGESA/高总线 not found，微星 B450 实测 bus 0x10=16 已解）；若 v3.0 仍报
-  "not found (both encodings)"，多为固件真没初始化该无头槽 → BIOS: Above4G+Re-Size BAR /
-  Init Display First=PEG / 插 CPU 顶槽，并把 40hx_log.txt（含 "diag: CF8 visible devices"
-  设备映射段）一并反馈。
-- Gen2 自愈增强：写 PL0 前先校验 BAR0 NV_PMC BOOT_0 家族字节(0x16=TU10x)，
-  异常安全中止；retrain 最多 6 轮；单实例互斥体防多路径并发抢驱动。
+【KIẾN THỨC CỐT LÕI CỦA DỰ ÁN】
+- Việc mở khoá chia thành 2 chuỗi độc lập:
+  ① Mở khoá năng lực tính toán (Compute/Hashrate): Được firmware UEFI 40HXUNLK.EFI nạp vào lúc khởi động máy (yêu cầu chuẩn boot UEFI+GPT, có phân vùng EFI, tắt Secure Boot, bật Above 4G Decoding).
+  ② Mở khoá PCIe Gen2: Được kích hoạt tự động ngầm sau khi đăng nhập Windows qua Scheduled Task "40HX PCIe Gen2 Bring-up" (chạy dưới quyền SYSTEM, độ trễ 30 giây), sau khi chạy xong tự động dọn dẹp driver.
+- Phân công nhiệm vụ của các công cụ:
+  40HXInstaller.exe = Cài đặt + Quản trị (Mặc định mở giao diện GUI cửa sổ đơn, không chia tab, gồm 3 khu vực:
+    ① Cài đặt thành phần & Môi trường: Tự động đánh dấu các mục còn thiếu (mục đã đạt chuẩn sẽ không tick để tránh ghi đè), các tuỳ chọn: GSP / EFI Compute + Mục boot firmware / Driver Gen2 + Loại trừ Defender / Tự khởi động khi đăng nhập / Tắt Fast Startup / Tắt ASPM / Power Plan hiệu năng cao / Tắt bảo vệ thời gian thực của Defender (tự động tick nếu đang bật).
+    ② Chính sách Gen2: Dùng xong gỡ ngay (Mặc định) / Thất bại tự thử lại (Watchdog cũ) / Dịch vụ thường trú (giữ driver, mỗi phút tự kiểm tra Gen2) + Tự động chuyển về Stage2 + Số lần và khoảng cách thử lại khi lỗi (Mặc định 3 lần / 1 phút), nút [Lưu chính sách] ghi vào Registry; Chế độ thường trú cần kết hợp với mục ① Đăng ký tác vụ [Tự khởi động Gen2 khi đăng nhập] mới có thể tự kiểm tra mỗi phút (tự huấn luyện lại nếu mất TLS).
+    ③ Nhật ký thao tác: Hiển thị toàn bộ dữ liệu xuất và báo cáo kiểm tra môi trường.
+    Hỗ trợ đầy đủ các tham số dòng lệnh CLI).
+  40HXUninstaller.exe = Gỡ cài đặt (Cùng cơ chế gỡ sạch mức thành phần như 40HXInstaller.exe -uninstall).
+  40HXCheck.exe = Chẩn đoán độc lập (Nhấp đúp chuột để kiểm tra; chủ yếu ở chế độ chỉ đọc, chỉ tạm thời nạp driver khi cần đo thực tế rồi tự dọn dẹp, tự động sao chép tóm tắt vào Clipboard).
+  make_usb_efi.bat = Phương án cứu hộ boot dự phòng (Tự động nhận diện USB, sao chep file EFI mở khoá và kiểm tra tính toàn vẹn; tham số /restore để hoàn nguyên USB).
+- Thao tác thường dùng (Khuyến khích dùng GUI thay vì gõ lệnh; xem các lệnh tương đương tại README mục 3.3):
+  · Khuyến nghị cài đặt 1-chạm (Máy mới) → GUI ② bấm [Kích hoạt Gen2 & Cài đặt tự khởi động]: Mở khoá ngay phiên hiện tại, sau đó tự động triển khai driver / loại trừ Defender / đăng ký tự khởi động khi đăng nhập —— từ đó về sau máy tự động mở khoá mỗi khi bật, không cần can thiệp.
+  · Chỉ mở khoá phiên này (Không đăng ký tự khởi động) → GUI ② bấm [Kích hoạt Gen2 ngay] (Tương đương tham số -gen2; dùng xong tự gỡ driver).
+  · Chỉ đăng ký tự khởi động khi mở máy (Không mở khoá ngay) → GUI ① tick chọn [Tự khởi động Gen2 khi đăng nhập] rồi bấm [Cài đặt các thành phần đã chọn] (Tương đương -task).
+  · Ép buộc chuyển về Stage2 Link Disable thủ công → Chỉ dùng qua dòng lệnh: 40HXInstaller.exe -gen2 -hard
+    (Trên GUI ② mục "Tự động kích hoạt Stage2" đã bật mặc định, tự động đi theo luồng này khi cần).
+- Cấu hình BIOS bắt buộc: Above 4G Decoding = Enabled, Secure Boot = Disabled, CSM = Disabled (Pure UEFI), Fast Boot = Disabled; Đặt mục khởi động "40HX Unlock" lên vị trí ưu tiên số 1 (Top Boot Priority).
+  Một số bo mạch chủ (như Maxsun) không hiện mục boot này trong danh sách BIOS: dùng Windows PE (firPE) hoặc DiskGenius để thêm mục boot thủ công, hoặc chọn ổ đĩa hệ thống UEFI làm ổ khởi động đầu tiên (công cụ cài đặt đã ghi sẵn file cứu hộ vào đường dẫn fallback chuẩn \EFI\Boot\bootx64.efi).
+- Từ bản v2.5 trở đi không cần bật Windows Test Signing; khuyến nghị driver NVIDIA dòng 537.58 hoặc mới nhất; GSP (EnableGpuFirmware=1) được công cụ tự thiết lập.
+- Nguồn điện: Công cụ tự động tắt Fast Startup của Windows và tắt PCIe ASPM trong Power Plan; tuỳ chọn High Performance Power Plan có sẵn trong GUI (có thể phục hồi thủ công theo README mục 2.4).
+- Hiện tượng bình thường: Khi bật máy màn hình mở khoá hiện 10~30 giây; sau khi vào Windows khoảng 30 giây Gen2 sẽ tự động hoàn tất trong im lặng;
+  Khi GPU ở trạng thái rảnh rỗi (Idle), GPU-Z hoặc công cụ chẩn đoán có thể hiển thị Gen1 do cơ chế tiết kiệm điện của card, khi có tải 3D/CUDA sẽ tự động bung lên Gen2, đây KHÔNG PHẢI lỗi ——
+  Tiêu chuẩn đánh giá chính xác nhất là Tốc độ mục tiêu (Target Link Speed - TLS): Nếu công cụ chẩn đoán báo "Target Gen2 / TLS=Gen2" tức là đã thành công.
+- Tự động phục hồi lỗi Gen2: Tác vụ đăng nhập nếu phát hiện chưa đạt tốc độ link sẽ tự động chạy cơ chế dự phòng Stage2 (Root Link Disable + PnP phục hồi, Gen2AutoHard bật mặc định); nếu vẫn chưa được sẽ tự động thử lại theo chính sách đã đặt (Gen2RetryCount / Gen2RetryIntervalMin, mặc định 3 lần / 1 phút). GUI ② nút [Kích hoạt Gen2 ngay] cũng tự động áp dụng Stage2 nếu được bật; dòng lệnh -gen2 -hard chỉ cần khi đã tắt tính năng tự động trên GUI hoặc muốn kích hoạt cưỡng chế.
+- Đánh giá trạng thái cài đặt driver theo nhiều tầng (không chỉ xem file có tồn tại hay không):
+  ① Nguồn sao lưu %ProgramData%\40HXUnlock\drivers (chứng cứ xác nhận đã từng được triển khai; sau khi "dùng xong gỡ ngay", việc System32 không còn file là trạng thái hoàn tất bình thường chứ không phải lỗi chưa cài);
+  ② 4 trạng thái file trong System32 (Thiếu file / File 0 byte do phần mềm diệt virus cách ly / Bình thường / Dung lượng khác file gốc do bị ghi đè);
+  ③ Trạng thái đăng ký và kiểu khởi động của dịch vụ (nếu bị phần mềm bên thứ 3 chuyển thành DISABLED sẽ khiến Gen2 không thể hoạt động, công cụ sẽ cảnh báo sửa chữa);
+  ④ Danh sách loại trừ của Windows Defender có hiệu lực hay không.
+- Lưu ý về phần mềm diệt virus:
+  ① Defender: Quá trình cài đặt tự động thêm 2 file .sys cùng thư mục sao lưu ProgramData vào danh sách loại trừ;
+  ② Phần mềm diệt virus bên thứ ba (Huorong, 360, Tencent, Avast, Kaspersky...) KHÔNG đọc danh sách loại trừ của Defender, người dùng phải thêm thủ công 4 đường dẫn driver vào danh sách tin cậy (xem README mục 5.2);
+  ③ Tuỳ chọn "Tắt bảo vệ thời gian thực của Defender" trong GUI ① (nếu Defender đang bật sẽ tự động tick): Sau khi tắt sẽ duy trì đến khi bật lại thủ công bằng PowerShell: Set-MpPreference -DisableRealtimeMonitoring $False;
+  ④ Nếu máy bị gỡ bỏ mô-đun Defender (bản Windows tinh chỉnh rút gọn), tính năng thêm loại trừ sẽ không khả dụng —— công cụ sẽ thông báo rõ ràng, đây không phải lỗi cài đặt.
+  Nếu driver bị biến thành file 0 byte (do phần mềm diệt virus cách ly), công cụ sẽ tự động triển khai lại trước lần chạy Gen2 tiếp theo.
+- Giới hạn đã biết: Một số dòng máy có driver/GSP ghi đè lại TLS trong vòng mili-giây (đây KHÔNG PHẢI lỗi khoá bảo vệ firmware BIOS, không được lấy số lô .06/.04 làm thước đo; tuyệt đối KHÔNG FLASH VBIOS). Scheduled Task đã đăng ký sẽ tự động xử lý qua Stage2 rollback.
+- Chẩn đoán "Chưa đăng ký task" đã được khắc phục triệt để: 40HXCheck dựa trên sự tồn tại thực tế của file XML tác vụ tại %SystemRoot%\System32\Tasks\40HX PCIe Gen2 Bring-up (không phụ thuộc vào mã trả về của schtasks /query).
+- Khả năng nhận diện GPU đa tầng:
+  Bên Windows = Quét nhanh bus 0–7 + Phân tích BDF qua LocationInformation trong Registry + Quét bù bus 8–255;
+  Bên EFI = Quét ban đầu bus 0–16 + Quét trực tiếp cổng CF8/CFC toàn bộ bus 0–255 dự phòng + Sửa lỗi bit Multifunction.
 
-【排查决策树】
-1. 先让用户双击 40HXCheck.exe，把弹窗文本（或 %LOCALAPPDATA%\40HXUnlock\logs\diagnose.txt）
-   发过来，按输出分支：
-   a. "算力满血 + Gen2 达成" → 已成功；若 [Gen2 登录自启] 未注册，本次为手动/残留成果，
-      冷开机后需先注册自启（见 c）才能保持。
-   b. "本次开机未解锁 (SS0 锁定)" → EFI 没执行：依次查启动项是否置顶 / Secure Boot /
-      Fast Boot / 快速启动是否已关；若诊断显示 引导模式=Legacy → 走第 3 步 mbr2gpt；
-      若 BIOS 列表看不到启动项 → PE/DiskGenius 添加或把 UEFI 系统盘设第一启动（走
-      bootx64 兜底），或按 README §2.2 用 U 盘手动引导解锁 EFI（不依赖固件启动项）。
-   c. "算力满血, Gen2 未达成" 且 "Gen2 任务: 未注册" → 管理员运行
-      40HXInstaller.exe -task（或 GUI ① 区勾[Gen2 登录自启]安装），注销重新登录后用 40HXCheck.exe 验证
-      （诊断以任务 XML 文件存在为权威，报未注册即确属没建成）。
-   d. "Gen2 目标已配置(TLS=Gen2), 当前 Gen1" → 分两种：①登录任务已注册且跑过 = 空闲
-      省电降速（成功态, 无需处理）；②自启任务未注册或刚开机 = 多为上次运行残留（完全
-      关机/显卡复位后会回锁）——先按 c 注册 [Gen2 登录自启]，冷开机后再验证；若持续
-      负载仍 Gen1，再手动 40HXInstaller.exe -gen2 或 -gen2 -hard。
-   e. TLS 仍 Gen1 且安装器日志 PL0 四寄存器写回全 OK → 先确认登录任务(已注册)是否自动执行过
-      Stage2 回退（看 installer.log / gen2_status.txt）；若已跑仍 Gen1，点 GUI ② [立即执行
-      Gen2] 再试（默认自动含 Stage2 回退）；仅当 ② 关掉自动回退或想强制触发时，才用管理员
-      命令行 40HXInstaller.exe -gen2 -hard；仍失败请收集诊断与 installer.log 反馈作者。
-      **不要刷 VBIOS**（无"写保护批次"，已有 .06 批次实证）。
-   f. 报"ThrottleStop/WinRing0 驱动未加载" → ①杀软隔离（diagnose.txt 驱动段标
-      "0 字节占位"：Defender→重跑安装器已自愈补排除；第三方杀软→到其信任列表放行
-      4 路径）；②本机装了 ThrottleStop 软件占用同名驱动 → 关闭 ThrottleStop 后重跑
-      安装器（工具自动复用其驱动、不覆盖不删）；③诊断报"无 Defender 管理模块"→
-      该机已无 Defender，功能不可用属预期，只需处理第三方杀软侧。
-   g. 日志含 "not found (both encodings)" / "GPU not found; abort" → EFI 找不到卡：
-      ①先用 v3.0 安装器重装解锁 EFI（初扫 0–16 + CF8 全 0–255）；②重装后仍 not found
-      → 多为固件未初始化该无头槽，走 BIOS（Init Display First=PEG / CPU 顶槽 / Above4G），
-      并把 40hx_log.txt（含 CF8 设备映射段）发作者。Windows 侧"未能在 PCI 总线上定位
-      40HX"自 v2.5.1 起已三层定位解决。
-   h. 寨板/多卡 retrain 后仍 Gen1（TLS=Gen2 但当前 Gen1）→ 先点 GUI ② [立即执行 Gen2]
-      （Gen2AutoHard 默认开，会自动含 Stage2 回退；瞬断链路数秒、自动恢复）；若你在 ② 关掉
-      了自动回退或想强制触发，再管理员运行 40HXInstaller.exe -gen2 -hard。
-2. 日志位置与取日志方法：%TEMP%\40HX_installer.log、%LOCALAPPDATA%\40HXUnlock\logs\、
-   ESP 根 40hx_log.txt（40HXCheck.exe 自动收集前两者到 logs 文件夹）。
-   报问题请把整个 logs 文件夹发给开发者 / 贴 issue。diagnose.txt 分段：
-   - 环境：OS/管理员/工具版本；
-   - 驱动：两个 .sys 是否存在、是否 0 字节（=杀软隔离占位铁证）、服务状态与启动类型、
-     ThrottleStop 是否共存、备份源是否存在；
-   - 原始 PCIe 寄存器：BDF、LNKCAP/LNKCTL/LNKSTA/LNKCTL2/LNKSTA2、BAR0+0x00 BOOT_0 家族；
-   - 已知限制对照：非写保护口径(不刷 VBIOS) / 寨板需 LD / 无头卡 EFI / 空闲降速 / 共存 / 杀软 / 失签名。
-   diagnose_时间戳.txt 每次运行归档；installer.log 含 Gen2 每步与寄存器。
-3. MBR 转 GPT（仅引导模式=Legacy 时）：先备份重要数据、暂停 BitLocker，管理员 CMD 依次：
-   mbr2gpt /validate /allowfullos   → 通过后
-   mbr2gpt /convert /allowfullos    → 重启进 BIOS 把启动模式改为 UEFI（关 CSM）
-   → 回 Windows 重新运行 40HXInstaller.exe。
-   注意：转换不可逆；需 Win10 1703+ / Win11 且主板支持 UEFI。
+【CÂY QUYẾT ĐỊNH XỬ LÝ SỰ CỐ】
+1. Hãy yêu cầu người dùng chạy 40HXCheck.exe, copy toàn bộ nội dung cửa sổ bật lên (hoặc file %LOCALAPPDATA%\40HXUnlock\logs\diagnose.txt) gửi qua đây, sau đó đối chiếu:
+   a. "Compute tối đa (Tối đa / Full) + Đạt chuẩn Gen2" → Đã hoàn toàn thành công; nếu [Tự khởi động Gen2 khi đăng nhập] chưa đăng ký thì kết quả này là tạm thời, cần đăng ký tác vụ tự khởi động (xem mục c) để duy trì sau khi khởi động lại máy.
+   b. "Phiên khởi động này chưa mở khoá (SS0 bị khoá)" → EFI chưa được thực thi: Lần lượt kiểm tra mục boot đã ưu tiên số 1 chưa / Secure Boot / Fast Boot / Fast Startup đã tắt chưa; nếu chế độ boot là Legacy → chuyển sang bước 3 dùng mbr2gpt; nếu BIOS không nhận mục boot → dùng PE/DiskGenius thêm mục boot hoặc chọn ổ UEFI làm ưu tiên 1 (chạy qua fallback bootx64), hoặc làm theo README mục 2.2 dùng USB tạo boot cứu hộ EFI thủ công.
+   c. "Compute tối đa, Gen2 chưa đạt" VÀ "Tác vụ Gen2: Chưa đăng ký" → Chạy với quyền Administrator:
+      40HXInstaller.exe -task (hoặc vào GUI ① tick chọn [Tự khởi động Gen2 khi đăng nhập] rồi bấm cài đặt), sau đó đăng xuất và đăng nhập lại rồi dùng 40HXCheck.exe kiểm tra lại.
+   d. "Mục tiêu Gen2 đã thiết lập (TLS=Gen2), hiện tại đang Gen1" → Có 2 trường hợp:
+      ① Tác vụ đăng nhập đã đăng ký và đã chạy = Card đang ở trạng thái rảnh rỗi tiết kiệm điện (Đã thành công, không cần xử lý, khi vào game/chạy benchmark sẽ tự động lên Gen2);
+      ② Tác vụ tự khởi động chưa đăng ký hoặc vừa mới mở máy = Thường là giá trị cũ còn sót lại từ phiên trước (sau khi khởi động nguội hoàn toàn card sẽ tụt về Gen1) —— hãy làm theo mục c để đăng ký tự khởi động; nếu khi có tải nặng liên tục mà card vẫn giữ ở Gen1, hãy chạy thủ công 40HXInstaller.exe -gen2 hoặc -gen2 -hard.
+   e. TLS vẫn ở Gen1 và nhật ký cài đặt báo 4 thanh ghi PL0 đều ghi thành công → Kiểm tra xem tác vụ đăng nhập đã tự động thực thi Stage2 rollback chưa (xem installer.log / gen2_status.txt); nếu đã chạy mà vẫn ở Gen1, vào GUI ② bấm [Kích hoạt Gen2 ngay] để thử lại; nếu vẫn thất bại hãy gửi file nhật ký chẩn đoán và installer.log cho tác giả. TUYỆT ĐỐI KHÔNG FLASH VBIOS.
+   f. Báo lỗi "Driver ThrottleStop/WinRing0 chưa nạp" →
+      ① Phần mềm diệt virus cách ly (file bị 0 byte): Với Defender thì chạy lại bộ cài để tự động bù danh sách loại trừ; với phần mềm bên thứ 3 thì thêm thủ công 4 đường dẫn driver vào danh sách tin cậy;
+      ② Máy đang mở ứng dụng ThrottleStop độc lập chiếm dụng driver: Tắt ThrottleStop đi rồi chạy lại bộ cài;
+      ③ Báo "Không có mô-đun quản lý Defender": Do Windows rút gọn, hãy xử lý ở phía phần mềm diệt virus bên thứ ba.
+   g. Nhật ký ghi "not found (both encodings)" / "GPU not found; abort" → EFI không tìm thấy card:
+      ① Dùng bản cài đặt v3.0 cài đặt lại EFI mở khoá;
+      ② Nếu vẫn không thấy, phần lớn do bo mạch chủ chưa khởi tạo khe cắm không màn hình này: Vào BIOS chỉnh Init Display First=PEG / Cắm card vào khe PCIe x16 đầu tiên nối trực tiếp CPU / Bật Above 4G Decoding, và gửi file 40hx_log.txt cho tác giả.
+   h. Bo mạch chủ không chính hãng / Hệ thống đa GPU sau khi retrain vẫn Gen1 (TLS=Gen2 nhưng hiện tại Gen1) → Vào GUI ② bấm [Kích hoạt Gen2 ngay] (mặc định đã bật tự động Stage2 rollback; màn hình có thể nháy chớp vài giây rồi tự phục hồi); hoặc chạy lệnh Admin: 40HXInstaller.exe -gen2 -hard.
+2. Vị trí các file nhật ký: %TEMP%\40HX_installer.log, %LOCALAPPDATA%\40HXUnlock\logs\, file 40hx_log.txt tại thư mục gốc phân vùng ESP (40HXCheck.exe sẽ tự động gom các file trên vào thư mục logs).
+   Khi báo cáo lỗi, hãy gửi toàn bộ thư mục logs. File diagnose.txt bao gồm các phần:
+   - Môi trường: Hệ điều hành / Quyền Admin / Phiên bản công cụ;
+   - Driver: Hai file .sys có tồn tại không, có bị 0 byte không, trạng thái dịch vụ và loại khởi động;
+   - Thanh ghi PCIe gốc: BDF, LNKCAP/LNKCTL/LNKSTA/LNKCTL2/LNKSTA2, thông số BAR0;
+   - Đối chiếu giới hạn đã biết: Khẳng định không phải lỗi khoá phần cứng (không flash VBIOS) / Tiết kiệm điện khi idle / Xung đột phần mềm diệt virus.
+3. Chuyển đổi ổ đĩa MBR sang GPT (chỉ áp dụng khi chuẩn boot là Legacy): Sao lưu dữ liệu quan trọng, tạm dừng BitLocker, mở CMD với quyền Administrator chạy lần lượt:
+   mbr2gpt /validate /allowfullos   → Sau khi báo thành công, chạy tiếp:
+   mbr2gpt /convert /allowfullos    → Khởi động lại máy vào BIOS chuyển Boot Mode sang UEFI (tắt CSM)
+   → Vào lại Windows và chạy lại 40HXInstaller.exe.
+   Lưu ý: Quá trình chuyển đổi là một chiều (không thể chuyển ngược lại MBR); yêu cầu Windows 10 bản 1703 trở lên hoặc Windows 11 và bo mạch chủ có hỗ trợ UEFI.

@@ -1384,7 +1384,7 @@ func gen2Main() {
 	}
 
 	if gpuProfile.DeviceID == 0x2189 {
-		gen2MainCMP30HX(wh, gpuBDF, gpuProfile, root, targetGen)
+		gen2MainCMP30HX(&wh, gpuBDF, gpuProfile, root, targetGen)
 		return
 	}
 
@@ -1571,7 +1571,8 @@ func gen2Main() {
 	}
 }
 
-func gen2MainCMP30HX(wh syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUProfile, root uint32, targetGen uint32) {
+func gen2MainCMP30HX(pWh *syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUProfile, root uint32, targetGen uint32) {
+	wh := *pWh
 	if targetGen > 2 {
 		fmt.Printf("[Gen%d-30HX] Lưu ý: CMP 30HX (TU116) bị đứt eFuse bit 3 (8.0 GT/s) mức phần cứng die, trần vật lý là Gen2. Tự động chuyển về Gen2.\n", targetGen)
 		targetGen = 2
@@ -1593,11 +1594,16 @@ func gen2MainCMP30HX(wh syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUProf
 
 	var th syscall.Handle
 	var bar0Phys uint64
+	var origCap, origCtl2 uint32
 	th, err := hxcore.OpenThrottleStop()
 	if err != nil {
 		fmt.Printf("[Gen%d-30HX][!] Driver ThrottleStop chưa được mở (%v), bỏ qua inject MMIO\n", targetGen, err)
 	} else {
-		defer hxcore.CloseHandle(th)
+		defer func() {
+			if th != 0 {
+				hxcore.CloseHandle(th)
+			}
+		}()
 		bar0raw, berr := hxcore.PciRd(wh, gpuBDF, 0x10)
 		if berr != nil || bar0raw == 0 || bar0raw == 0xFFFFFFFF {
 			fmt.Printf("[Gen%d-30HX][!] Địa chỉ BAR0 bất thường: 0x%08X (err=%v)\n", targetGen, bar0raw, berr)
@@ -1633,7 +1639,7 @@ func gen2MainCMP30HX(wh syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUProf
 
 				// 2. PCIe Capability register injection:
 				// LNKCAP (0x088084): bits[3:0] đổi thành targetGen (Max Link Speed = Gen2)
-				origCap, _ := hxcore.TSRead(th, bar0Phys+0x00088084)
+				origCap, _ = hxcore.TSRead(th, bar0Phys+0x00088084)
 				newCap := (origCap & 0xFFFFFFF0) | targetGen
 				_ = hxcore.TSWrite(th, bar0Phys+0x00088084, newCap)
 				rbCap, _ := hxcore.TSRead(th, bar0Phys+0x00088084)
@@ -1650,7 +1656,7 @@ func gen2MainCMP30HX(wh syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUProf
 				fmt.Printf("[Gen%d-30HX] [MMIO] XVE_F0  (0x0880F0): Ghi 0x%08X -> Đọc lại 0x%08X\n", targetGen, speedVectorMask, rbCap2F0)
 
 				// LNKCTL2 (0x0880A8): bits[3:0] đổi thành targetGen (TLS = Gen2)
-				origCtl2, _ := hxcore.TSRead(th, bar0Phys+0x000880A8)
+				origCtl2, _ = hxcore.TSRead(th, bar0Phys+0x000880A8)
 				newCtl2 := (origCtl2 & 0xFFFFFFF0) | targetGen
 				_ = hxcore.TSWrite(th, bar0Phys+0x000880A8, newCtl2)
 				rbCtl2, _ := hxcore.TSRead(th, bar0Phys+0x000880A8)
@@ -1774,6 +1780,52 @@ func gen2MainCMP30HX(wh syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUProf
 		}
 	}
 
+	// Stage 2: Tự động Soft Reset PnP GPU nếu Stage 1 chưa đạt
+	if cur < targetGen && (hasArg("-hard") || gen2AutoHardEnabled()) {
+		if hasArg("-hard") {
+			fmt.Printf("[Gen%d-30HX] Huấn luyện lại chưa đạt → -hard kích hoạt Soft Reset PnP GPU\n", targetGen)
+		} else {
+			fmt.Printf("[Gen%d-30HX] Huấn luyện lại chưa đạt (hiện tại Gen%d) → Tự động thực thi Stage 2: Soft Reset PnP GPU giải phóng DMA locks...\n", targetGen, cur)
+		}
+		if gen2PnpRecoverGPU(gpuProfile.DeviceID) {
+			gen2ReopenDrivers(&th, pWh)
+			wh = *pWh
+			time.Sleep(2 * time.Second)
+			if th != 0 && bar0Phys != 0 {
+				_ = hxcore.TSWrite(th, bar0Phys+0x0008841C, 0xE0B42D00)
+				_ = hxcore.TSWrite(th, bar0Phys+0x0008872C, xveOvrVal)
+				_ = hxcore.TSWrite(th, bar0Phys+0x0008C040, 0x80085800)
+				_ = hxcore.TSWrite(th, bar0Phys+0x0008C2C0, 0x068731B3)
+				if origCap != 0 {
+					_ = hxcore.TSWrite(th, bar0Phys+0x00088084, (origCap&0xFFFFFFF0)|targetGen)
+				}
+				_ = hxcore.TSWrite(th, bar0Phys+0x000880A4, speedVectorMask)
+				_ = hxcore.TSWrite(th, bar0Phys+0x000880F0, speedVectorMask)
+				if origCtl2 != 0 {
+					_ = hxcore.TSWrite(th, bar0Phys+0x000880A8, (origCtl2&0xFFFFFFF0)|targetGen)
+				}
+			}
+			gen2SetTLS(wh, gpuBDF, uint16(targetGen))
+			if root != 0xFFFFFFFF {
+				gen2SetTLS(wh, root, uint16(targetGen))
+			}
+			gen2RestoreGPULnkctl(wh, gpuBDF)
+			for attempt := 0; attempt < 4; attempt++ {
+				bdf, tag := gpuBDF, "GPU"
+				if attempt%2 == 0 && root != 0xFFFFFFFF {
+					bdf, tag = root, "ROOT"
+				}
+				fmt.Printf("[Gen%d-30HX] [PnP Reset] Huấn luyện lại sau Soft Reset #%d (%s)...\n", targetGen, attempt+1, tag)
+				_ = retrain(bdf)
+				time.Sleep(2000 * time.Millisecond)
+				cur = hxcore.LinkSpeed(wh, gpuBDF)
+				if cur >= targetGen {
+					break
+				}
+			}
+		}
+	}
+
 	tls := uint32(0)
 	if cap := hxcore.PcieCap(wh, gpuBDF); cap != 0 {
 		if v, err := hxcore.PciRd(wh, gpuBDF, cap+0x30); err == nil {
@@ -1801,13 +1853,9 @@ func gen2MainCMP30HX(wh syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUProf
 		}
 		fmt.Printf("[Gen%d-30HX] Khởi động lại service NVDisplay để nạp lại hàng đợi DMA driver...\n", targetGen)
 		gen2RestartNVDisplay()
-	} else if tls >= targetGen || rootTls >= targetGen {
+	} else if tls >= targetGen {
 		ok = true
-		if tls >= targetGen {
-			verdict = fmt.Sprintf("🟢 Gen%d đã cấu hình (TLS=Gen%d): Hiện đang Gen%d x%d do trạng thái tiết kiệm điện PCIe rảnh", targetGen, tls, cur, width)
-		} else {
-			verdict = fmt.Sprintf("🟢 Gen%d đã cấu hình (Root TLS=Gen%d): Hiện đang Gen%d x%d do GPU rảnh/không giữ TLS", targetGen, rootTls, cur, width)
-		}
+		verdict = fmt.Sprintf("🟢 Gen%d đã cấu hình (TLS=Gen%d): Hiện đang Gen%d x%d do trạng thái tiết kiệm điện PCIe rảnh", targetGen, tls, cur, width)
 	}
 	fmt.Printf("[Gen%d-30HX] %s\n", targetGen, verdict)
 
@@ -2044,15 +2092,26 @@ func gen2RootLinkDisable(th syscall.Handle, wh *syscall.Handle, gpuBDF uint32, b
 	time.Sleep(2000 * time.Millisecond)
 }
 
-// PnP Vô hiệu hoá/Bật lại 40HX — Khôi phục "GPU is lost" sau Link Disable
-func gen2PnpRecover40HX() bool {
-	ps := `$iid=(Get-PnpDevice -Class Display | Where-Object { $_.InstanceId -match 'DEV_1F0B' } | Select-Object -First 1).InstanceId; ` +
-		`if($iid){ Disable-PnpDevice -InstanceId $iid -Confirm:$false; Start-Sleep -Seconds 2; ` +
-		`Enable-PnpDevice -InstanceId $iid -Confirm:$false; Start-Sleep -Seconds 4; Write-Output "PnP-OK $iid" } ` +
-		`else { Write-Output 'PnP-NONE' }`
+// PnP Vô hiệu hoá/Bật lại GPU — Khôi phục "GPU is lost" sau Link Disable hoặc giải phóng DMA locks
+func gen2PnpRecoverGPU(devID uint16) bool {
+	devPattern := "DEV_1F0B"
+	if devID == 0x2189 {
+		devPattern = "DEV_2189"
+	} else if devID == 0 {
+		devPattern = "(DEV_1F0B|DEV_2189)"
+	} else {
+		devPattern = fmt.Sprintf("DEV_%04X", devID)
+	}
+	ps := fmt.Sprintf(`$devs = Get-PnpDevice -Class Display -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -match '%s' }; `+
+		`if ($devs) { foreach ($d in $devs) { try { pnputil /restart-device $d.InstanceId >$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {} }; Start-Sleep -Seconds 2; Write-Output "PnP-OK" } `+
+		`else { Write-Output 'PnP-NONE' }`, devPattern)
 	out, err := exec.Command("powershell", "-NoProfile", "-Command", ps).CombinedOutput()
 	fmt.Printf("    PnP Khôi phục: %s (err=%v)\n", strings.TrimSpace(string(out)), err)
 	return err == nil && strings.Contains(string(out), "PnP-OK")
+}
+
+func gen2PnpRecover40HX() bool {
+	return gen2PnpRecoverGPU(0x1F0B)
 }
 
 // Khởi động lại NVDisplay Container (phục hồi hiển thị GPU-Z / Task Manager)
@@ -2064,22 +2123,26 @@ func gen2RestartNVDisplay() {
 
 // Trong lúc -hard fallback, PnP reset GPU khiến handle cũ \\.\ThrottleStop / WinRing0 có thể bị hỏng -> mở lại
 func gen2ReopenDrivers(th, wh *syscall.Handle) bool {
-	hxcore.CloseHandle(*th)
-	hxcore.CloseHandle(*wh)
-	ok := true
-	if nt, e := hxcore.OpenThrottleStop(); e != nil {
-		fmt.Printf("    [!] Mở lại ThrottleStop thất bại: %v\n", e)
-		ok = false
-	} else {
-		*th = nt
+	if th != nil && *th != 0 {
+		hxcore.CloseHandle(*th)
+		*th = 0
+		if nt, e := hxcore.OpenThrottleStop(); e != nil {
+			fmt.Printf("    [!] Mở lại ThrottleStop thất bại: %v\n", e)
+		} else {
+			*th = nt
+		}
 	}
-	if nw, e := hxcore.OpenDevice(`\\.\WinRing0_1_2_0`); e != nil {
-		fmt.Printf("    [!] Mở lại WinRing0 thất bại: %v\n", e)
-		ok = false
-	} else {
-		*wh = nw
+	if wh != nil && *wh != 0 {
+		hxcore.CloseHandle(*wh)
+		*wh = 0
+		if nw, e := hxcore.OpenDevice(`\\.\WinRing0_1_2_0`); e != nil {
+			fmt.Printf("    [!] Mở lại WinRing0 thất bại: %v\n", e)
+			return false
+		} else {
+			*wh = nw
+		}
 	}
-	return ok
+	return wh == nil || *wh != 0
 }
 
 // Khôi phục GPU LNKCTL CCC (0x0140, Common Clock + Extended Synch) và vô hiệu hoá ASPM [1:0]

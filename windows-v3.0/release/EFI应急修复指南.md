@@ -1,69 +1,69 @@
-# 40HX Unlock 应急修复指南（引导损坏恢复）
+# Hướng Dẫn Cứu Hộ Khẩn Cấp 40HX Unlock (Khôi Phục Khi Lỗi Boot EFI)
 
-> **本文件仅在"装了解锁后开机引导出错"时使用**——正常使用请不要碰。
-> 适用范围：开机蓝屏报错 `0xc000000f` / `0xc000007b` / `0xc0000098`，
-> 提示找不到 `\EFI\40HX\40HXUNLK.EFI`，或卡在 40HX 解锁画面无法进系统。
-
----
-
-## 0. 为什么会这样 & 修复思路
-
-解锁工具会往 **EFI 系统分区（ESP）** 写入解锁固件并注册一个固件启动项。
-极少数情况下（固件文件不完整、主板时序、人为中断），会导致引导链断裂：
-
-```
-开机 → 主板按 NVRAM 启动项去找 \EFI\40HX\40HXUNLK.EFI
-     → 文件缺失/损坏 → Windows 引导管理器报 0xc000000f
-```
-
-**核心原则：这不是系统坏了，是"引导入口"被卡住了。**
-修复 = ① 删掉卡住的 40HX 启动项与残留文件 → ② 恢复/重建 Windows 自己的 BCD 引导数据库。
-
-**你需要准备一个 Windows 安装 U 盘**（官方媒体创建工具做的即可），
-或一个 Ubuntu 等 Linux 启动 U 盘（仅用于删文件，修不了 BCD）。
+> **Tài liệu này CHỈ dùng khi "sau khi cài đặt công cụ mở khoá bị lỗi khởi động EFI"** — khi máy hoạt động bình thường xin đừng can thiệp.
+> Phạm vi áp dụng: Khởi động máy hiện màn hình xanh báo lỗi `0xc000000f` / `0xc000007b` / `0xc0000098`,
+> hoặc báo không tìm thấy `\EFI\40HX\40HXUNLK.EFI`, hoặc bị treo ở màn hình 40HX Unlock không vào được Windows.
 
 ---
 
-## 1. 首选方案：Windows 安装 U 盘（一条路走完，推荐）
+## 0. Nguyên Nhân & Hướng Xử Lý
 
-### 1.1 启动到 Windows 恢复环境
+Công cụ mở khoá sẽ ghi firmware mở khoá vào **phân vùng hệ thống EFI (ESP)** và đăng ký một mục khởi động firmware.
+Trong một số rất ít trường hợp (file firmware không trọn vẹn, timing mainboard, mất điện đột ngột), chuỗi khởi động có thể bị gián đoạn:
 
-1. 插入 **Windows 安装 U 盘**，开机从它启动（UEFI 开头的那一项）。
-2. 看到安装界面后，点左下角 **修复计算机** → **疑难解答** → **高级选项** → **命令提示符**。
+```
+Khởi động máy → Mainboard theo mục boot NVRAM tìm \EFI\40HX\40HXUNLK.EFI
+             → File bị thiếu / hỏng → Windows Boot Manager báo lỗi 0xc000000f
+```
 
-### 1.2 挂载 EFI 分区
+**Nguyên tắc cốt lõi: Hệ điều hành Windows không hề bị hỏng, chỉ có "cổng vào khởi động" bị nghẽn.**
+Cách khắc phục = ① Xoá mục boot 40HX bị kẹt cùng các file tạm → ② Khôi phục / Tạo lại cơ sở dữ liệu boot BCD của chính Windows.
 
-在命令提示符里执行：
+**Bạn cần chuẩn bị một USB cài đặt Windows** (tạo bằng công cụ Media Creation Tool chính thức từ Microsoft là tốt nhất),
+hoặc một USB khởi động Linux như Ubuntu (chỉ dùng để xoá file, không thể sửa BCD).
+
+---
+
+## 1. Phương Án Tối Ưu: Dùng USB Cài Đặt Windows (Khuyến Nghị, 1 Quy Trình Hoàn Chỉnh)
+
+### 1.1 Khởi động vào môi trường phục hồi Windows (Windows Recovery Environment)
+
+1. Cắm **USB cài đặt Windows**, bật máy và chọn boot từ USB (chọn mục có tiền tố `UEFI:`).
+2. Khi thấy màn hình cài đặt Windows, bấm vào dòng **Repair your computer (Sửa chữa máy tính)** ở góc dưới bên trái → **Troubleshoot (Khắc phục sự cố)** → **Advanced options (Tuỳ chọn nâng cao)** → **Command Prompt (Dấu nhắc lệnh)**.
+
+### 1.2 Gắn ký tự ổ đĩa cho phân vùng EFI
+
+Trong cửa sổ Command Prompt, thực thi:
 
 ```bat
 diskpart
 list disk
-select disk 0        ← 你的系统盘，若不止一块盘先用 list disk 确认
+select disk 0        ← Ổ cứng cài Windows của bạn, nếu có nhiều ổ hãy dùng list disk để xác nhận
 list volume
 ```
 
-找到 **类型为"系统"（ESP，FAT32，一般 100~500MB）** 的那一卷，记下它的卷号（例如 2），然后：
+Tìm phân vùng có **loại là "System" (ESP, định dạng FAT32, thường có dung lượng 100~500MB)**, ghi nhớ số Volume (ví dụ: Volume 2), sau đó:
 
 ```bat
-select volume 2      ← 换成你看到的卷号
-assign letter=Z:     ← 把 EFI 分区挂成 Z 盘
+select volume 2      ← Thay bằng số Volume thực tế bạn vừa nhìn thấy
+assign letter=Z:     ← Gắn phân vùng EFI thành ổ Z:
 exit
 ```
 
-### 1.3 删除 40HX 解锁残留（关键）
+### 1.3 Xoá tệp tin tàn dư của 40HX Unlock (Quan trọng)
 
 ```bat
 Z:
 dir \EFI
 ```
 
-看到 `\EFI\40HX` 目录就删掉：
+Nếu thấy thư mục `\EFI\40HX`, tiến hành xoá:
 
 ```bat
 rmdir /s /q Z:\EFI\40HX
 ```
 
-顺手清理根目录和回退引导残留（有就删，没有跳过）：
+Đồng thời dọn dẹp các file nhật ký và bản sao lưu tại thư mục gốc EFI (nếu có thì xoá, không có thì bỏ qua):
 
 ```bat
 del Z:\40hx_log.txt
@@ -71,106 +71,106 @@ del Z:\40hx_vbios.bin
 del Z:\EFI\Boot\bootx64.efi.40hx.bak
 ```
 
-### 1.4 重建 Windows BCD 引导数据库（最关键）
+### 1.4 Tạo lại cơ sở dữ liệu khởi động Windows BCD (Quan trọng nhất)
 
 ```bat
 cd /d Z:\EFI\Microsoft\Boot
-ren BCD BCD.old              ← 旧的备份起来（好习惯）
+ren BCD BCD.old              ← Đổi tên BCD cũ để sao lưu
 bootrec /rebuildbcd
 ```
 
-按提示输入 `Y` 把扫描到的 Windows 加入引导。完成后可顺手修复引导记录（保险）：
+Làm theo hướng dẫn trên màn hình, nhập `Y` để thêm bản cài đặt Windows vừa quét được vào danh sách boot. Sau khi hoàn tất có thể chạy thêm các lệnh sửa bản ghi boot (để bảo đảm):
 
 ```bat
 bootrec /fixmbr
 bootrec /fixboot
 ```
 
-> 若 `bootrec /rebuildbcd` 扫不到系统，可改用（把 Z: 换成你的 ESP 盘符）：
+> Nếu lệnh `bootrec /rebuildbcd` không quét thấy hệ điều hành, bạn có thể dùng lệnh thay thế sau (thay Z: bằng ổ ESP bạn đã gán):
 > ```bat
 > bcdboot C:\Windows /s Z: /f UEFI
 > ```
 
-### 1.5 收尾重启
+### 1.5 Hoàn tất & Khởi động lại
 
 ```bat
 exit
 ```
 
-重启（拔掉 U 盘）。此时应能直接进 Windows。
+Khởi động lại máy tính (rút USB ra). Lúc này hệ thống sẽ vào thẳng Windows bình thường.
 
-### 1.6 进系统后的最后清理
+### 1.6 Dọn dẹp sau khi vào lại Windows
 
-以管理员运行发布包里的 **`40HXUninstaller.exe`**：
-它会删除剩余的计划任务 / 固件启动项 / 驱动与服务 / GSP 设置，让系统彻底回到出厂状态。
+Nhấp chuột phải chọn Run as administrator tệp **`40HXUninstaller.exe`** trong bộ công cụ phát hành:
+Công cụ sẽ tự động dọn sạch các Scheduled Task còn lại / mục boot firmware / driver và dịch vụ / cấu hình GSP, đưa hệ thống hoàn toàn về trạng thái sạch sẽ ban đầu.
 
-> 用 **EasyUEFI 或 BIOS 启动菜单**检查一下：确认启动顺序里 Windows Boot Manager 在第一位，没有 40HX Unlock 残留项。
+> Kiểm tra lại bằng **EasyUEFI hoặc Boot Menu BIOS**: Xác nhận Windows Boot Manager đang đứng ở vị trí đầu tiên và không còn mục 40HX Unlock tàn dư.
 
 ---
 
-## 2. 备选：Ubuntu / Linux U 盘（只能删文件，不能修 BCD）
+## 2. Phương Án Dự Phòng: Dùng USB Ubuntu / Linux (Chỉ Xoá Được File, Không Sửa Được BCD)
 
-> 只在没有 Windows 安装 U 盘时用来应急。**Linux 修不了 Windows 的 BCD**，
-> 删完文件后仍要用方案 1 的 `bootrec`/`bcdboot` 重建引导（或用 Windows U 盘）。
+> Chỉ áp dụng khi không có sẵn USB cài đặt Windows để chữa cháy. **Linux không sửa được BCD của Windows**,
+> sau khi xoá file bạn vẫn cần dùng lệnh `bootrec`/`bcdboot` ở Phương án 1 để tạo lại boot (hoặc mượn USB Windows sau).
 
-1. Ubuntu U 盘启动时，**务必选 `UEFI:` 开头的那一项**（否则看不到 EFI 变量）。
-2. 打开终端：
+1. Khi khởi động từ USB Ubuntu, **bắt buộc chọn mục có tiền tố `UEFI:`** (nếu không sẽ không truy cập được biến NVRAM EFI).
+2. Mở Terminal (Cửa sổ dòng lệnh):
 
 ```bash
-# 找到 EFI 分区（一般几百 MB 的 FAT32）
+# Tìm phân vùng EFI (thường vài trăm MB, định dạng FAT32)
 sudo lsblk -f
 
-# 挂载（nvme0n1p2 换成你的 EFI 分区）
+# Gắn phân vùng (thay nvme0n1p2 bằng tên phân vùng EFI thực tế của bạn)
 sudo mkdir -p /mnt/efi
 sudo mount /dev/nvme0n1p2 /mnt/efi
 
-# 删除 40HX 残留（目录 + 根目录杂物 + 回退备份）
+# Xoá tàn dư 40HX (thư mục + file rác ở gốc + backup)
 sudo rm -rf /mnt/efi/EFI/40HX
 sudo rm -f  /mnt/efi/40hx_log.txt /mnt/efi/40hx_vbios.bin
 sudo rm -f  /mnt/efi/EFI/Boot/bootx64.efi.40hx.bak
 
-# 确认没有残留
+# Xác nhận không còn tệp tin liên quan
 sudo find /mnt/efi -iname "*40hx*" -o -iname "*unlk*"
 ```
 
-3. 用 efibootmgr 删除 NVRAM 里的 40HX 启动项：
+3. Dùng efibootmgr để xoá mục boot 40HX trong NVRAM:
 
 ```bash
-sudo efibootmgr -v          # 找到 "40HX Unlock" 对应的 BootXXXX
-sudo efibootmgr -b 0001 -B  # 删除它（0001 换成实际编号）
+sudo efibootmgr -v          # Tìm mã BootXXXX tương ứng với "40HX Unlock"
+sudo efibootmgr -b 0001 -B  # Xoá mục đó (thay 0001 bằng số thực tế)
 ```
 
-4. `sudo umount /mnt/efi`，重启。
-5. **仍不能进系统的话** → 回到方案 1，用 Windows U 盘重建 BCD。
+4. Chạy `sudo umount /mnt/efi` và khởi động lại máy.
+5. **Nếu vẫn chưa vào được hệ thống** → Chuyển sang Phương án 1, dùng USB Windows để tạo lại BCD.
 
 ---
 
-## 3. 兜底：BIOS 层面
+## 3. Xử Lý Trực Tiếp Trong BIOS
 
-进 BIOS（开机狂按 Del / F2）：
+Truy cập BIOS (bật máy và nhấn liên tục phím Del hoặc F2):
 
-1. **Boot 菜单** → 找启动项列表，把 `40HX Unlock` 设为 **Disabled** 或删除；
-2. 确认 **Windows Boot Manager** 是第一启动项；
-3. 若开机菜单里 40HX Unlock 一直删不掉，尝试主板 **CMOS 清零**
-   （拔主板纽扣电池 30 秒，或 BIOS 里 Load Optimized Defaults）——这会清空 NVRAM 启动项。
-
----
-
-## 4. 修复成功标志
-
-- 开机直接进 Windows，无任何中间菜单 / 蓝屏报错；
-- BIOS 启动菜单里没有 40HX Unlock；
-- 事件日志不再报 `\EFI\40HX\40HXUNLK.EFI` 找不到。
+1. **Menu Boot** → Tìm danh sách mục khởi động, chuyển mục `40HX Unlock` sang **Disabled** hoặc bấm Delete để xoá;
+2. Xác nhận **Windows Boot Manager** được đặt ở vị trí khởi động số 1;
+3. Nếu mục 40HX Unlock không xoá được trong menu boot, hãy thử **Reset CMOS bo mạch chủ**
+   (tháo pin CMOS 30 giây hoặc chọn Load Optimized Defaults trong BIOS) — thao tác này sẽ đặt lại danh sách mục boot NVRAM.
 
 ---
 
-## 5. 怎么避免再次发生
+## 4. Dấu Hiệu Phục Hồi Thành Công
 
-1. **别在解锁固件工作时断电/强制重启**——固件写入 ESP 中途断电是损坏主因；
-2. 升级系统/驱动前建议先卸载解锁（`40HXUninstaller.exe`），完事再装回来；
-3. 有条件的话，用 DiskGenius / Macrium Reflect 定期备份 ESP 分区（很小，几百 KB）；
-4. 本次修复的完整复盘与命令备份见本目录 README 第 5 节"失败排查"与第 8 节——遇到同款报错直接按本文件第 1 节走即可。
+- Bật máy vào thẳng Windows, không xuất hiện menu trung gian hay màn hình xanh báo lỗi;
+- Trong Boot Menu của BIOS không còn mục 40HX Unlock;
+- Windows Event Log không còn ghi nhận lỗi thiếu file `\EFI\40HX\40HXUNLK.EFI`.
 
 ---
 
-*仅供个人硬件研究与学习使用，请遵守当地法律与硬件厂商条款。*
+## 5. Cách Phòng Tránh Sự Cố Lặp Lại
+
+1. **Tuyệt đối không tắt nguồn / ép khởi động lại khi firmware mở khoá đang chạy** — Mất điện giữa chừng khi ghi firmware vào ESP là nguyên nhân chính gây lỗi;
+2. Trước khi cập nhật Windows lớn hoặc nâng cấp driver đồ hoạ, nên gỡ công cụ mở khoá trước (`40HXUninstaller.exe`), sau khi cập nhật xong mới cài đặt lại;
+3. Nếu có điều kiện, định kỳ dùng DiskGenius / Macrium Reflect sao lưu phân vùng ESP (rất nhỏ, chỉ vài trăm KB);
+4. Để tìm hiểu chi tiết các bước xử lý lỗi khác, xem mục 5 "Xử lý sự cố" và mục 8 trong tệp README.md cùng thư mục.
+
+---
+
+*Tài liệu dành cho nghiên cứu phần cứng và học tập cá nhân. Vui lòng tuân thủ các quy định pháp luật và điều khoản bảo hành của nhà sản xuất phần cứng.*
