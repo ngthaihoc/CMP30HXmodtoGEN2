@@ -4,3 +4,5 @@
 *.log
 CLAUDE.md
 PROJECT_CONTEXT.md
+.agents/
+skills-lock.json

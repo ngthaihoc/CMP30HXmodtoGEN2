@@ -46,6 +46,8 @@ cd /d "%~dp0"
 
 if /i "%~1"=="-uninstall" goto :uninstall
 if /i "%~1"=="/u" goto :uninstall
+if /i "%~2"=="-uninstall" goto :uninstall
+if /i "%~2"=="/u" goto :uninstall
 
 echo ================================================================
 echo    CONG CU CAI DAT TU DONG GEN2 X16 CHO NVIDIA CMP 30HX (TU116)
@@ -117,16 +119,23 @@ if exist "%TARGET_INSTALLER%" (
 
 :: Tao script runner tu dong polling va Soft Reset neu bi ket Gen1 sau reboot
 set "FINAL_RUNNER=%FINAL_DIR%\RunUnlock.bat"
-powershell -NoProfile -ExecutionPolicy Bypass -Command @"
-@'
-@echo off
-setlocal
-cd /d "%~dp0"
-"40HXInstaller.exe" -gen2-30hx -silent
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 15; `$statusFile = [System.IO.Path]::Combine(`$env:ProgramData, '40HXUnlock\gen2_status.txt'); if (Test-Path `$statusFile) { `$c = Get-Content `$statusFile -Raw; if (`$c -match 'GPU TLS=Gen1|chua dat|chưa đạt') { `$devs = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { `$_.HardwareID -match 'VEN_10DE&(DEV_2189|DEV_1F0B)' }; foreach (`$d in `$devs) { try { pnputil /restart-device `$d.InstanceId >`$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId `$d.InstanceId -Confirm:`$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId `$d.InstanceId -Confirm:`$false -ErrorAction SilentlyContinue } catch {} }; Start-Sleep -Seconds 2; Start-Process -FilePath (Join-Path `$pwd.Path '40HXInstaller.exe') -ArgumentList '-gen2-30hx -silent' -Wait } }" >nul 2>&1
-endlocal
-'@ | Set-Content -Path $env:FINAL_RUNNER -Encoding ASCII -Force
-"@ >nul 2>&1
+set "SRC_RUNNER="
+if exist "%~dp0windows-v3.0\release\RunUnlock.bat" (
+    set "SRC_RUNNER=%~dp0windows-v3.0\release\RunUnlock.bat"
+) else if exist "%~dp0release\RunUnlock.bat" (
+    set "SRC_RUNNER=%~dp0release\RunUnlock.bat"
+) else if exist "%~dp0RunUnlock.bat" (
+    set "SRC_RUNNER=%~dp0RunUnlock.bat"
+)
+
+if defined SRC_RUNNER (
+    copy /y "%SRC_RUNNER%" "%FINAL_RUNNER%" >nul 2>&1
+)
+
+if not exist "%FINAL_RUNNER%" (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "[System.IO.File]::WriteAllBytes($env:FINAL_RUNNER, [System.Convert]::FromBase64String('QGVjaG8gb2ZmDQpzZXRsb2NhbA0KY2QgL2QgIiV+ZHAwIg0KIjQwSFhJbnN0YWxsZXIuZXhlIiAtZ2VuMi0zMGh4IC1zaWxlbnQNCnBvd2Vyc2hlbGwgLU5vUHJvZmlsZSAtRXhlY3V0aW9uUG9saWN5IEJ5cGFzcyAtQ29tbWFuZCAiU3RhcnQtU2xlZXAgLVNlY29uZHMgMTU7ICRzdGF0dXNGaWxlID0gW1N5c3RlbS5JTy5QYXRoXTo6Q29tYmluZShgJGVudjpQcm9ncmFtRGF0YSwgJzQwSFhVbmxvY2tcZ2VuMl9zdGF0dXMudHh0Jyk7IGlmIChUZXN0LVBhdGggYCRzdGF0dXNGaWxlKSB7IGAkYyA9IEdldC1Db250ZW50IGAkc3RhdHVzRmlsZSAtUmF3OyBpZiAoYCRjIC1tYXRjaCAnR1BVIFRMUz1HZW4xfGNodWEgZGF0fGNoxrBhIMSR4bqhdCcpIHsgYCRkZXZzID0gR2V0LVBucERldmljZSAtUHJlc2VudE9ubHkgLUVycm9yQWN0aW9uIFNpbGVudGx5Q29udGludWUgfCBXaGVyZS1PYmplY3QgeyBgJF8uSGFyZHdhcmVJRCAtbWF0Y2ggJ1ZFTl8xMERFJihERVZfMjE4OXxERVZfMUYwQiknIH07IGZvcmVhY2ggKGAkZCBpbiBgJGRldnMpIHsgdHJ5IHsgcG5wdXRpbCAvcmVzdGFydC1kZXZpY2UgYCRkLkluc3RhbmNlSWQgPmAkbnVsbCAyPiYxIH0gY2F0Y2gge307IHRyeSB7IERpc2FibGUtUG5wRGV2aWNlIC1JbnN0YW5jZUlkIGAkZC5JbnN0YW5jZUlkIC1Db25maXJtOmAkZmFsc2UgLUVycm9yQWN0aW9uIFNpbGVudGx5Q29udGludWU7IFN0YXJ0LVNsZWVwIC1NaWxsaXNlY29uZHMgODAwOyBFbmFibGUtUG5wRGV2aWNlIC1JbnN0YW5jZUlkIGAkZC5JbnN0YW5jZUlkIC1Db25maXJtOmAkZmFsc2UgLUVycm9yQWN0aW9uIFNpbGVudGx5Q29udGludWUgfSBjYXRjaCB7fSB9OyBTdGFydC1TbGVlcCAtU2Vjb25kcyAyOyBTdGFydC1Qcm9jZXNzIC1GaWxlUGF0aCAoSm9pbi1QYXRoIGAkcHdkLlBhdGggJzQwSFhJbnN0YWxsZXIuZXhlJykgLUFyZ3VtZW50TGlzdCAnLWdlbjItMzBoeCAtc2lsZW50JyAtV2FpdCB9IH0iID5udWwgMj4mMQplbmRsb2NhbA0K'))" >nul 2>&1
+)
+echo [V] Da thiet lap script duy tri khoi dong: "%FINAL_RUNNER%"
 echo.
 
 :: 1. Don dep task retry cu (neu co), tranh vong lap retry Gen3/Gen2 cu
@@ -209,7 +218,7 @@ if "%NEED_REBOOT%"=="1" (
     echo     Buoc hien tai co the khong nap duoc driver kernel; sau khi ket thuc hay reboot truoc khi danh gia.
 )
 echo [5/6] Dang kich hoat Gen2 x16 va toi uu MRRS 512B ngay...
-"%FINAL_INSTALLER%" -gen2-30hx
+"%FINAL_INSTALLER%" -gen2-30hx -silent
 if errorlevel 1 (
     echo       [X] Installer bao loi khi chay [exit code khac 0].
     echo           Kiem tra driver WinRing0/ThrottleStop, HVCI va quyen Administrator.
@@ -243,7 +252,7 @@ if "%NEED_DEV_RESET%"=="1" (
     echo       [*] Dang tu dong thuc hien chu trinh Soft Reset [Disable - Enable qua PnP]...
     powershell -NoProfile -ExecutionPolicy Bypass -Command "$devs = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -match 'VEN_10DE&(DEV_2189|DEV_1F0B)' }; if ($devs) { foreach ($d in $devs) { try { pnputil /restart-device $d.InstanceId >$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {} }; Start-Sleep -Seconds 2 } else { Write-Host 'Khong tim thay Instance ID qua PnP' }" >nul 2>&1
     echo       [*] Dang chay lai lenh mo khoa Gen2 sau khi Soft Reset card...
-    "%FINAL_INSTALLER%" -gen2-30hx
+    "%FINAL_INSTALLER%" -gen2-30hx -silent
     if not errorlevel 1 (
         set "UNLOCK_OK=1"
         if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
