@@ -47,16 +47,11 @@ schtasks /delete /tn "40HXGen2Retry" /f >nul 2>&1
 :: 2. Tat tinh nang tiet kiem dien PCIe ASPM va Hybrid Sleep (tranh bi ha ve Gen1 khi idle)
 echo [1/6] Dang tat PCIe ASPM va Hybrid Sleep...
 set "POWERCFG_OK=1"
-powercfg -setacvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0 >nul 2>&1
-if errorlevel 1 set "POWERCFG_OK=0"
-powercfg -setdcvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0 >nul 2>&1
-if errorlevel 1 set "POWERCFG_OK=0"
-powercfg -setacvalueindex SCHEME_CURRENT SUB_SLEEP HYBRIDSLEEP 0 >nul 2>&1
-if errorlevel 1 set "POWERCFG_OK=0"
-powercfg -setdcvalueindex SCHEME_CURRENT SUB_SLEEP HYBRIDSLEEP 0 >nul 2>&1
-if errorlevel 1 set "POWERCFG_OK=0"
-powercfg -setactive SCHEME_CURRENT >nul 2>&1
-if errorlevel 1 set "POWERCFG_OK=0"
+powercfg -setacvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0 >nul 2>&1 || set "POWERCFG_OK=0"
+powercfg -setdcvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0 >nul 2>&1 || set "POWERCFG_OK=0"
+powercfg -setacvalueindex SCHEME_CURRENT SUB_SLEEP HYBRIDSLEEP 0 >nul 2>&1 || set "POWERCFG_OK=0"
+powercfg -setdcvalueindex SCHEME_CURRENT SUB_SLEEP HYBRIDSLEEP 0 >nul 2>&1 || set "POWERCFG_OK=0"
+powercfg -setactive SCHEME_CURRENT >nul 2>&1 || set "POWERCFG_OK=0"
 if "%POWERCFG_OK%"=="1" (
     echo       [OK] Da tat PCIe ASPM va Hybrid Sleep.
 ) else (
@@ -91,15 +86,12 @@ if not errorlevel 1 set "NEED_REBOOT=1"
 reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" /v "Enabled" /t REG_DWORD /d 0 /f >nul 2>&1
 if errorlevel 1 (
     echo       [X] Khong tat duoc Memory Integrity. Windows co the van chan driver kernel.
-    set "HVCI_OK=0"
 ) else (
     reg query "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" /v "Enabled" 2>nul | %SystemRoot%\System32\findstr.exe /i "0x1" >nul 2>&1
     if not errorlevel 1 (
         echo       [X] Memory Integrity van dang ON. Can reboot va kiem tra lai Windows Security.
-        set "HVCI_OK=0"
         set "NEED_REBOOT=1"
     ) else (
-        set "HVCI_OK=1"
         if "%NEED_REBOOT%"=="1" (echo       [!] Da dat HVCI=OFF; can reboot de driver duoc giai phong.) else (echo       [OK] Memory Integrity dang OFF.)
     )
 )
@@ -110,16 +102,11 @@ set "TASK_OK=0"
 set "CMP30HX_INSTALLER=%INSTALLER%"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$exe=$env:CMP30HX_INSTALLER; if (-not [IO.Path]::IsPathRooted($exe)) { throw 'Duong dan installer khong hop le' }; $a1=New-ScheduledTaskAction -Execute 'powercfg.exe' -Argument '-setacvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0'; $a2=New-ScheduledTaskAction -Execute 'powercfg.exe' -Argument '-setdcvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0'; $a3=New-ScheduledTaskAction -Execute 'powercfg.exe' -Argument '-setactive SCHEME_CURRENT'; $a4=New-ScheduledTaskAction -Execute $exe -Argument '-gen2-30hx -silent'; $t=New-ScheduledTaskTrigger -AtStartup; $t.Delay='PT45S'; $p=New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest; Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action @($a1,$a2,$a3,$a4) -Trigger $t -Principal $p -Force" >nul 2>&1
 if not errorlevel 1 set "TASK_OK=1"
+if "%TASK_OK%"=="1" schtasks /query /tn "CMP30HX_Gen2_Unlock" >nul 2>&1 || set "TASK_OK=0"
 if "%TASK_OK%"=="1" (
-    schtasks /query /tn "CMP30HX_Gen2_Unlock" >nul 2>&1
-    if errorlevel 1 (
-        echo       [X] Scheduled Task SYSTEM khong ton tai sau khi tao. Khong dam bao persistence sau reboot.
-        set "TASK_OK=0"
-    ) else (
-        echo       [OK] Scheduled Task SYSTEM da duoc xac nhan; se chay khi Startup sau 45 giay.
-        echo           Sau reboot: dang nhap Windows, cho du 45 giay roi moi kiem tra Gen2.
-        echo           Task dang chay tu duong dan hien tai; khong di chuyen/xoa file nay sau khi cai dat.
-    )
+    echo       [OK] Scheduled Task SYSTEM da duoc xac nhan; se chay khi Startup sau 45 giay.
+    echo           Sau reboot: dang nhap Windows, cho du 45 giay roi moi kiem tra Gen2.
+    echo           Task dang chay tu duong dan hien tai; khong di chuyen/xoa file nay sau khi cai dat.
 ) else (
     echo       [X] Khong tao duoc Scheduled Task SYSTEM. Sau reboot can chay lai lenh mo khoa thu cong.
     echo           Ban fallback user da bi bo qua de tranh task user khong nap duoc driver kernel.

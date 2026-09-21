@@ -70,7 +70,7 @@ Mặc định `DEVCTL` (`cap + 0x08`) có Max Read Request Size (MRRS) đặt l�
 Công cụ tự động nâng MRRS lên **512 Bytes** (`0x2000`) và khởi động lại `NVDisplay.ContainerLocalSystem`, giúp băng thông đạt tối đa **~6.3 – 6.4 GB/s** (đạt ~98% lý thuyết của Gen2 x16).
 
 ### 0.3 Lệnh khởi động tự động Gen2 cho CMP 30HX khi bật máy
-Khuyến nghị chạy script **`Setup_CMP30HX.bat`** ở thư mục gốc để tự cấu hình 1-chạm.  
+Khuyến nghị chạy script **`Setup_CMP30HX_WindowsAIO.bat`** ở thư mục gốc để tự cấu hình 1-chạm.  
 Nếu muốn cấu hình thủ công:
 - **Trên PowerShell**:
 ```powershell

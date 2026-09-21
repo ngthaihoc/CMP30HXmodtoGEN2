@@ -1,12 +1,12 @@
 # <img src="https://api.iconify.design/carbon/chip.svg?color=%2310b981" width="32" height="32" align="center" /> Mở Khoá NVIDIA CMP 30HX v3.0.0 (PCIe Gen2 x16)
 
 [![GitHub Repo](https://img.shields.io/badge/GitHub-ngthaihoc%2FCMP30HXmodtoGEN2-181717?logo=github&logoColor=white)](https://github.com/ngthaihoc/CMP30HXmodtoGEN2)
-[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20x64-0078D6?logo=windows&logoColor=white)](https://microsoft.com)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-0078D6?logo=linux&logoColor=white)](https://kernel.org)
 [![GPU](https://img.shields.io/badge/NVIDIA-TU116-76B900?logo=nvidia&logoColor=white)](https://nvidia.com)
 [![PCIe](https://img.shields.io/badge/PCIe-Gen2%20x16%20(~6.4%20GB%2Fs)-orange)](https://pcisig.com)
 [![Test Signing](https://img.shields.io/badge/Test%20Signing-Không%20cần%20thiết-success)](#)
 
-Giải pháp mở khoá băng thông **PCIe Gen2 x16 (~6.4 GB/s)** cho card đồ hoạ **NVIDIA CMP 30HX (nhân TU116)** trên hệ điều hành Windows 10/11 x64.
+Giải pháp mở khoá băng thông **PCIe Gen2 x16 (~6.4 GB/s)** cho card đồ hoạ **NVIDIA CMP 30HX (nhân TU116)** trên các hệ điều hành Windows 10/11 x64 và Linux (Ubuntu, Debian, HiveOS, RaveOS, Fedora, Arch Linux).
 
 - **Cài đặt 1-chạm tự động**: Tự thiết lập môi trường, tắt tiết kiệm điện PCIe ASPM, cấu hình Memory Integrity và tự động kích hoạt khi bật máy.
 - **Tương thích mọi Driver**: Hỗ trợ toàn bộ driver NVIDIA (chính thức, desktop, mod, phiên bản mới nhất, không giới hạn bản 537.58).
@@ -45,7 +45,7 @@ Giải pháp mở khoá băng thông **PCIe Gen2 x16 (~6.4 GB/s)** cho card đ�
 
 ### Cách 1: Cài đặt tự động 1-chạm (Khuyến nghị cho mọi người dùng)
 
-Trong thư mục vừa giải nén, nhấp chuột phải vào tệp **`Setup_CMP30HX.bat`** và chọn **Run as administrator** (hoặc nhấp đúp chuột, script sẽ tự động yêu cầu quyền Admin nếu cần).
+Trong thư mục vừa giải nén, nhấp chuột phải vào tệp **`Setup_CMP30HX_WindowsAIO.bat`** và chọn **Run as administrator** (hoặc nhấp đúp chuột, script sẽ tự động yêu cầu quyền Admin nếu cần).
 
 Script sẽ tự động thực hiện tuần tự 6 bước tối ưu hệ thống:
 1. **Tắt PCIe ASPM (Active State Power Management) & Hybrid Sleep**:
@@ -117,6 +117,34 @@ Nếu muốn tự kiểm soát từng bước qua cửa sổ dòng lệnh (Termi
 
 ---
 
+### Cách 3: Cài đặt tự động trên Linux (Ubuntu, Debian, HiveOS, RaveOS, Fedora, Arch Linux)
+
+Dành cho các máy chạy Linux hoặc trâu cày/AI server dùng Linux. Tệp **`Setup_CMP30HX_LinuxAIO.sh`** là bộ công cụ All-In-One riêng biệt, chạy trực tiếp không cần cài thêm driver bên ngoài:
+
+```bash
+chmod +x Setup_CMP30HX_LinuxAIO.sh
+sudo ./Setup_CMP30HX_LinuxAIO.sh
+```
+
+**Tính năng tự động của `Setup_CMP30HX_LinuxAIO.sh`:**
+1. **Tắt PCIe ASPM & Runtime Power Management**: Đặt policy kernel sang `performance` và đặt `power/control=on` cho toàn bộ thiết bị PCI, chống tụt Gen1 khi idle.
+2. **Quét & Xử lý toàn bộ card đồ họa**: Tự động phát hiện và áp dụng cho tất cả card CMP 30HX (`10de:2189`) và CMP 40HX (`10de:1f0b`) trên máy.
+3. **BAR0 MMIO Direct Injection**: Can thiệp thanh ghi kernel (`XVE_OVR`, `PRIV_MISC_1`, `LINK_CONFIG_0`, `LNKCAP`, `LNKCTL2`).
+4. **Tối ưu MRRS 512B & Retrain Link**: Cấu hình Target Link Speed = Gen2, nâng Max Read Request Size lên 512 Bytes (DEVCTL) và thực hiện chu trình retrain đạt trần ~6.4 GB/s.
+5. **Cài đặt Systemd Service & Sleep Hook**: Tự động kích hoạt service `cmp30hx-gen2-unlock.service` và sleep hook `/lib/systemd/system-sleep/cmp30hx-unlock` để duy trì Gen2 sau khi reboot hoặc wake up.
+
+**Các lệnh tiện ích trên Linux:**
+- Kiểm tra trạng thái link & MRRS hiện tại:
+  ```bash
+  sudo ./Setup_CMP30HX_LinuxAIO.sh --status
+  ```
+- Gỡ bỏ hoàn toàn systemd service và hook:
+  ```bash
+  sudo ./Setup_CMP30HX_LinuxAIO.sh --uninstall
+  ```
+
+---
+
 ## <img src="https://api.iconify.design/lucide/check-circle.svg?color=%2306b6d4" width="22" height="22" align="center" /> 3. Kiểm Tra & Xác Nhận Băng Thông
 
 Sau khi kích hoạt (hoặc sau khi đăng nhập lại Windows), kiểm tra bằng 2 công cụ sau:
@@ -137,8 +165,8 @@ Sau khi kích hoạt (hoặc sau khi đăng nhập lại Windows), kiểm tra b�
 
 | Hiện tượng | Nguyên nhân | Hướng giải quyết |
 |---|---|---|
-| **Kẹt ở Gen1 (GPU TLS=Gen1, Root TLS=Gen2)** | Windows bật Memory Integrity (HVCI) chặn nạp driver kernel can thiệp MMIO, hoặc cáp Riser lỏng / tiếp xúc kém | 1. Chạy `Setup_CMP30HX.bat` và **Khởi động lại máy tính (Reboot)**.<br>2. Cắm card trực tiếp vào khe PCIe x16 nối CPU, hạn chế dùng cáp riser. |
-| **Bị tụt về Gen1 x16 khi card ở chế độ rảnh (Idle)** | Tính năng tiết kiệm điện PCIe ASPM của Windows đang bật | Chạy lại `Setup_CMP30HX.bat` (script tự động tắt ASPM) hoặc chỉnh trong Power Options $\rightarrow$ PCI Express $\rightarrow$ Link State Power Management: **Off**. |
+| **Kẹt ở Gen1 (GPU TLS=Gen1, Root TLS=Gen2)** | Windows bật Memory Integrity (HVCI) chặn nạp driver kernel can thiệp MMIO, hoặc cáp Riser lỏng / tiếp xúc kém | 1. Chạy `Setup_CMP30HX_WindowsAIO.bat` và **Khởi động lại máy tính (Reboot)**.<br>2. Cắm card trực tiếp vào khe PCIe x16 nối CPU, hạn chế dùng cáp riser. |
+| **Bị tụt về Gen1 x16 khi card ở chế độ rảnh (Idle)** | Tính năng tiết kiệm điện PCIe ASPM của Windows đang bật | Chạy lại `Setup_CMP30HX_WindowsAIO.bat` (script tự động tắt ASPM) hoặc chỉnh trong Power Options $\rightarrow$ PCI Express $\rightarrow$ Link State Power Management: **Off**. |
 | **GPU-Z báo Gen2 x16 nhưng AIDA64 chỉ đạt ~2.5 GB/s** | Giá trị Max Read Request Size (MRRS) của card bị kẹp ở 128 Bytes mặc định | Chạy lệnh `40HXInstaller.exe -gen2-30hx` để nâng MRRS lên 512 Bytes và nạp lại hàng đợi DMA. |
 | **Không nhận diện được GPU / Mã lỗi 43** | Mối hàn trở mod lane x16 chưa tiếp xúc tốt hoặc card chưa nhận driver | 1. Kiểm tra lại mối hàn trở trên card.<br>2. Cài lại driver NVIDIA (có thể dùng DDU quét sạch driver cũ rồi cài bản mới nhất). |
 | **Đã thử mọi cách fix vẫn không được** | Driver NVIDIA bị xung đột cấu hình, profile registry lưu đè hoặc service driver lỗi | Gỡ sạch driver cũ bằng **DDU (Display Driver Uninstaller)** rồi tiến hành cài đặt lại driver NVIDIA. |
@@ -148,7 +176,7 @@ Sau khi kích hoạt (hoặc sau khi đăng nhập lại Windows), kiểm tra b�
 ## <img src="https://api.iconify.design/lucide/trash-2.svg?color=%23ef4444" width="22" height="22" align="center" /> 5. Gỡ Cài Đặt (Uninstall)
 
 Khi muốn đưa hệ thống về trạng thái ban đầu:
-- **Cách nhanh**: Chạy lệnh `Setup_CMP30HX.bat -uninstall`.
+- **Cách nhanh**: Chạy lệnh `Setup_CMP30HX_WindowsAIO.bat -uninstall`.
 - **Cách qua giao diện**: Nhấp chuột phải vào **`40HXUninstaller.exe`** $\rightarrow$ chọn **Run as administrator**.
 
 Hệ thống sẽ tự động dọn dẹp sạch sẽ:
