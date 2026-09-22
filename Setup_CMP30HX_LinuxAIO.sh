@@ -262,6 +262,8 @@ try:
     write_u32(0x0008872C, 0x00000006)
     # 0x0008C040: LINK_CONFIG_0
     write_u32(0x0008C040, 0x80085800)
+    # 0x0008C1C0: PL_LINK_RATE (bit 20 = 0, Power Limit Gen2 link rate)
+    write_u32(0x0008C1C0, 0x00240036)
     # 0x0008C2C0: CYA_0
     write_u32(0x0008C2C0, 0x068731B3)
     # 0x0008872C: XVE_OVR confirm
@@ -438,6 +440,59 @@ unlock_gpu_pcie() {
         fi
         attempt=$((attempt + 1))
     done
+
+    # Stage 2: Tu dong Soft Reset PCI bus va giai phong GPU process neu Stage 1 chua dat
+    if [[ ${speed_achieved} -eq 0 ]]; then
+        echo -e "    ${C_YELLOW}[!] Retrain lan 1 chua dat Gen2. Dang thuc thi Stage 2: Soft Reset PCI bus (cmpunlocker2 method)...${C_RESET}"
+        if command -v fuser >/dev/null 2>&1; then
+            fuser -k /dev/nvidia* /dev/dri/* 2>/dev/null || true
+            sleep 1.0
+        fi
+
+        local dev_sys="/sys/bus/pci/devices/${gpu_bdf}"
+        if [[ ! -d "${dev_sys}" ]]; then
+            dev_sys="/sys/bus/pci/devices/0000:${gpu_bdf}"
+        fi
+
+        if [[ -e "${dev_sys}/remove" ]]; then
+            echo 1 > "${dev_sys}/remove" 2>/dev/null || true
+            sleep 2.0
+            echo 1 > /sys/bus/pci/rescan 2>/dev/null || true
+            sleep 2.0
+
+            # Tai inject MMIO va retrain lai sau reset
+            inject_bar0_mmio "${gpu_bdf}"
+            setpci -s "${gpu_bdf}" "${gpu_cap}"+0x30.w="${new_gpu_ctl2}" 2>/dev/null || true
+            if [[ -n "${root_bdf}" && -n "${root_cap}" ]]; then
+                setpci -s "${root_bdf}" "${root_cap}"+0x30.w="${new_root_ctl2}" 2>/dev/null || true
+            fi
+
+            # Retrain lai sau Soft Reset
+            for r_att in 1 2; do
+                local t_bdf="${gpu_bdf}"
+                local t_cap="${gpu_cap}"
+                if [[ ${r_att} -eq 1 && -n "${root_bdf}" && -n "${root_cap}" ]]; then
+                    t_bdf="${root_bdf}"
+                    t_cap="${root_cap}"
+                fi
+                local cv_raw
+                cv_raw=$(setpci -s "${t_bdf}" "${t_cap}"+0x10.w 2>/dev/null || true)
+                local cv
+                cv=$(parse_hex "${cv_raw}")
+                setpci -s "${t_bdf}" "${t_cap}"+0x10.w="$(printf "%04x" $(( cv | 0x0020 )))" 2>/dev/null || true
+                sleep 2.0
+
+                local r_sta_raw
+                r_sta_raw=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x12.w 2>/dev/null || true)
+                local r_speed=$(( $(parse_hex "${r_sta_raw}") & 0xF ))
+                if [[ ${r_speed} -ge 2 ]]; then
+                    echo -e "    ${C_GREEN}[V] Stage 2 Soft Reset: DA DAT GEN${r_speed}!${C_RESET}"
+                    speed_achieved=1
+                    break
+                fi
+            done
+        fi
+    fi
 
     # Doc lai ket qua cuoi cung
     local final_sta_raw
