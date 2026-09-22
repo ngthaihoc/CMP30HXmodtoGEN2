@@ -14,6 +14,14 @@ for %%a in (%*) do (
     if /i "%%~a"=="/test" set "IS_MOCK=1"
     if /i "%%~a"=="-mock" set "IS_MOCK=1"
     if /i "%%~a"=="/mock" set "IS_MOCK=1"
+    if /i "%%~a"=="-mock-fail" (
+        set "IS_MOCK=1"
+        set "IS_MOCK_FAIL=1"
+    )
+    if /i "%%~a"=="/mock-fail" (
+        set "IS_MOCK=1"
+        set "IS_MOCK_FAIL=1"
+    )
     if /i "%%~a"=="-nocheck" set "NO_CHECK=1"
     if /i "%%~a"=="/nocheck" set "NO_CHECK=1"
     if /i "%%~a"=="-nowait" set "NO_WAIT=1"
@@ -289,9 +297,20 @@ if "%NEED_DEV_RESET%"=="1" (
     echo.
     echo       [!] Phat hien GPU TLS van o Gen1 [driver mod / iGPU dang giu DMA context].
     echo       [*] Dang tu dong thuc hien chu trinh Soft Reset [Disable - Enable qua PnP]...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$devs = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -match 'VEN_10DE&(DEV_2189|DEV_1F0B)' }; if ($devs) { foreach ($d in $devs) { try { pnputil /restart-device $d.InstanceId >$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {} }; Start-Sleep -Seconds 2 } else { Write-Host 'Khong tim thay Instance ID qua PnP' }" >nul 2>&1
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$devs = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -match 'VEN_10DE&(DEV_2189|DEV_1F0B)' }; if ($devs) { foreach ($d in $devs) { try { pnputil /restart-device $d.InstanceId >$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {} }; Start-Sleep -Seconds 2; try { Restart-Service NVDisplay.ContainerLocalSystem -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 } catch {} } else { Write-Host 'Khong tim thay Instance ID qua PnP' }" >nul 2>&1
     echo       [*] Dang chay lai lenh mo khoa Gen2 sau khi Soft Reset card...
-    if "%IS_MOCK%"=="1" (
+    if "%IS_MOCK_FAIL%"=="1" (
+        echo       [*] [MOCK TEST FAIL] Mo phong Soft Reset khong the cuu van, GPU van kiet o Gen1...
+        (
+            echo ==== 40HX Gen2 Ket qua [MOCK TEST - THAT BAI] ====
+            echo GPU: NVIDIA CMP 30HX [TU116] [DEV_2189]
+            echo PCIe Link Width: x16
+            echo PCIe Link Speed: GPU TLS=Gen1 [2.5 GT/s]
+            echo Trang thai: chua dat muc tieu Gen2! [Soft Reset khong the cuu van link]
+            echo Quyen thuc thi: Quan tri vien / SYSTEM
+        ) > "%ProgramData%\40HXUnlock\gen2_status.txt"
+        set "UNLOCK_OK=0"
+    ) else if "%IS_MOCK%"=="1" (
         echo       [*] [MOCK TEST] Mo phong Installer lan 2: Soft Reset thanh cong, GPU bung Gen2 x16 [5.0 GT/s]!
         (
             echo ==== 40HX Gen2 Ket qua [MOCK TEST - LAN 2 SAU SOFT RESET] ====
