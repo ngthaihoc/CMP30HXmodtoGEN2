@@ -1,3 +1,10 @@
+<p align="right">
+  <b>Ngôn ngữ:</b>
+  <b>Tiếng Việt</b> |
+  <a href="README_EN.md">English</a> |
+  <a href="README_ZH.md">简体中文</a>
+</p>
+
 # <img src="https://api.iconify.design/carbon/chip.svg?color=%2310b981" width="32" height="32" align="center" /> Mở Khoá NVIDIA CMP 30HX v3.0.0 (PCIe Gen2 x16)
 
 [![GitHub Repo](https://img.shields.io/badge/GitHub-ngthaihoc%2FCMP30HXmodtoGEN2-181717?logo=github&logoColor=white)](https://github.com/ngthaihoc/CMP30HXmodtoGEN2)
