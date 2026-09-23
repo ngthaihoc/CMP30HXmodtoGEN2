@@ -3,11 +3,22 @@ setlocal EnableDelayedExpansion
 chcp 65001 >nul
 title CMP 30HX Gen2 Automated Mock Test Suite
 
+:: Kiem tra co truyen tham so bo qua UAC khong (-noadmin)
+set "NO_ADMIN=0"
+for %%a in (%*) do (
+    if /i "%%~a"=="-noadmin" set "NO_ADMIN=1"
+    if /i "%%~a"=="/noadmin" set "NO_ADMIN=1"
+)
+
 :: Kiem tra quyen Administrator
 set "IS_ELEVATED=0"
-fltmc >nul 2>&1 && set "IS_ELEVATED=1"
-if "!IS_ELEVATED!"=="0" (
-    fsutil dirty query %systemdrive% >nul 2>&1 && set "IS_ELEVATED=1"
+if "%NO_ADMIN%"=="1" (
+    set "IS_ELEVATED=1"
+) else (
+    fltmc >nul 2>&1 && set "IS_ELEVATED=1"
+    if "!IS_ELEVATED!"=="0" (
+        fsutil dirty query %systemdrive% >nul 2>&1 && set "IS_ELEVATED=1"
+    )
 )
 
 if "!IS_ELEVATED!"=="0" (
@@ -38,33 +49,21 @@ set /a FAILED_TESTS=0
 set "IS_CLI=0"
 
 :: Phan tich tham so dong lenh truc tiep
-if /i "%~1"=="-clean" (
-    set "IS_CLI=1"
-    goto :cmd_clean
+set "TARGET_CMD="
+for %%a in (%*) do (
+    if /i "%%~a"=="-clean" set "TARGET_CMD=cmd_clean"
+    if /i "%%~a"=="-uninstall" set "TARGET_CMD=cmd_clean"
+    if /i "%%~a"=="/u" set "TARGET_CMD=cmd_clean"
+    if /i "%%~a"=="-run" set "TARGET_CMD=cmd_run"
+    if /i "%%~a"=="-test" set "TARGET_CMD=cmd_run"
+    if /i "%%~a"=="-fail" set "TARGET_CMD=cmd_fail"
+    if /i "%%~a"=="-winring0" set "TARGET_CMD=cmd_winring0"
+    if /i "%%~a"=="-nogpu" set "TARGET_CMD=cmd_nogpu"
+    if /i "%%~a"=="-auto" set "TARGET_CMD=cmd_auto"
 )
-if /i "%~1"=="-uninstall" (
+if defined TARGET_CMD (
     set "IS_CLI=1"
-    goto :cmd_clean
-)
-if /i "%~1"=="/u" (
-    set "IS_CLI=1"
-    goto :cmd_clean
-)
-if /i "%~1"=="-run" (
-    set "IS_CLI=1"
-    goto :cmd_run
-)
-if /i "%~1"=="-test" (
-    set "IS_CLI=1"
-    goto :cmd_run
-)
-if /i "%~1"=="-fail" (
-    set "IS_CLI=1"
-    goto :cmd_fail
-)
-if /i "%~1"=="-auto" (
-    set "IS_CLI=1"
-    goto :cmd_auto
+    goto :!TARGET_CMD!
 )
 
 :menu
@@ -74,20 +73,24 @@ echo    BO TRINH KIEM THU TU DONG HOA CMP 30HX GEN2 (TEST SUITE)
 echo ================================================================
 echo.
 echo  [1] Test Suite 1: Kiem thu nhanh thanh cong (Gen1 - Soft Reset - Gen2)
-echo  [2] Test Suite 2: Kiem thu nhanh that bai (Mock Failure Branch)
-echo  [3] Test Suite 3: Don dep / Go bo cai dat he thong (Uninstall)
-echo  [4] Full Test Suite: Chay tat ca 3 Suites + Assertions + Report
-echo  [5] Thoat
+echo  [2] Test Suite 2: Kiem thu nhanh that bai (Soft Reset khong the cuu van)
+echo  [3] Test Suite 3: Kiem thu driver WinRing0 bi chan (HVCI / Access Denied)
+echo  [4] Test Suite 4: Kiem thu khong tim thay GPU CMP 30HX tren bus PCI
+echo  [5] Test Suite 5: Don dep / Go bo cai dat he thong (Uninstall)
+echo  [6] Full Test Suite: Chay tat ca 5 Suites + Assertions + Report
+echo  [7] Thoat
 echo.
 echo ================================================================
-set /p "CHOICE=Nhap lua chon cua ban [1-5] (Mac dinh: 4): "
-if "%CHOICE%"=="" set "CHOICE=4"
+set /p "CHOICE=Nhap lua chon cua ban [1-7] (Mac dinh: 6): "
+if "%CHOICE%"=="" set "CHOICE=6"
 
 if "%CHOICE%"=="1" goto :cmd_run
 if "%CHOICE%"=="2" goto :cmd_fail
-if "%CHOICE%"=="3" goto :cmd_clean
-if "%CHOICE%"=="4" goto :cmd_auto
-if "%CHOICE%"=="5" exit /b 0
+if "%CHOICE%"=="3" goto :cmd_winring0
+if "%CHOICE%"=="4" goto :cmd_nogpu
+if "%CHOICE%"=="5" goto :cmd_clean
+if "%CHOICE%"=="6" goto :cmd_auto
+if "%CHOICE%"=="7" exit /b 0
 
 echo [!] Lua chon khong hop le.
 timeout /t 2 >nul
@@ -127,9 +130,43 @@ if not "!IS_CLI!"=="1" (
 )
 exit /b !SUB_EC!
 
+:cmd_winring0
+cls
+echo [*] KHOI CHAY TEST SUITE 3 (WINRING0 DRIVER BLOCKED)...
+call :test_suite_winring0
+call :print_summary
+set "SUB_EC=!ERRORLEVEL!"
+if not "!IS_CLI!"=="1" (
+    echo.
+    set /p "CLEAN_NOW=Ban co muon don dep sach ngay bay gio khong? (Y/N, mac dinh Y): "
+    if "!CLEAN_NOW!"=="" set "CLEAN_NOW=y"
+    if /i "!CLEAN_NOW!"=="y" (
+        call :test_suite_uninstall
+    )
+    pause
+)
+exit /b !SUB_EC!
+
+:cmd_nogpu
+cls
+echo [*] KHOI CHAY TEST SUITE 4 (NO GPU CMP 30HX FOUND)...
+call :test_suite_nogpu
+call :print_summary
+set "SUB_EC=!ERRORLEVEL!"
+if not "!IS_CLI!"=="1" (
+    echo.
+    set /p "CLEAN_NOW=Ban co muon don dep sach ngay bay gio khong? (Y/N, mac dinh Y): "
+    if "!CLEAN_NOW!"=="" set "CLEAN_NOW=y"
+    if /i "!CLEAN_NOW!"=="y" (
+        call :test_suite_uninstall
+    )
+    pause
+)
+exit /b !SUB_EC!
+
 :cmd_clean
 cls
-echo [*] KHOI CHAY TEST SUITE 3 (UNINSTALL ^& CLEANUP)...
+echo [*] KHOI CHAY TEST SUITE 5 (UNINSTALL ^& CLEANUP)...
 call :test_suite_uninstall
 call :print_summary
 set "SUB_EC=!ERRORLEVEL!"
@@ -139,10 +176,12 @@ exit /b !SUB_EC!
 :cmd_auto
 cls
 echo ================================================================
-echo    CHAY KIEM THU TU DONG TOAN BO TEST SUITES VA ASSERTIONS
+echo    CHAY KIEM THU TU DONG TOAN BO 5 TEST SUITES VA ASSERTIONS
 echo ================================================================
 call :test_suite_happy
 call :test_suite_fail
+call :test_suite_winring0
+call :test_suite_nogpu
 call :test_suite_uninstall
 call :print_summary
 set "FINAL_EC=!ERRORLEVEL!"
@@ -183,13 +222,39 @@ call :assert_file_exists "%STATUS_FILE%" "File gen2_status.txt duoc ghi nhan"
 call :assert_file_contains "%STATUS_FILE%" "chua dat muc tieu Gen2!" "Xac nhan trang thai chua dat Gen2"
 exit /b 0
 
-:test_suite_uninstall
+:test_suite_winring0
 echo.
-echo [*] [TEST SUITE 3] Kiem thu go bo va don dep sach se he thong...
-call "%TARGET_BAT%" -uninstall -nowait -noadmin
+echo [*] [TEST SUITE 3] Kiem thu driver WinRing0 bi chan (HVCI / Blocklist / Error 5)...
+call :clean_baseline
+call "%TARGET_BAT%" -mock-winring0 -nocheck -nowait -noadmin
 set "EC=!ERRORLEVEL!"
 echo.
 echo     --- Ket qua kiem tra (Assertions - Suite 3) ---
+call :assert_exit_code "1" "!EC!" "Setup tra ve ExitCode 1 khi driver bi chan"
+call :assert_file_exists "%STATUS_FILE%" "File gen2_status.txt duoc tao"
+call :assert_file_contains "%STATUS_FILE%" "WinRing0" "File status ghi nhan loi driver WinRing0"
+exit /b 0
+
+:test_suite_nogpu
+echo.
+echo [*] [TEST SUITE 4] Kiem thu khong tim thay GPU CMP 30HX tren bus PCI...
+call :clean_baseline
+call "%TARGET_BAT%" -mock-nogpu -nocheck -nowait -noadmin
+set "EC=!ERRORLEVEL!"
+echo.
+echo     --- Ket qua kiem tra (Assertions - Suite 4) ---
+call :assert_exit_code "1" "!EC!" "Setup tra ve ExitCode 1 khi khong tim thay GPU"
+call :assert_file_exists "%STATUS_FILE%" "File gen2_status.txt duoc tao"
+call :assert_file_contains "%STATUS_FILE%" "PCI" "File status ghi nhan loi PCI bus"
+exit /b 0
+
+:test_suite_uninstall
+echo.
+echo [*] [TEST SUITE 5] Kiem thu go bo va don dep sach se he thong...
+call "%TARGET_BAT%" -uninstall -nowait -noadmin
+set "EC=!ERRORLEVEL!"
+echo.
+echo     --- Ket qua kiem tra (Assertions - Suite 5) ---
 call :assert_exit_code "0" "!EC!" "Lenh Uninstall tra ve ExitCode 0"
 call :assert_task_not_exists "CMP30HX_Gen2_Unlock" "Scheduled Task da bi xoa triet de"
 call :assert_reg_not_exists "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" "CMP30HX_Gen2" "Registry Run Key HKLM da bi xoa"
