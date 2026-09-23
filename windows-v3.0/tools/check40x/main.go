@@ -150,7 +150,7 @@ func classifyLoadErr(raw string) string {
 	case strings.Contains(r, "1072"):
 		return "Dịch vụ đang ở trạng thái tồn đọng 'Đánh dấu để xóa' (Lỗi 1072) — Công cụ đã tạo lại và thử lại"
 	case strings.Contains(r, "拒绝访问"), strings.Contains(r, "access is denied"), strings.Contains(r, "error 5"), strings.Contains(r, " 5:"):
-		return "Không đủ quyền hạn (Lỗi 5) — Vui lòng chạy công cụ này với quyền Quản trị viên (Run as Administrator)"
+		return "Không đủ quyền hạn hoặc bị chặn driver (Lỗi 5 / Access Denied) — Nếu đã chạy Administrator: Lỗi do Tính toàn vẹn bộ nhớ (HVCI) hoặc Danh sách chặn driver (Vulnerable Driver Blocklist). CẦN KHỞI ĐỘNG LẠI MÁY (REBOOT) để Windows áp dụng tắt HVCI."
 	case strings.Contains(r, "1060"), strings.Contains(r, "不存在"):
 		return "Không tìm thấy dịch vụ (Lỗi 1060) — Tệp driver chưa được triển khai thành công, hãy chạy lại trình cài đặt rồi thử lại"
 	}
@@ -511,14 +511,20 @@ func check() {
 
 	// --- B. Trạng thái cơ bản ---
 	gspTxt := "✗ Chưa bật (Sau khi cài driver NVIDIA sẽ do bộ cài tự thiết lập)"
-	if gsOn {
+	if cmp30HX {
+		gspTxt = "Không hỗ trợ (TU116 không có phần cứng GSP - Bỏ qua)"
+	} else if gsOn {
 		gspTxt = "✓ Đã bật"
 	} else if sub == "" {
 		gspTxt = "— Không tìm thấy khoá GSP (Cần cài driver NVIDIA trước mới có thể bật GSP)"
 	}
+	sbTxt := map[bool]string{true: "Bật (Cần tắt!)", false: "Tắt (OK)"}[sbOn]
+	if cmp30HX {
+		sbTxt = map[bool]string{true: "Bật (OK - Tương thích Riot Vanguard)", false: "Tắt (OK)"}[sbOn]
+	}
 	w("GPU CMP : %s   Secure Boot: %s   GSP: %s\n",
 		map[bool]string{true: "✓", false: "✗"}[gpuOK],
-		map[bool]string{true: "Bật (Cần tắt!)", false: "Tắt (OK)"}[sbOn], gspTxt)
+		sbTxt, gspTxt)
 	w("Ký thử nghiệm: %s  (v2.5 trở lên không cần, khuyến nghị tắt)\n",
 		map[bool]string{true: "Đã bật", false: "Tắt"}[tsOn])
 
@@ -654,13 +660,13 @@ func check() {
 	if !gpuOK {
 		tips = append(tips, "· Không phát hiện card CMP: Xác nhận card đã cắm và driver đã cài đặt")
 	}
-	if sbOn {
+	if !cmp30HX && sbOn {
 		tips = append(tips, "· Secure Boot đang bật: Vào BIOS để tắt (nếu không EFI mở khoá sẽ bị từ chối)")
 	}
 	if tsOn {
 		tips = append(tips, "· Chế độ Test Signing đang bật (v2.5 trở lên không cần): bcdedit /set testsigning off để tắt")
 	}
-	if !gsOn {
+	if !cmp30HX && !gsOn {
 		tips = append(tips, "· GSP chưa bật: Mở 40HXInstaller.exe -> ① Chọn [Bật GSP] -> Bấm [Cài đặt các mục đã chọn]")
 	}
 	if gpuOK && st.SS0OK && !st.Unlocked {

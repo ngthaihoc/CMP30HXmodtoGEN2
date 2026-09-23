@@ -510,6 +510,20 @@ if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
 
 :skip_dev_reset
 
+:: Cap nhat lai chinh xac nguyen nhan that bai tu gen2_status.txt (sau Soft Reset neu co)
+if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
+    %SystemRoot%\System32\find.exe /i "WinRing0" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "IS_DRV_FAIL=1"
+    %SystemRoot%\System32\find.exe /i "ThrottleStop" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "IS_DRV_FAIL=1"
+    %SystemRoot%\System32\find.exe /i "Loi 5" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "IS_DRV_FAIL=1"
+    %SystemRoot%\System32\find.exe /i "Error 5" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "IS_DRV_FAIL=1"
+    %SystemRoot%\System32\find.exe /i "ERROR_ACCESS_DENIED" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "IS_DRV_FAIL=1"
+    %SystemRoot%\System32\find.exe /i "bus PCI" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "IS_NOGPU_FAIL=1"
+    %SystemRoot%\System32\find.exe /i "Khong tim thay" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "IS_NOGPU_FAIL=1"
+    %SystemRoot%\System32\find.exe /i "not found" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "IS_NOGPU_FAIL=1"
+)
+if "%IS_MOCK_WINRING0%"=="1" set "IS_DRV_FAIL=1"
+if "%IS_MOCK_NOGPU%"=="1" set "IS_NOGPU_FAIL=1"
+
 :: Don dep sach se driver BYOVD sau khi mo khoa, giu he thong sach 100% cho Anti-Cheat (Riot Vanguard / Easy Anti-Cheat)
 sc stop WinRing0_1_2_0 >nul 2>&1
 sc delete WinRing0_1_2_0 >nul 2>&1
@@ -522,6 +536,12 @@ del /f /q "%SystemRoot%\System32\drivers\ThrottleStop.sys" >nul 2>&1
 echo.
 echo [6/6] Kiem tra trang thai sau khi mo khoa...
 if "%NO_CHECK%"=="1" goto :skip_check
+if "%IS_DRV_FAIL%"=="1" (
+    echo [*] Driver kernel dang bi chan boi HVCI / Vulnerable Driver Blocklist trong phien nay.
+    echo     Bo qua khoi chay 40HXCheck de tranh thong bao nham ve quyen han / GSP.
+    echo     He thong can REBOOT de tat HVCI; sau reboot Scheduled Task se tu dong mo khoa Gen2.
+    goto :check_done
+)
 echo.
 echo [*] LUU Y QUAN TRONG VE GSP (GPU System Processor):
 echo     CMP 30HX dung kien truc TU116 KHONG CO phan cung GSP.
