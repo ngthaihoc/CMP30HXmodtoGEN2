@@ -39,7 +39,14 @@ if not exist "%TARGET_BAT%" (
     exit /b 1
 )
 
+set "REBAR_BAT=%~dp0Setup_ReBar_CMP30HX.bat"
+if not exist "%REBAR_BAT%" (
+    echo [X] Khong tim thay: "%REBAR_BAT%"
+    exit /b 1
+)
+
 set "STATUS_FILE=%ProgramData%\40HXUnlock\gen2_status.txt"
+set "REBAR_STATUS_FILE=%ProgramData%\40HXUnlock\rebar_status.txt"
 set "APP_DIR=%ProgramFiles%\40HXUnlock"
 set "RUN_BAT=%APP_DIR%\RunUnlock.bat"
 
@@ -59,6 +66,11 @@ for %%a in (%*) do (
     if /i "%%~a"=="-fail" set "TARGET_CMD=cmd_fail"
     if /i "%%~a"=="-winring0" set "TARGET_CMD=cmd_winring0"
     if /i "%%~a"=="-nogpu" set "TARGET_CMD=cmd_nogpu"
+    if /i "%%~a"=="-rebar" set "TARGET_CMD=cmd_rebar"
+    if /i "%%~a"=="-rebar-happy" set "TARGET_CMD=cmd_rebar_happy"
+    if /i "%%~a"=="-rebar-laptop" set "TARGET_CMD=cmd_rebar_laptop"
+    if /i "%%~a"=="-rebar-clean" set "TARGET_CMD=cmd_rebar_clean"
+    if /i "%%~a"=="-all" set "TARGET_CMD=cmd_auto"
     if /i "%%~a"=="-auto" set "TARGET_CMD=cmd_auto"
 )
 if defined TARGET_CMD (
@@ -69,28 +81,39 @@ if defined TARGET_CMD (
 :menu
 cls
 echo ================================================================
-echo    BO TRINH KIEM THU TU DONG HOA CMP 30HX GEN2 (TEST SUITE)
+echo    BO TRINH KIEM THU TU DONG HOA CMP 30HX GEN2 & REBAR AIO
 echo ================================================================
 echo.
-echo  [1] Test Suite 1: Kiem thu nhanh thanh cong (Gen1 - Soft Reset - Gen2)
-echo  [2] Test Suite 2: Kiem thu nhanh that bai (Soft Reset khong the cuu van)
-echo  [3] Test Suite 3: Kiem thu driver WinRing0 bi chan (HVCI / Access Denied)
-echo  [4] Test Suite 4: Kiem thu khong tim thay GPU CMP 30HX tren bus PCI
-echo  [5] Test Suite 5: Don dep / Go bo cai dat he thong (Uninstall)
-echo  [6] Full Test Suite: Chay tat ca 5 Suites + Assertions + Report
-echo  [7] Thoat
+echo  --- CAC TEST SUITE GEN2 [Setup_CMP30HX_WindowsAIO.bat] ---
+echo  [1] Test Suite 1: Kiem thu Gen2 nhanh thanh cong (Gen1 - Soft Reset - Gen2)
+echo  [2] Test Suite 2: Kiem thu Gen2 nhanh that bai (Soft Reset khong the cuu van)
+echo  [3] Test Suite 3: Kiem thu Gen2 driver WinRing0 bi chan (HVCI / Blocklist)
+echo  [4] Test Suite 4: Kiem thu Gen2 khong tim thay GPU CMP 30HX tren bus PCI
+echo  [5] Test Suite 5: Don dep / Go bo Gen2 he thong (Uninstall Gen2)
+echo.
+echo  --- CAC TEST SUITE RESIZABLE BAR [Setup_ReBar_CMP30HX.bat] ---
+echo  [6] Test Suite 6: Kiem thu Resizable BAR 1-Click AIO (Happy Path)
+echo  [7] Test Suite 7: Kiem thu Khoa an toan ReBAR chan Laptop (Laptop Guard)
+echo  [8] Test Suite 8: Don dep / Go bo Resizable BAR (Uninstall ReBAR)
+echo.
+echo  --- FULL AUTOMATED TEST RUNNER ---
+echo  [9] Full Test Suite: Chay tat ca 8 Suites + Assertions + Report
+echo  [0] Thoat
 echo.
 echo ================================================================
-set /p "CHOICE=Nhap lua chon cua ban [1-7] (Mac dinh: 6): "
-if "%CHOICE%"=="" set "CHOICE=6"
+set /p "CHOICE=Nhap lua chon cua ban [1-9, 0] (Mac dinh: 9): "
+if "%CHOICE%"=="" set "CHOICE=9"
 
 if "%CHOICE%"=="1" goto :cmd_run
 if "%CHOICE%"=="2" goto :cmd_fail
 if "%CHOICE%"=="3" goto :cmd_winring0
 if "%CHOICE%"=="4" goto :cmd_nogpu
 if "%CHOICE%"=="5" goto :cmd_clean
-if "%CHOICE%"=="6" goto :cmd_auto
-if "%CHOICE%"=="7" exit /b 0
+if "%CHOICE%"=="6" goto :cmd_rebar_happy
+if "%CHOICE%"=="7" goto :cmd_rebar_laptop
+if "%CHOICE%"=="8" goto :cmd_rebar_clean
+if "%CHOICE%"=="9" goto :cmd_auto
+if "%CHOICE%"=="0" exit /b 0
 
 echo [!] Lua chon khong hop le.
 timeout /t 2 >nul
@@ -173,16 +196,59 @@ set "SUB_EC=!ERRORLEVEL!"
 if not "!IS_CLI!"=="1" pause
 exit /b !SUB_EC!
 
+:cmd_rebar_happy
+cls
+echo [*] KHOI CHAY TEST SUITE 6 (REBAR 1-CLICK AIO HAPPY PATH)...
+call :test_suite_rebar_happy
+call :print_summary
+set "SUB_EC=!ERRORLEVEL!"
+if not "!IS_CLI!"=="1" pause
+exit /b !SUB_EC!
+
+:cmd_rebar_laptop
+cls
+echo [*] KHOI CHAY TEST SUITE 7 (REBAR LAPTOP SAFETY GUARD)...
+call :test_suite_rebar_laptop
+call :print_summary
+set "SUB_EC=!ERRORLEVEL!"
+if not "!IS_CLI!"=="1" pause
+exit /b !SUB_EC!
+
+:cmd_rebar_clean
+cls
+echo [*] KHOI CHAY TEST SUITE 8 (REBAR UNINSTALL)...
+call :test_suite_rebar_uninstall
+call :print_summary
+set "SUB_EC=!ERRORLEVEL!"
+if not "!IS_CLI!"=="1" pause
+exit /b !SUB_EC!
+
+:cmd_rebar
+cls
+echo ================================================================
+echo    CHAY KIEM THU REBAR 3 SUITES (6, 7, 8)
+echo ================================================================
+call :test_suite_rebar_happy
+call :test_suite_rebar_laptop
+call :test_suite_rebar_uninstall
+call :print_summary
+set "FINAL_EC=!ERRORLEVEL!"
+if not "!IS_CLI!"=="1" pause
+exit /b !FINAL_EC!
+
 :cmd_auto
 cls
 echo ================================================================
-echo    CHAY KIEM THU TU DONG TOAN BO 5 TEST SUITES VA ASSERTIONS
+echo    CHAY KIEM THU TU DONG TOAN BO 8 TEST SUITES VA ASSERTIONS
 echo ================================================================
 call :test_suite_happy
 call :test_suite_fail
 call :test_suite_winring0
 call :test_suite_nogpu
 call :test_suite_uninstall
+call :test_suite_rebar_happy
+call :test_suite_rebar_laptop
+call :test_suite_rebar_uninstall
 call :print_summary
 set "FINAL_EC=!ERRORLEVEL!"
 if not "!IS_CLI!"=="1" pause
@@ -262,14 +328,58 @@ call :assert_file_not_exists "%STATUS_FILE%" "File gen2_status.txt da duoc don d
 call :assert_file_not_exists "%APP_DIR%" "Thu muc he thong 40HXUnlock da bi xoa"
 exit /b 0
 
+:test_suite_rebar_happy
+echo.
+echo [*] [TEST SUITE 6] Kiem thu Resizable BAR 1-Click AIO (Happy Path)...
+if exist "%REBAR_STATUS_FILE%" del /f /q "%REBAR_STATUS_FILE%" >nul 2>&1
+call "%REBAR_BAT%" -test -nocheck -nowait -noadmin
+set "EC=!ERRORLEVEL!"
+echo.
+echo     --- Ket qua kiem tra (Assertions - Suite 6) ---
+call :assert_exit_code "0" "!EC!" "ReBAR Setup tra ve ExitCode 0 [Thanh cong]"
+call :assert_file_exists "%REBAR_STATUS_FILE%" "File rebar_status.txt duoc tao hop le"
+call :assert_file_contains "%REBAR_STATUS_FILE%" "8192 MB" "Xac nhan BAR1 Size = 8192 MB [8GB luy thua 2]"
+call :assert_file_contains "%REBAR_STATUS_FILE%" "Turing Override" "Xac nhan Driver Profile rBAR da bat"
+call :assert_file_contains "%REBAR_STATUS_FILE%" "MOCK TEST SIMULATION" "Xac nhan che do mo phong an toan"
+call :assert_task_exists "NVIDIA_ReBAR_Global_Profile" "Scheduled Task ReBAR Profile da duoc tao"
+call :assert_reg_exists "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" "NVIDIA_ReBAR_Profile" "Registry Run Key HKLM ReBAR da duoc tao"
+exit /b 0
+
+:test_suite_rebar_laptop
+echo.
+echo [*] [TEST SUITE 7] Kiem thu Khoa an toan ReBAR chan he thong Laptop...
+call "%REBAR_BAT%" -mock-laptop -nowait -noadmin
+set "EC=!ERRORLEVEL!"
+echo.
+echo     --- Ket qua kiem tra (Assertions - Suite 7) ---
+call :assert_exit_code "1" "!EC!" "ReBAR Setup chan dung 100%% tren Laptop [ExitCode 1]"
+exit /b 0
+
+:test_suite_rebar_uninstall
+echo.
+echo [*] [TEST SUITE 8] Kiem thu go bo va khoi phuc mac dinh Resizable BAR...
+call "%REBAR_BAT%" -uninstall -mock -nowait -noadmin
+set "EC=!ERRORLEVEL!"
+echo.
+echo     --- Ket qua kiem tra (Assertions - Suite 8) ---
+call :assert_exit_code "0" "!EC!" "Lenh Uninstall ReBAR tra ve ExitCode 0"
+call :assert_file_not_exists "%REBAR_STATUS_FILE%" "File rebar_status.txt da bi xoa triet de"
+call :assert_task_not_exists "NVIDIA_ReBAR_Global_Profile" "Scheduled Task ReBAR Profile da bi xoa triet de"
+call :assert_reg_not_exists "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" "NVIDIA_ReBAR_Profile" "Registry Run Key HKLM ReBAR da bi xoa"
+exit /b 0
+
 :clean_baseline
 schtasks /delete /tn "CMP30HX_Gen2_Unlock" /f >nul 2>&1
 schtasks /delete /tn "CMP30HX_Gen2_Unlock_User" /f >nul 2>&1
 schtasks /delete /tn "40HXGen2Retry" /f >nul 2>&1
 schtasks /delete /tn "40HX PCIe Gen2 Bring-up" /f >nul 2>&1
+schtasks /delete /tn "NVIDIA_ReBAR_Global_Profile" /f >nul 2>&1
 reg delete "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "CMP30HX_Gen2" /f >nul 2>&1
 reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "40HXGen2" /f >nul 2>&1
+reg delete "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "NVIDIA_ReBAR_Profile" /f >nul 2>&1
+reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "NVIDIA_ReBAR_Profile" /f >nul 2>&1
 if exist "%STATUS_FILE%" del /f /q "%STATUS_FILE%" >nul 2>&1
+if exist "%REBAR_STATUS_FILE%" del /f /q "%REBAR_STATUS_FILE%" >nul 2>&1
 exit /b 0
 
 :: ================================================================
