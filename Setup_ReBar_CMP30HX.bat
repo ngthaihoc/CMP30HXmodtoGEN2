@@ -19,6 +19,16 @@ for %%a in (%*) do (
     if /i "%%~a"=="/test" set "IS_MOCK=1"
     if /i "%%~a"=="-mock" set "IS_MOCK=1"
     if /i "%%~a"=="/mock" set "IS_MOCK=1"
+    if /i "%%~a"=="-mock-laptop" (
+        set "MOCK_LAPTOP=1"
+        set "IS_ADMIN=1"
+        if not defined ACTION set "ACTION=INSTALL"
+    )
+    if /i "%%~a"=="/mock-laptop" (
+        set "MOCK_LAPTOP=1"
+        set "IS_ADMIN=1"
+        if not defined ACTION set "ACTION=INSTALL"
+    )
     if /i "%%~a"=="-nocheck" set "NO_CHECK=1"
     if /i "%%~a"=="/nocheck" set "NO_CHECK=1"
     if /i "%%~a"=="-nowait" set "NO_WAIT=1"
@@ -157,11 +167,34 @@ for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Get-CimInsta
 
 echo    - He thong   : !SYS_MANU! - Model: !SYS_MODEL!
 echo    - Bo mach chu: !MB_MANU! - Model: !MB_PROD! [BIOS: !MB_BIOS!]
+echo    - Che do Boot: %FIRMWARE_TYPE%
 
-rem Kiem tra 4 lop nhan dien Laptop
-for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Get-CimInstance Win32_ComputerSystem).PCSystemType"`) do if "%%A"=="2" set "IS_LAPTOP=1"
-for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "[bool](Get-CimInstance Win32_Battery)"`) do if /i "%%A"=="True" set "IS_LAPTOP=1"
-echo "!SYS_MODEL! !MB_PROD!" | findstr /i "FA506 G513 G533 GL553 Nitro Legion Victus Laptop Notebook Book Portable TUF ROG Zephyrus Strix Thin Stealth Blade Omen Pavilion Inspiron Latitude Precision XPS Yoga ThinkPad IdeaPad" >nul 2>&1 && set "IS_LAPTOP=1"
+rem Kiem tra che do khoi dong UEFI thuan
+if /i not "%FIRMWARE_TYPE%"=="UEFI" (
+    echo.
+    echo ================================================================
+    echo  [!] CANH BAO: He thong dang khoi dong o che do Legacy BIOS [CSM].
+    echo      Resizable BAR bat buoc he thong phai boot o chuan UEFI thuan.
+    echo      Vui long chuyen doi o dia sang GPT va bat UEFI trong BIOS.
+    echo ================================================================
+    echo.
+)
+
+rem Ho tro mo phong phat hien Laptop cho bo kiem thu (Mock Laptop Guard)
+if "!MOCK_LAPTOP!"=="1" (
+    set "IS_LAPTOP=1"
+    set "IS_MOCK=0"
+    set "SYS_MANU=MockVendor"
+    set "SYS_MODEL=MockGamingLaptop"
+    set "MB_PROD=MockLaptopBoard"
+    set "MB_BIOS=V1.00"
+    set "DETECTED_GPUS= [NVIDIA CMP 30HX]"
+) else (
+    rem Kiem tra 4 lop nhan dien Laptop thuc te
+    for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Get-CimInstance Win32_ComputerSystem).PCSystemType"`) do if "%%A"=="2" set "IS_LAPTOP=1"
+    for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "[bool](Get-CimInstance Win32_Battery)"`) do if /i "%%A"=="True" set "IS_LAPTOP=1"
+    echo "!SYS_MODEL! !MB_PROD!" | findstr /i "FA506 G513 G533 GL553 Nitro Legion Victus Laptop Notebook Book Portable TUF ROG Zephyrus Strix Thin Stealth Blade Omen Pavilion Inspiron Latitude Precision XPS Yoga ThinkPad IdeaPad" >nul 2>&1 && set "IS_LAPTOP=1"
+)
 
 rem Quet danh sach GPU tren may
 set "FOUND_NVIDIA=0"
@@ -272,62 +305,121 @@ echo    + nvidiaProfileInspector.exe : [OK] [Cong cu mo khoa rBAR trong driver]
 echo    + Enable_ReBAR_Turing.nip    : [OK] [Profile rBAR Base da cau hinh san]
 
 echo.
-echo ================================================================
-echo [*] HUONG DAN THAO TAC BO MACH CHU MAY BAN [MAINBOARD DESKTOP]:
-echo.
-echo    1. Thiet lap BIOS Setup [Bat buoc]:
-echo       - Dat 'Above 4G Decoding' = Enabled
-echo       - Dat 'CSM Support' = Disabled [Bat buoc chuan UEFI thuan]
-echo       - Dat 'Re-Size BAR Support' = Auto hoac Enabled [neu co san]
-echo.
-echo    2. Chen module NvStrapsReBar.ffs vao BIOS [Chi thuc hien tren PC co Flashback]:
-echo       - Mo UEFITool.exe tai: "%TOOL_DIR%\UEFITool.exe"
-echo       - Mo file BIOS goc cua bo mach chu.
-echo       - Tim kiem 'PciBus' trong phan DXE Volume.
-echo       - Nhap chuot phai vao driver cuoi cung -^> 'Insert after...'
-echo       - Chon file: "%TOOL_DIR%\NvStrapsReBar.ffs"
-echo       - Luu thanh file BIOS moi va nap vao mainboard qua nut USB Flashback.
-echo ================================================================
-echo.
+rem ----------------------------------------------------------------
+rem KIEM TRA CHAN DOAN UEFI DXE DRIVER STATUS
+rem ----------------------------------------------------------------
+set "DXE_LOADED=0"
+if "!IS_MOCK!"=="1" (
+    set "DXE_LOADED=1"
+    echo    + Trang thai UEFI DXE Driver: [MOCK] Loaded [0x0] - San sang 100%%.
+) else (
+    echo Q | "%TOOL_DIR%\NvStrapsReBar.exe" 2>nul | findstr /i "status: Loaded" >nul 2>&1
+    if not errorlevel 1 (
+        set "DXE_LOADED=1"
+        echo    + Trang thai UEFI DXE Driver: Loaded [0x0] - San sang 100%%.
+    ) else (
+        echo    + Trang thai UEFI DXE Driver: Not loaded [Chua phat hien ReBAR trong BIOS].
+    )
+)
+
+if "!DXE_LOADED!"=="0" (
+    set "IS_MODERN_MB=0"
+    for %%k in (B450 B550 A520 X570 B650 X670 A620 Z390 Z490 B460 H470 Z590 B560 H510 Z690 B660 H610 Z790 B760 H770) do (
+        echo "!MB_PROD!" | findstr /i "%%k" >nul 2>&1 && set "IS_MODERN_MB=1"
+    )
+
+    if "!IS_MODERN_MB!"=="1" (
+        echo.
+        echo ================================================================
+        echo [*] HUONG DAN BO MACH CHU HO TRO REBAR GOC [!MB_PROD!]:
+        echo     Bo mach chu cua ban da co san tinh nang ReBAR trong BIOS.
+        echo     [V] BAN KHONG CAN DUNG UEFITOOL DE MOD BIOS.
+        echo.
+        echo     Chi can khoi dong lai may, vao BIOS Setup [Del / F2] va BAT:
+        echo       1. 'Above 4G Decoding'   = Enabled
+        echo       2. 'Re-Size BAR Support' = Auto hoac Enabled
+        echo       3. 'CSM Support'         = Disabled [UEFI thuan]
+        echo ================================================================
+        echo.
+    ) else (
+        echo.
+        echo ================================================================
+        echo [*] HUONG DAN BO MACH CHU THE HE CU / CAN CHEN MODULE FFS:
+        echo     Bo mach chu [!MB_PROD!] co the can chen module NvStrapsReBar.ffs.
+        echo     Luu y: Chi thuc hien tren mainboard PC co nut 'USB BIOS Flashback'.
+        echo.
+        echo     Cac buoc thuc hien bang UEFITool:
+        echo     1. Mo UEFITool.exe tai: "%TOOL_DIR%\UEFITool.exe"
+        echo     2. Mo file BIOS goc cua bo mach chu.
+        echo     3. Tim kiem 'PciBus' trong phan DXE Volume.
+        echo     4. Nhap chuot phai vao driver cuoi cung -^> 'Insert after...'
+        echo     5. Chon file: "%TOOL_DIR%\NvStrapsReBar.ffs" va luu lai BIOS moi.
+        echo ================================================================
+        echo.
+        if "!NO_WAIT!"=="0" (
+            if "!IS_MOCK!"=="0" (
+                set "OPEN_TOOL=N"
+                set /p "OPEN_TOOL=Ban co muon mo UEFITool.exe ngay bay gio khong? [Y/N, Mac dinh N]: "
+                if /i "!OPEN_TOOL!"=="Y" (
+                    start "" "%TOOL_DIR%\UEFITool.exe"
+                )
+            )
+        )
+    )
+)
 
 rem ----------------------------------------------------------------
-rem BUOC 4: CAU HINH NVRAM VA DRIVER PROFILE
+rem BUOC 4: CAU HINH NVRAM VA DRIVER PROFILE TU DONG [1-CLICK AIO]
 rem ----------------------------------------------------------------
-echo [4/5] Thao tac cau hinh phan mem Windows:
+echo [4/5] Tu dong cau hinh phan mem Windows [1-Click Automation]:
 echo.
-echo [*] BUOC 4A: Khoi chay NvStrapsReBar de cau hinh BAR 8GB vao NVRAM...
-echo     Trong cua so NvStrapsReBar:
-echo     - Bam phim 'E' [Enable ReBAR cho dong Turing]
-echo     - Bam phim 'S' [Save cau hinh vao NVRAM]
-echo     - Bam phim 'Q' [Quit thoat chuong trinh]
-echo.
-
+echo [*] BUOC 4A: Tu dong cau hinh BAR 8GB vao UEFI NVRAM...
 if "!IS_MOCK!"=="1" (
     echo    [MOCK] Gia lap khoi chay NvStrapsReBar.exe thanh cong.
-    echo    [MOCK] - Da chon Enable ReBAR Turing: [OK]
+    echo    [MOCK] - Da chon Enable ReBAR Turing [E]: [OK]
     echo    [MOCK] - Da thiet lap BAR Size = 8192 MB [8GB]: [OK]
-    echo    [MOCK] - Da ghi bien EFI NVRAM he thong [Simulated]: [OK]
+    echo    [MOCK] - Da ghi bien EFI NVRAM he thong [S]: [OK]
+    echo    [MOCK] - Da thoat chuong trinh [Q]: [OK]
 ) else (
-    echo Dang mo NvStrapsReBar.exe...
-    start /wait "" "%TOOL_DIR%\NvStrapsReBar.exe"
+    (echo E & echo S & echo Q) | "%TOOL_DIR%\NvStrapsReBar.exe" >nul 2>&1
+    echo    [+] Da tu dong ghi cau hinh Turing ReBAR 8GB vao UEFI NVRAM: [OK]
 )
 
 echo.
-echo [*] BUOC 4B: Kich hoat rBAR trong NVIDIA Driver Profile...
-echo     File profile san co: "%TOOL_DIR%\Enable_ReBAR_Turing.nip"
-
+echo [*] BUOC 4B: Tu dong kich hoat rBAR trong NVIDIA Driver Profile...
 if "!IS_MOCK!"=="1" (
-    echo    [MOCK] Gia lap nap profile Enable_ReBAR_Turing.nip thanh cong.
+    echo    [MOCK] Gia lap nap profile Enable_ReBAR_Turing.nip qua co -silent thanh cong.
     echo    [MOCK] - rBAR - Feature    = 0x00000001 [Enabled]
     echo    [MOCK] - rBAR - Options    = 0x00000001 [Turing Override]
     echo    [MOCK] - rBAR - Size Limit = 0x00000000 [No Limit]
 ) else (
-    echo Dang mo NVIDIA Profile Inspector...
-    echo - Vui long nhan bieu tuong Import [mui ten xanh chuc xuong]
-    echo - Chon file 'Enable_ReBAR_Turing.nip'
-    echo - Bam 'Apply changes' o goc tren ben phai.
-    start "" "%TOOL_DIR%\nvidiaProfileInspector.exe" "%TOOL_DIR%\Enable_ReBAR_Turing.nip"
+    start /wait "" "%TOOL_DIR%\nvidiaProfileInspector.exe" -silent "%TOOL_DIR%\Enable_ReBAR_Turing.nip"
+    echo    [+] Da tu dong nap Driver Profile [Enable_ReBAR_Turing.nip -silent]: [OK]
 )
+
+echo.
+echo [*] BUOC 4C: Thiet lap Scheduled Task duy tri rBAR Driver Profile...
+set "REBAR_APP_DIR=%ProgramFiles%\40HXUnlock\rebar"
+set "REBAR_RUNNER=%REBAR_APP_DIR%\RunReBarProfile.bat"
+
+if not exist "%REBAR_APP_DIR%" mkdir "%REBAR_APP_DIR%" >nul 2>&1
+copy /y "%TOOL_DIR%\nvidiaProfileInspector.exe" "%REBAR_APP_DIR%\" >nul 2>&1
+copy /y "%TOOL_DIR%\nvidiaProfileInspector.exe.config" "%REBAR_APP_DIR%\" >nul 2>&1
+copy /y "%TOOL_DIR%\Enable_ReBAR_Turing.nip" "%REBAR_APP_DIR%\" >nul 2>&1
+
+(
+    echo @echo off
+    echo setlocal
+    echo cd /d "%%~dp0"
+    echo if exist "%%~dp0nvidiaProfileInspector.exe" start /wait "" "%%~dp0nvidiaProfileInspector.exe" -silent "%%~dp0Enable_ReBAR_Turing.nip"
+    echo exit /b 0
+) > "%REBAR_RUNNER%"
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$taskName='NVIDIA_ReBAR_Global_Profile'; $dir=$env:REBAR_APP_DIR; $bat=$env:REBAR_RUNNER; $action = New-ScheduledTaskAction -Execute $env:ComSpec -Argument ('/c `\"' + $bat + '`\"') -WorkingDirectory $dir; $t1 = New-ScheduledTaskTrigger -AtStartup; $t1.Delay = 'PT15S'; $t2 = New-ScheduledTaskTrigger -AtLogOn; $t2.Delay = 'PT5S'; $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5); $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest; Register-ScheduledTask -TaskName $taskName -Action $action -Trigger @($t1, $t2) -Settings $settings -Principal $principal -Force | Out-Null; try { $srv = New-Object -ComObject 'Schedule.Service'; $srv.Connect(); $task = $srv.GetFolder('\').GetTask($taskName); $def = $task.Definition; $tEvent = $def.Triggers.Create(0); $tEvent.Subscription = '<QueryList><Query Id=''0'' Path=''System''><Select Path=''System''>*[System[Provider[@Name=''Microsoft-Windows-Power-Troubleshooter''] and EventID=1]]</Select></Query></QueryList>'; $tEvent.Delay = 'PT3S'; $tEvent.Enabled = $true; $srv.GetFolder('\').RegisterTaskDefinition($taskName, $def, 4, $null, $null, 5, $null) | Out-Null } catch {}" >nul 2>&1
+
+reg add "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "NVIDIA_ReBAR_Profile" /t REG_SZ /d "\"%REBAR_RUNNER%\"" /f >nul 2>&1
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "NVIDIA_ReBAR_Profile" /t REG_SZ /d "\"%REBAR_RUNNER%\"" /f >nul 2>&1
+echo    [+] Da kich hoat Scheduled Task [NVIDIA_ReBAR_Global_Profile] va Registry Run: [OK]
 
 rem Ghi nhan file trang thai ReBAR
 if not exist "%STATUS_DIR%" mkdir "%STATUS_DIR%" >nul 2>&1
@@ -423,22 +515,25 @@ echo ================================================================
 echo.
 echo [*] Thao tac nay se giup ban:
 echo     1. Xoa bo bien cau hinh ReBAR trong UEFI NVRAM.
-echo     2. Xoa file trang thai tai ProgramData.
+echo     2. Xoa Scheduled Task va Registry duy tri rBAR Profile.
+echo     3. Xoa file trang thai tai ProgramData.
 echo.
 
 if "!IS_MOCK!"=="1" (
     echo [MOCK] Gia lap xoa bien NVRAM va don dep file thanh cong.
 ) else (
-    echo [*] Dang mo NvStrapsReBar de xoa cau hinh NVRAM...
-    echo     Trong cua so hien ra:
-    echo     - Bam phim 'C' [Clear per-GPU configuration]
-    echo     - Bam phim 'S' [Save de luu bien trang]
-    echo     - Bam phim 'Q' [Quit thoat]
-    echo.
+    echo [*] Dang tu dong xoa cau hinh ReBAR trong UEFI NVRAM...
     if exist "%TOOL_DIR%\NvStrapsReBar.exe" (
-        start /wait "" "%TOOL_DIR%\NvStrapsReBar.exe"
+        (echo C & echo S & echo Q) | "%TOOL_DIR%\NvStrapsReBar.exe" >nul 2>&1
+        echo    [+] Da xoa cau hinh ReBAR trong NVRAM: [OK]
     )
 )
+
+echo [*] Dang xoa Scheduled Task va Registry duy tri rBAR Profile...
+schtasks /delete /tn "NVIDIA_ReBAR_Global_Profile" /f >nul 2>&1
+reg delete "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "NVIDIA_ReBAR_Profile" /f >nul 2>&1
+reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "NVIDIA_ReBAR_Profile" /f >nul 2>&1
+if exist "%ProgramFiles%\40HXUnlock\rebar" rmdir /s /q "%ProgramFiles%\40HXUnlock\rebar" >nul 2>&1
 
 if exist "%STATUS_FILE%" del /f /q "%STATUS_FILE%" >nul 2>&1
 echo.
