@@ -5,6 +5,9 @@ title CMP 30HX Gen2 x16 Auto Setup
 
 :: Phan tich toan bo tham so dong lenh
 set "IS_MOCK=0"
+set "IS_MOCK_FAIL=0"
+set "IS_MOCK_WINRING0=0"
+set "IS_MOCK_NOGPU=0"
 set "NO_CHECK=0"
 set "NO_WAIT=0"
 for %%a in (%*) do (
@@ -14,14 +17,12 @@ for %%a in (%*) do (
     if /i "%%~a"=="/test" set "IS_MOCK=1"
     if /i "%%~a"=="-mock" set "IS_MOCK=1"
     if /i "%%~a"=="/mock" set "IS_MOCK=1"
-    if /i "%%~a"=="-mock-fail" (
-        set "IS_MOCK=1"
-        set "IS_MOCK_FAIL=1"
-    )
-    if /i "%%~a"=="/mock-fail" (
-        set "IS_MOCK=1"
-        set "IS_MOCK_FAIL=1"
-    )
+    if /i "%%~a"=="-mock-fail" set "IS_MOCK_FAIL=1"
+    if /i "%%~a"=="/mock-fail" set "IS_MOCK_FAIL=1"
+    if /i "%%~a"=="-mock-winring0" set "IS_MOCK_WINRING0=1"
+    if /i "%%~a"=="/mock-winring0" set "IS_MOCK_WINRING0=1"
+    if /i "%%~a"=="-mock-nogpu" set "IS_MOCK_NOGPU=1"
+    if /i "%%~a"=="/mock-nogpu" set "IS_MOCK_NOGPU=1"
     if /i "%%~a"=="-nocheck" set "NO_CHECK=1"
     if /i "%%~a"=="/nocheck" set "NO_CHECK=1"
     if /i "%%~a"=="-nowait" set "NO_WAIT=1"
@@ -30,6 +31,9 @@ for %%a in (%*) do (
     if /i "%%~a"=="-u" set "DO_UNINSTALL=1"
     if /i "%%~a"=="/u" set "DO_UNINSTALL=1"
 )
+if "%IS_MOCK_FAIL%"=="1" set "IS_MOCK=1"
+if "%IS_MOCK_WINRING0%"=="1" set "IS_MOCK=1"
+if "%IS_MOCK_NOGPU%"=="1" set "IS_MOCK=1"
 if "%DO_UNINSTALL%"=="1" goto :uninstall
 
 :: Kiem tra quyen Administrator (UAC da tang phong thu, thay the net session cu)
@@ -70,15 +74,44 @@ if "%IS_ADMIN%"=="0" (
 cd /d "%~dp0"
 
 echo ================================================================
-if "%IS_MOCK%"=="1" (
-    echo    CONG CU KIEM THU MO PHONG [MOCK TEST] GEN2 X16 CHO CMP 30HX
-    echo    - Mo phong GPU CMP 30HX [TU116] ket Gen1 o lan goi dau
-    echo    - Kich hoat chu trinh Soft Reset tu dong qua PnP
-    echo    - Mo phong khoi phuc thanh cong Gen2 x16 [5.0 GT/s] o lan 2
-    echo    - He thong: Powercfg, ASPM, Blocklist, Task SYSTEM chay that 100%%
-) else (
-    echo    CONG CU CAI DAT TU DONG GEN2 X16 CHO NVIDIA CMP 30HX (TU116)
-)
+if not "%IS_MOCK%"=="1" goto :banner_real
+if "%IS_MOCK_WINRING0%"=="1" goto :banner_winring0
+if "%IS_MOCK_NOGPU%"=="1" goto :banner_nogpu
+if "%IS_MOCK_FAIL%"=="1" goto :banner_fail
+goto :banner_mock_default
+
+:banner_winring0
+echo    KIEM THU MO PHONG [MOCK TEST]: DRIVER WINRING0 BI CHAN
+echo    - Mo phong Driver kernel WinRing0 bi Windows/Antivirus chan nap
+echo    - Kiem tra he thong tu dong phat hien va bo qua Soft Reset
+echo    - Kiem tra thong bao huong dan xu ly HVCI / Blocklist / Reboot
+goto :banner_end
+
+:banner_nogpu
+echo    KIEM THU MO PHONG [MOCK TEST]: KHONG TIM THAY GPU CMP 30HX
+echo    - Mo phong khong dinh vi duoc GPU tren PCI Bus
+echo    - Kiem tra he thong phat hien va huong dan Device Manager / Driver
+goto :banner_end
+
+:banner_fail
+echo    KIEM THU MO PHONG [MOCK TEST]: KET GEN1 SAU SOFT RESET
+echo    - Mo phong GPU van ket Gen1 du da thuc hien chu trinh Soft Reset
+echo    - Kiem tra huong dan xu ly ve BIOS, PCIe slot va Render Test
+goto :banner_end
+
+:banner_mock_default
+echo    CONG CU KIEM THU MO PHONG [MOCK TEST] GEN2 X16 CHO CMP 30HX
+echo    - Mo phong GPU CMP 30HX [TU116] ket Gen1 o lan goi dau
+echo    - Kich hoat chu trinh Soft Reset tu dong qua PnP
+echo    - Mo phong khoi phuc thanh cong Gen2 x16 [5.0 GT/s] o lan 2
+echo    - He thong: Powercfg, ASPM, Blocklist, Task SYSTEM chay that 100%%
+goto :banner_end
+
+:banner_real
+echo    CONG CU CAI DAT TU DONG GEN2 X16 CHO NVIDIA CMP 30HX [TU116]
+goto :banner_end
+
+:banner_end
 echo ================================================================
 echo.
 
@@ -186,6 +219,9 @@ echo       [OK] Da vo hieu hoa Fast Startup (Hiberboot) va PCIe ASPM toan he tho
 
 :: 3. Tat Microsoft Vulnerable Driver Blocklist (tranh Windows chan driver sau reboot)
 echo [2/6] Dang tat Microsoft Vulnerable Driver Blocklist...
+set "NEED_REBOOT=0"
+reg query "HKLM\SYSTEM\CurrentControlSet\Control\CI\Config" /v "VulnerableDriverBlocklistEnable" 2>nul | %SystemRoot%\System32\findstr.exe /i "0x1" >nul 2>&1
+if not errorlevel 1 set "NEED_REBOOT=1"
 reg add "HKLM\SYSTEM\CurrentControlSet\Control\CI\Config" /v "VulnerableDriverBlocklistEnable" /t REG_DWORD /d 0 /f >nul 2>&1
 if errorlevel 1 (
     echo       [X] Khong tat duoc Driver Blocklist. Kiem tra chinh sach bao mat Windows.
@@ -196,7 +232,6 @@ if errorlevel 1 (
 
 :: 4. Tat Memory Integrity (Core Isolation / HVCI) de driver MMIO khong bi chan
 echo [3/6] Dang kiem tra va tat Memory Integrity (HVCI)...
-set "NEED_REBOOT=0"
 reg query "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" /v "Enabled" 2>nul | %SystemRoot%\System32\findstr.exe /i "0x1" >nul 2>&1
 if not errorlevel 1 set "NEED_REBOOT=1"
 reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" /v "Enabled" /t REG_DWORD /d 0 /f >nul 2>&1
@@ -250,29 +285,56 @@ if "%NEED_REBOOT%"=="1" (
     echo     Buoc hien tai co the khong nap duoc driver kernel; sau khi ket thuc hay reboot truoc khi danh gia.
 )
 echo [5/6] Dang kich hoat Gen2 x16 va toi uu MRRS 512B ngay...
-if "%IS_MOCK%"=="1" (
-    echo       [*] [MOCK TEST] Mo phong Installer lan 1: Phat hien CMP 30HX nhung dang bi ket Gen1...
-    if not exist "%ProgramData%\40HXUnlock" mkdir "%ProgramData%\40HXUnlock" >nul 2>&1
-    (
-        echo ==== 40HX Gen2 Ket qua [MOCK TEST - LAN 1] ====
-        echo GPU: NVIDIA CMP 30HX [TU116] [DEV_2189]
-        echo PCIe Link Width: x16
-        echo PCIe Link Speed: GPU TLS=Gen1 [2.5 GT/s]
-        echo Trang thai: chua dat muc tieu Gen2! [Driver mod / iGPU dang giu DMA context]
-        echo Quyen thuc thi: Quan tri vien / SYSTEM
-    ) > "%ProgramData%\40HXUnlock\gen2_status.txt"
+if "%IS_MOCK_WINRING0%"=="1" goto :mock_winring0
+if "%IS_MOCK_NOGPU%"=="1" goto :mock_nogpu
+if "%IS_MOCK%"=="1" goto :mock_gen1
+goto :do_install
+
+:mock_winring0
+echo       [*] [MOCK TEST] Mo phong WinRing0 bi chan boi HVCI / Security Policy...
+if not exist "%ProgramData%\40HXUnlock" mkdir "%ProgramData%\40HXUnlock" >nul 2>&1
+> "%ProgramData%\40HXUnlock\gen2_status.txt" echo ==== 40HX Gen2 Ket qua [MOCK TEST - WINRING0 BLOCKED] ====
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo GPU: NVIDIA CMP 30HX [TU116] [DEV_2189]
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo X Gen2 Chua thuc thi: WinRing0 driver bi chan [Loi 5 / ERROR_ACCESS_DENIED]
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo Driver: WinRing0 Khong chay, ThrottleStop khong the mo thiet bi
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo Loi: Khoi dong that bai: Khong du quyen han [Loi 5 / ERROR_ACCESS_DENIED]
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo Quyen thuc thi: Quan tri vien / SYSTEM
+set "UNLOCK_OK=0"
+goto :install_done
+
+:mock_nogpu
+echo       [*] [MOCK TEST] Mo phong khong tim thay GPU CMP 30HX tren bus PCIe...
+if not exist "%ProgramData%\40HXUnlock" mkdir "%ProgramData%\40HXUnlock" >nul 2>&1
+> "%ProgramData%\40HXUnlock\gen2_status.txt" echo ==== 40HX Gen2 Ket qua [MOCK TEST - KHONG TIM THAY GPU] ====
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo [X] Khong the dinh vi GPU CMP 30HX tren bus PCI [Khong tim thay thiet bi DEV_2189]
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo Trang thai: Khong tim thay thiet bi tren bus PCI.
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo Quyen thuc thi: Quan tri vien / SYSTEM
+set "UNLOCK_OK=0"
+goto :install_done
+
+:mock_gen1
+echo       [*] [MOCK TEST] Mo phong Installer lan 1: Phat hien CMP 30HX nhung dang bi ket Gen1...
+if not exist "%ProgramData%\40HXUnlock" mkdir "%ProgramData%\40HXUnlock" >nul 2>&1
+> "%ProgramData%\40HXUnlock\gen2_status.txt" echo ==== 40HX Gen2 Ket qua [MOCK TEST - LAN 1] ====
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo GPU: NVIDIA CMP 30HX [TU116] [DEV_2189]
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo PCIe Link Width: x16
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo PCIe Link Speed: GPU TLS=Gen1 [2.5 GT/s]
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo Trang thai: chua dat muc tieu Gen2! [Driver mod / iGPU dang giu DMA context]
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo Quyen thuc thi: Quan tri vien / SYSTEM
+set "UNLOCK_OK=0"
+goto :install_done
+
+:do_install
+"%FINAL_INSTALLER%" -gen2-30hx -silent
+if errorlevel 1 (
+    echo       [X] Installer bao loi khi chay [exit code khac 0].
+    echo           Kiem tra driver WinRing0/ThrottleStop, HVCI va quyen Administrator.
     set "UNLOCK_OK=0"
 ) else (
-    "%FINAL_INSTALLER%" -gen2-30hx -silent
-    if errorlevel 1 (
-        echo       [X] Installer bao loi khi chay [exit code khac 0].
-        echo           Kiem tra driver WinRing0/ThrottleStop, HVCI va quyen Administrator.
-        set "UNLOCK_OK=0"
-    ) else (
-        set "UNLOCK_OK=1"
-    )
+    set "UNLOCK_OK=1"
 )
 
+:install_done
 if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
     echo       [OK] Chi tiet ket qua tu installer:
     echo       --------------------------------------------------------
@@ -284,110 +346,205 @@ if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
     echo           Hay chay lai 40HXInstaller.exe -status de kiem tra.
 )
 
-:: Kiem tra chu trinh Soft Reset neu GPU TLS bi ket o Gen1 (dac biet tren he thong GPU kep iGPU + CMP 30HX hoac driver mod)
+:: Phan tich chinh xac nguyen nhan that bai tu gen2_status.txt
+set "IS_DRV_FAIL=0"
+set "IS_NOGPU_FAIL=0"
+if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
+    %SystemRoot%\System32\find.exe /i "WinRing0" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "IS_DRV_FAIL=1"
+    %SystemRoot%\System32\find.exe /i "ThrottleStop" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "IS_DRV_FAIL=1"
+    %SystemRoot%\System32\find.exe /i "Loi 5" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "IS_DRV_FAIL=1"
+    %SystemRoot%\System32\find.exe /i "ERROR_ACCESS_DENIED" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "IS_DRV_FAIL=1"
+    %SystemRoot%\System32\find.exe /i "bus PCI" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "IS_NOGPU_FAIL=1"
+    %SystemRoot%\System32\find.exe /i "Khong tim thay" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "IS_NOGPU_FAIL=1"
+    %SystemRoot%\System32\find.exe /i "not found" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "IS_NOGPU_FAIL=1"
+)
+if "%IS_MOCK_WINRING0%"=="1" set "IS_DRV_FAIL=1"
+if "%IS_MOCK_NOGPU%"=="1" set "IS_NOGPU_FAIL=1"
+
+:: Neu driver kernel bi chan hoac khong tim thay GPU, Soft Reset hoan toan vo dung!
+:: Chi thuc hien Soft Reset khi driver hoat dong binh thuong nhung link GPU TLS bi ket o Gen1
 set "NEED_DEV_RESET=0"
+if "%IS_DRV_FAIL%"=="1" goto :skip_reset_drv
+if "%IS_NOGPU_FAIL%"=="1" goto :skip_reset_nogpu
 if "%UNLOCK_OK%"=="0" set "NEED_DEV_RESET=1"
 if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
     findstr /i "GPU TLS=Gen1" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "NEED_DEV_RESET=1"
     findstr /i "chua dat" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "NEED_DEV_RESET=1"
     findstr /i "chưa đạt" "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1 && set "NEED_DEV_RESET=1"
 )
+goto :check_dev_reset
 
-if "%NEED_DEV_RESET%"=="1" (
+:skip_reset_drv
+echo.
+echo       [!] Phat hien Driver Kernel bi chan [WinRing0/ThrottleStop Loi 5 / HVCI / Antivirus].
+echo       [*] Bo qua Soft Reset (Soft Reset khong the giai quyet loi chan quyen driver kernel).
+set "NEED_REBOOT=1"
+goto :check_dev_reset
+
+:skip_reset_nogpu
+echo.
+echo       [!] Khong dinh vi duoc GPU CMP 30HX tren bus PCI.
+echo       [*] Bo qua Soft Reset.
+goto :check_dev_reset
+
+:check_dev_reset
+
+if "%NEED_DEV_RESET%"=="0" goto :skip_dev_reset
+echo.
+echo       [!] Phat hien GPU TLS van o Gen1 [driver mod / iGPU dang giu DMA context].
+echo       [*] Dang tu dong thuc hien chu trinh Soft Reset [Disable - Enable qua PnP]...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$devs = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -match 'VEN_10DE&(DEV_2189|DEV_1F0B)' }; if ($devs) { foreach ($d in $devs) { try { pnputil /restart-device $d.InstanceId >$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {} }; Start-Sleep -Seconds 2; try { Restart-Service NVDisplay.ContainerLocalSystem -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 } catch {} } else { Write-Host 'Khong tim thay Instance ID qua PnP' }" >nul 2>&1
+echo       [*] Dang chay lai lenh mo khoa Gen2 sau khi Soft Reset card...
+if "%IS_MOCK_FAIL%"=="1" goto :mock_reset_fail
+if "%IS_MOCK%"=="1" goto :mock_reset_ok
+"%FINAL_INSTALLER%" -gen2-30hx -silent
+if not errorlevel 1 set "UNLOCK_OK=1"
+goto :reset_done
+
+:mock_reset_fail
+echo       [*] [MOCK TEST FAIL] Mo phong Soft Reset khong the cuu van, GPU van kiet o Gen1...
+> "%ProgramData%\40HXUnlock\gen2_status.txt" echo ==== 40HX Gen2 Ket qua [MOCK TEST - THAT BAI] ====
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo GPU: NVIDIA CMP 30HX [TU116] [DEV_2189]
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo PCIe Link Width: x16
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo PCIe Link Speed: GPU TLS=Gen1 [2.5 GT/s]
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo Trang thai: chua dat muc tieu Gen2! [Soft Reset khong the cuu van link]
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo Quyen thuc thi: Quan tri vien / SYSTEM
+set "UNLOCK_OK=0"
+goto :reset_done
+
+:mock_reset_ok
+echo       [*] [MOCK TEST] Mo phong Installer lan 2: Soft Reset thanh cong, GPU bung Gen2 x16 [5.0 GT/s]!
+> "%ProgramData%\40HXUnlock\gen2_status.txt" echo ==== 40HX Gen2 Ket qua [MOCK TEST - LAN 2 SAU SOFT RESET] ====
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo GPU: NVIDIA CMP 30HX [TU116] [DEV_2189]
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo PCIe Link Width: x16
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo PCIe Link Speed: GPU TLS=Gen2 [5.0 GT/s]
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo Ket qua: da dat muc tieu Gen2 thanh cong!
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo MRRS: 512B [Da toi uu]
+>> "%ProgramData%\40HXUnlock\gen2_status.txt" echo Quyen thuc thi: Quan tri vien / SYSTEM
+set "UNLOCK_OK=1"
+goto :reset_done
+
+:reset_done
+if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
     echo.
-    echo       [!] Phat hien GPU TLS van o Gen1 [driver mod / iGPU dang giu DMA context].
-    echo       [*] Dang tu dong thuc hien chu trinh Soft Reset [Disable - Enable qua PnP]...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$devs = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -match 'VEN_10DE&(DEV_2189|DEV_1F0B)' }; if ($devs) { foreach ($d in $devs) { try { pnputil /restart-device $d.InstanceId >$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {} }; Start-Sleep -Seconds 2; try { Restart-Service NVDisplay.ContainerLocalSystem -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 } catch {} } else { Write-Host 'Khong tim thay Instance ID qua PnP' }" >nul 2>&1
-    echo       [*] Dang chay lai lenh mo khoa Gen2 sau khi Soft Reset card...
-    if "%IS_MOCK_FAIL%"=="1" (
-        echo       [*] [MOCK TEST FAIL] Mo phong Soft Reset khong the cuu van, GPU van kiet o Gen1...
-        (
-            echo ==== 40HX Gen2 Ket qua [MOCK TEST - THAT BAI] ====
-            echo GPU: NVIDIA CMP 30HX [TU116] [DEV_2189]
-            echo PCIe Link Width: x16
-            echo PCIe Link Speed: GPU TLS=Gen1 [2.5 GT/s]
-            echo Trang thai: chua dat muc tieu Gen2! [Soft Reset khong the cuu van link]
-            echo Quyen thuc thi: Quan tri vien / SYSTEM
-        ) > "%ProgramData%\40HXUnlock\gen2_status.txt"
-        set "UNLOCK_OK=0"
-    ) else if "%IS_MOCK%"=="1" (
-        echo       [*] [MOCK TEST] Mo phong Installer lan 2: Soft Reset thanh cong, GPU bung Gen2 x16 [5.0 GT/s]!
-        (
-            echo ==== 40HX Gen2 Ket qua [MOCK TEST - LAN 2 SAU SOFT RESET] ====
-            echo GPU: NVIDIA CMP 30HX [TU116] [DEV_2189]
-            echo PCIe Link Width: x16
-            echo PCIe Link Speed: GPU TLS=Gen2 [5.0 GT/s]
-            echo Ket qua: da dat muc tieu Gen2 thanh cong!
-            echo MRRS: 512B [Da toi uu]
-            echo Quyen thuc thi: Quan tri vien / SYSTEM
-        ) > "%ProgramData%\40HXUnlock\gen2_status.txt"
-        set "UNLOCK_OK=1"
-    ) else (
-        "%FINAL_INSTALLER%" -gen2-30hx -silent
-        if not errorlevel 1 set "UNLOCK_OK=1"
-    )
-    if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
-        echo.
-        echo       [OK] Ket qua sau khi Soft Reset:
-        echo       --------------------------------------------------------
-        type "%ProgramData%\40HXUnlock\gen2_status.txt"
-        echo.
-        echo       --------------------------------------------------------
-    )
+    echo       [OK] Ket qua sau khi Soft Reset:
+    echo       --------------------------------------------------------
+    type "%ProgramData%\40HXUnlock\gen2_status.txt"
+    echo.
+    echo       --------------------------------------------------------
 )
+
+:skip_dev_reset
 
 :: 7. Kiem tra trang thai chan doan
 echo.
 echo [6/6] Kiem tra trang thai sau khi mo khoa...
-if not "%NO_CHECK%"=="1" (
-    if exist "%TARGET_CHECK%" (
-        echo [*] Tim thay cong cu chan doan: "%TARGET_CHECK%"
-        echo [*] Dang khoi chay cua so chan doan 40HXCheck...
-        start "" "%TARGET_CHECK%"
-    ) else (
-        "%FINAL_INSTALLER%" -status
-    )
+if "%NO_CHECK%"=="1" goto :skip_check
+echo.
+echo [*] LUU Y QUAN TRONG VE GSP (GPU System Processor):
+echo     CMP 30HX dung kien truc TU116 KHONG CO phan cung GSP.
+echo     Neu 40HXCheck bao "Khong tim thay khoa GSP / Bat GSP": HAY BO QUA HOAN TOAN!
+echo.
+if exist "%TARGET_CHECK%" (
+    echo [*] Tim thay cong cu chan doan: "%TARGET_CHECK%"
+    echo [*] Dang khoi chay cua so chan doan 40HXCheck...
+    start "" "%TARGET_CHECK%"
 ) else (
-    echo [*] Bo qua khoi chay 40HXCheck [-nocheck].
+    "%FINAL_INSTALLER%" -status
 )
+goto :check_done
+
+:skip_check
+echo [*] Bo qua khoi chay 40HXCheck [-nocheck].
+
+:check_done
 
 echo.
 echo ================================================================
-if "%UNLOCK_OK%"=="1" (
-    if "%IS_MOCK%"=="1" (
-        echo  [V] KIEM THU MO PHONG [MOCK TEST] HOAN TAT MY MAN:
-        echo  - Mo phong phat hien GPU CMP 30HX ket Gen1 o lan chay 1: [THANH CONG].
-        echo  - Tu dong kich hoat chu trinh Soft Reset card qua PnP: [THANH CONG].
-        echo  - Mo phong tai bung toc do Gen2 x16 [5.0 GT/s] o lan chay 2: [THANH CONG].
-        echo  - Toan bo cac buoc he thong da thuc hien that 100%%:
-        echo    + Powercfg: Tat Fast Startup, Hybrid Sleep, PCIe ASPM tat ca Power Plan.
-        echo    + CI Policy: Tat Microsoft Vulnerable Driver Blocklist.
-        echo    + HVCI: Kiem tra trang thai Memory Integrity.
-        echo    + Persistence: Scheduled Task SYSTEM va Registry Run Key duy tri Gen2.
-        echo.
-        echo  - Ban co the dung: Setup_CMP30HX_WindowsAIO.bat -uninstall de don dep sau kiem thu.
-    ) else (
-        echo  [V] CAI DAT HOAN TAT - Gen2 da duoc cau hinh ben vung.
-        echo  - Da thiet lap da co che: Scheduled Task SYSTEM + Registry Run Key.
-        echo  - Tu dong duy tri Gen2 tren moi lan Boot, Dang nhap va Wake from Sleep!
-        echo.
-        echo  - LUU Y QUAN TRONG VE GEN 1 KHI VUA KHOI DONG / IDLE:
-        echo    + Link PCIe se o Gen1 x16 khi card o che do ranh [Idle Power Saving].
-        echo    + Khi co tai 3D/CUDA/AIDA64/FurMark, card se tu dong bung toc do len Gen2 x16.
-        echo    + Neu GPU-Z bao Gen1: nhap vao dau cham hoi [?] canh Bus Interface de chay Render Test!
-        echo  - Neu sau khi reboot co tai ma GPU van Gen1: kiem tra HVCI, riser, tiep xuc lane va BIOS khe PCIe.
-    )
+if "%UNLOCK_OK%"=="1" goto :summary_ok
+goto :summary_fail
+
+:summary_ok
+if "%IS_MOCK%"=="1" (
+    echo  [V] KIEM THU MO PHONG [MOCK TEST] HOAN TAT MY MAN:
+    echo  - Mo phong phat hien GPU CMP 30HX ket Gen1 o lan chay 1: [THANH CONG].
+    echo  - Tu dong kich hoat chu trinh Soft Reset card qua PnP: [THANH CONG].
+    echo  - Mo phong tai bung toc do Gen2 x16 [5.0 GT/s] o lan chay 2: [THANH CONG].
+    echo  - Toan bo cac buoc he thong da thuc hien that 100%%:
+    echo    + Powercfg: Tat Fast Startup, Hybrid Sleep, PCIe ASPM tat ca Power Plan.
+    echo    + CI Policy: Tat Microsoft Vulnerable Driver Blocklist.
+    echo    + HVCI: Kiem tra trang thai Memory Integrity.
+    echo    + Persistence: Scheduled Task SYSTEM va Registry Run Key duy tri Gen2.
+    echo.
+    echo  - Ban co the dung: Setup_CMP30HX_WindowsAIO.bat -uninstall de don dep sau kiem thu.
 ) else (
-    echo  [X] CAI DAT CHUA HOAN TAT - chua xac nhan duoc Gen2 trong phien hien tai.
-    if "%NEED_REBOOT%"=="1" (
-        echo  - LUU Y: Memory Integrity [HVCI] vua duoc tat, nhung can KHOI DONG LAI MAY de ap dung.
-        echo    Sau khi reboot, Scheduled Task SYSTEM se tu dong thu nap driver va mo khoa Gen2.
-    ) else (
-        echo  - Khong ket luan thanh cong chi dua tren Root Port Gen2.
-        echo  - Kiem tra file status va log chi tiet: %TEMP%\40HX_installer.log
-        echo  - Neu da thu moi cach van loi: go bo sach driver cu bang DDU roi cai lai driver NVIDIA moi nhat.
-    )
+    echo  [V] CAI DAT HOAN TAT - Gen2 da duoc cau hinh ben vung.
+    echo  - Da thiet lap da co che: Scheduled Task SYSTEM + Registry Run Key.
+    echo  - Tu dong duy tri Gen2 tren moi lan Boot, Dang nhap va Wake from Sleep!
+    echo.
+    echo  - LUU Y QUAN TRONG VE GEN 1 KHI VUA KHOI DONG / IDLE:
+    echo    + Link PCIe se o Gen1 x16 khi card o che do ranh [Idle Power Saving].
+    echo    + Khi co tai 3D/CUDA/AIDA64/FurMark, card se tu dong bung toc do len Gen2 x16.
+    echo    + Neu GPU-Z bao Gen1: nhap vao dau cham hoi [?] canh Bus Interface de chay Render Test!
+    echo  - Neu sau khi reboot co tai ma GPU van Gen1: kiem tra HVCI, riser, tiep xuc lane va BIOS khe PCIe.
 )
+goto :summary_end
+
+:summary_fail
+if "%IS_DRV_FAIL%"=="1" goto :fail_drv
+if "%IS_NOGPU_FAIL%"=="1" goto :fail_nogpu
+goto :fail_gen1
+
+:fail_drv
+echo  [X] CAI DAT CHUA HOAN TAT - DRIVER KERNEL (WinRing0/ThrottleStop) BI CHAN!
+echo.
+echo  [!] NGUYEN NHAN CHINH:
+echo      Windows Core Isolation (HVCI), Vulnerable Driver Blocklist hoac Antivirus
+echo      dang chan nap driver truy cap phan cung kernel (Loi 5 / Access Denied).
+echo.
+echo  [*] CAC BUOC KHAC PHUC:
+echo      1. KHOI DONG LAI MAY (REBOOT):
+echo         Script da tu dong tat HVCI va Driver Blocklist trong Registry o Buoc [2/6] ^& [3/6].
+echo         Tuy nhien, Windows KERNEL BAT BUOC PHAI REBOOT moi co hieu luc!
+echo      2. Kiem tra phan mem diet virus / Windows Defender:
+echo         Neu co Kaspersky, Bitdefender, Avast... hay tam tat hoac them exclusion cho
+echo         thu muc "%ProgramFiles%\40HXUnlock".
+echo      3. Sau khi Reboot:
+echo         Scheduled Task SYSTEM se tu dong thu nap lai driver va mo khoa Gen2.
+echo         Hoac ban co the chay lai script nay voi Run as Administrator.
+goto :fail_common
+
+:fail_nogpu
+echo  [X] CAI DAT CHUA HOAN TAT - KHONG TIM THAY GPU CMP 30HX (DEV_2189)!
+echo.
+echo  [!] NGUYEN NHAN CHINH:
+echo      Cong cu khong dinh vi duoc card CMP 30HX tren bus PCI.
+echo.
+echo  [*] CAC BUOC KHAC PHUC:
+echo      1. Kiem tra lai nguon phu 8-pin PCIe va tiep xuc khe cam PCIe / Riser.
+echo      2. Kiem tra Device Manager xem card co hien thi khong (ke ca dang co cham than vang).
+echo      3. Kiem tra BIOS: Bat "Above 4G Decoding", Re-Size BAR, va kiem tra thiet lap khe PCIe.
+goto :fail_common
+
+:fail_gen1
+echo  [X] CAI DAT CHUA HOAN TAT - GPU VAN BI KET O GEN1 (2.5 GT/s)!
+echo.
+echo  [!] NGUYEN NHAN CHINH:
+echo      Driver da mo duoc phan cung nhung link PCIe khong the bung len Gen2.
+echo.
+echo  [*] CAC BUOC KHAC PHUC:
+echo      1. Mo GPU-Z va BAM VAO DAU CHAM HOI [?] canh muc Bus Interface de chay RENDER TEST!
+echo         Luu y: Khi card o che do nghi (Idle), GPU se tu dong ha xuong Gen1 de tiet kiem dien.
+echo      2. Neu khi Render Test van kiet Gen1: Khoi dong lai may de PnP/DMA context duoc giai phong.
+echo      3. Neu van Gen1 sau reboot: Kiem tra cap Riser, tiep xuc khe PCIe hoac cam truc tiep vao khe x16.
+echo      4. Neu nghi ngo xung dot driver: Dung DDU go sach driver cu trong Safe Mode roi cai lai.
+goto :fail_common
+
+:fail_common
+echo.
+echo  [*] LUU Y VE GSP: TU116 (CMP 30HX) khong ho tro GSP. Bo qua moi canh bao GSP tu 40HXCheck.
+
+:summary_end
 if "%TASK_OK%"=="1" (
     echo  - Sau khi reboot, he thong se tu dong mo khoa sau 15 giay khoi dong hoac 5 giay dang nhap.
 ) else (
