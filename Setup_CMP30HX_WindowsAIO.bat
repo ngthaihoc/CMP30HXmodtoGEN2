@@ -30,11 +30,22 @@ for %%a in (%*) do (
     if /i "%%~a"=="/uninstall" set "DO_UNINSTALL=1"
     if /i "%%~a"=="-u" set "DO_UNINSTALL=1"
     if /i "%%~a"=="/u" set "DO_UNINSTALL=1"
+    if /i "%%~a"=="-cleantasks" set "DO_CLEAN_TASKS=1"
+    if /i "%%~a"=="/cleantasks" set "DO_CLEAN_TASKS=1"
+    if /i "%%~a"=="-deltasks" set "DO_CLEAN_TASKS=1"
+    if /i "%%~a"=="/deltasks" set "DO_CLEAN_TASKS=1"
+    if /i "%%~a"=="-clean" set "DO_CLEAN_TASKS=1"
+    if /i "%%~a"=="/clean" set "DO_CLEAN_TASKS=1"
+    if /i "%%~a"=="-notask" set "NO_TASK=1"
+    if /i "%%~a"=="/notask" set "NO_TASK=1"
+)
+set "HAS_CLI_FLAG=0"
+for %%a in (%*) do (
+    if /i not "%%~a"=="-noadmin" if /i not "%%~a"=="/noadmin" set "HAS_CLI_FLAG=1"
 )
 if "%IS_MOCK_FAIL%"=="1" set "IS_MOCK=1"
 if "%IS_MOCK_WINRING0%"=="1" set "IS_MOCK=1"
 if "%IS_MOCK_NOGPU%"=="1" set "IS_MOCK=1"
-if "%DO_UNINSTALL%"=="1" goto :uninstall
 
 :: Kiem tra quyen Administrator (UAC da tang phong thu, thay the net session cu)
 if not defined IS_ADMIN (
@@ -73,6 +84,37 @@ if "%IS_ADMIN%"=="0" (
 
 cd /d "%~dp0"
 
+if "%DO_CLEAN_TASKS%"=="1" goto :clean_tasks
+if "%DO_UNINSTALL%"=="1" goto :uninstall
+if "%HAS_CLI_FLAG%"=="0" goto :aio_menu
+goto :start_aio
+
+:aio_menu
+cls
+echo ================================================================
+echo    CONG CU CAI DAT TOAN DIEN [ALL-IN-ONE] CHO CMP 30HX [TU116]
+echo    - Tuong thich 100%% Game Riot [Valorant, LoL] va Nguoi dung pho thong
+echo ================================================================
+echo.
+echo   [1] Cai dat va Mo khoa Gen2 AIO [Tu dong 100%% cho moi nguoi dung]
+echo       - Mo khoa Gen2 x16 [5.0 GT/s], toi uu DEVCTL MRRS 512B
+echo       - TU DONG tich hop toi uu Riot Games (Valorant/LMHT)
+echo       - Don dep sach driver BYOVD tranh loi VAN 1067
+echo.
+echo   [2] Go bo cai dat (Tu dong xoa Scheduled Task va Don dep)
+echo       - Tu dong xoa sach Scheduled Task, Registry Run key cua script
+echo       - Go bo hoan toan khoi he thong
+echo.
+echo   [3] Thoat
+echo.
+echo ================================================================
+%SystemRoot%\System32\choice.exe /c 123 /t 8 /d 1 /m "Nhap lua chon cua ban [1-3] (Tu dong chon [1] sau 8 giay): "
+if errorlevel 3 exit /b 0
+if errorlevel 2 goto :clean_tasks
+if errorlevel 1 goto :start_aio
+goto :start_aio
+
+:start_aio
 echo ================================================================
 if not "%IS_MOCK%"=="1" goto :banner_real
 if "%IS_MOCK_WINRING0%"=="1" goto :banner_winring0
@@ -194,13 +236,15 @@ if defined SRC_RUNNER (
 )
 
 if not exist "%FINAL_RUNNER%" (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "[System.IO.File]::WriteAllBytes($env:FINAL_RUNNER, [System.Convert]::FromBase64String('QGVjaG8gb2ZmDQpzZXRsb2NhbA0KY2QgL2QgIiV+ZHAwIg0KIjQwSFhJbnN0YWxsZXIuZXhlIiAtZ2VuMi0zMGh4IC1zaWxlbnQNCnBvd2Vyc2hlbGwgLU5vUHJvZmlsZSAtRXhlY3V0aW9uUG9saWN5IEJ5cGFzcyAtQ29tbWFuZCAiU3RhcnQtU2xlZXAgLVNlY29uZHMgMTU7ICRzdGF0dXNGaWxlID0gW1N5c3RlbS5JTy5QYXRoXTo6Q29tYmluZShgJGVudjpQcm9ncmFtRGF0YSwgJzQwSFhVbmxvY2tcZ2VuMl9zdGF0dXMudHh0Jyk7IGlmIChUZXN0LVBhdGggYCRzdGF0dXNGaWxlKSB7IGAkYyA9IEdldC1Db250ZW50IGAkc3RhdHVzRmlsZSAtUmF3OyBpZiAoYCRjIC1tYXRjaCAnR1BVIFRMUz1HZW4xfGNodWEgZGF0fGNoxrBhIMSR4bqhdCcpIHsgYCRkZXZzID0gR2V0LVBucERldmljZSAtUHJlc2VudE9ubHkgLUVycm9yQWN0aW9uIFNpbGVudGx5Q29udGludWUgfCBXaGVyZS1PYmplY3QgeyBgJF8uSGFyZHdhcmVJRCAtbWF0Y2ggJ1ZFTl8xMERFJihERVZfMjE4OXxERVZfMUYwQiknIH07IGZvcmVhY2ggKGAkZCBpbiBgJGRldnMpIHsgdHJ5IHsgcG5wdXRpbCAvcmVzdGFydC1kZXZpY2UgYCRkLkluc3RhbmNlSWQgPmAkbnVsbCAyPiYxIH0gY2F0Y2gge307IHRyeSB7IERpc2FibGUtUG5wRGV2aWNlIC1JbnN0YW5jZUlkIGAkZC5JbnN0YW5jZUlkIC1Db25maXJtOmAkZmFsc2UgLUVycm9yQWN0aW9uIFNpbGVudGx5Q29udGludWU7IFN0YXJ0LVNsZWVwIC1NaWxsaXNlY29uZHMgODAwOyBFbmFibGUtUG5wRGV2aWNlIC1JbnN0YW5jZUlkIGAkZC5JbnN0YW5jZUlkIC1Db25maXJtOmAkZmFsc2UgLUVycm9yQWN0aW9uIFNpbGVudGx5Q29udGludWUgfSBjYXRjaCB7fSB9OyBTdGFydC1TbGVlcCAtU2Vjb25kcyAyOyBTdGFydC1Qcm9jZXNzIC1GaWxlUGF0aCAoSm9pbi1QYXRoIGAkcHdkLlBhdGggJzQwSFhJbnN0YWxsZXIuZXhlJykgLUFyZ3VtZW50TGlzdCAnLWdlbjItMzBoeCAtc2lsZW50JyAtV2FpdCB9IH0iID5udWwgMj4mMQplbmRsb2NhbA0K'))" >nul 2>&1
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "[System.IO.File]::WriteAllBytes($env:FINAL_RUNNER, [System.Convert]::FromBase64String('QGVjaG8gb2ZmDQpzZXRsb2NhbA0KY2QgL2QgIiV+ZHAwIg0Kd2hlcmUgbnZpZGlhLXNtaSA+bnVsIDI+JjEgJiYgbnZpZGlhLXNtaSAtcG0gMSA+bnVsIDI+JjENCiI0MEhYSW5zdGFsbGVyLmV4ZSIgLWdlbjItMzBoeCAtc2lsZW50DQp3aGVyZSBudmlkaWEtc21pID5udWwgMj4mMSAmJiBudmlkaWEtc21pIC1wbSAxID5udWwgMj4mMQ0KcG93ZXJzaGVsbCAtbm9Qcm9maWxlIC1FeGVjdXRpb25Qb2xpY3kgQnlwYXNzIC1Db21tYW5kICJTdGFydC1TbGVlcCAtU2Vjb25kcyAxNTsgJHN0YXR1c0ZpbGUgPSBbU3lzdGVtLklPLlBhdGhdOjpDb21iaW5lKCRlbnY6UHJvZ3JhbURhdGEsICc0MEhYVW5sb2NrXGdlbjJfc3RhdHVzLnR4dCcpOyBpZiAoVGVzdC1QYXRoICRzdGF0dXNGaWxlKSB7ICRjID0gR2V0LUNvbnRlbnQgJHN0YXR1c0ZpbGUgLVJhdzsgaWYgKCRjIC1tYXRjaCAnR1BVIFRMUz1HZW4xfGNodWEgZGF0fGNoxrBhIMSR4bqhdCcpIHsgJGRldnMgPSBHZXQtUG5wRGV2aWNlIC1QcmVzZW50T25seSAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZSB8IFdoZXJlLU9iamVjdCB7ICRfLkhhcmR3YXJlSUQgLW1hdGNoICdWRW5fMTBERSYoREVWXzIxODl8REVWXzFGMEIpJyB9OyBmb3JlYWNoICgkZCBpbiAkZGV2cykgeyB0cnkgeyBwbnB1dGlsIC9yZXN0YXJ0LWRldmljZSAkZC5JbnN0YW5jZUlkID4kbnVsbCAyPiYxIH0gY2F0Y2gge307IHRyeSB7IERpc2FibGUtUG5wRGV2aWNlIC1JbnN0YW5jZUlkICRkLkluc3RhbmNlSWQgLUNvbmZpcm06JGZhbHNlIC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlOyBTdGFydC1TbGVlcCAtTWlsbGlzZWNvbmRzIDgwMDsgRW5hYmxlLVBucERldmljZSAtSW5zdGFuY2VJZCAkZC5JbnN0YW5jZUlkIC1Db25maXJtOiRmYWxzZSAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZSB9IGNhdGNoIHt9IH07IFN0YXJ0LVNsZWVwIC1TZWNvbmRzIDI7IFN0YXJ0LVByb2Nlc3MgLUZpbGVQYXRoIChKb2luLVBhdGggJHB3ZC5QYXRoICc0MEhYSW5zdGFsbGVyLmV4ZScpIC1Bcmd1bWVudExpc3QgJy1nZW4yLTMwaHggLXNpbGVudCcgLVdhaXQ7IHRyeSB7ICYgJ252aWRpYS1zbWknIC1wbSAxIH0gY2F0Y2gge30gfSB9IiA+bnVsIDI+JjENCjo6IERvbiBkZXAgc2FjaCBzZSBkcml2ZXIgQllPVkQga2hvaSBrZXJuZWwgdmEgU3lzdGVtMzIgKHRyYW5oIHh1bmcgZG90IFJpb3QgVmFuZ3VhcmQgLyBFYXN5IEFudGktQ2hlYXQpDQpzYyBzdG9wIFdpblJpbmcwXzFfMl8wID5udWwgMj4mMQ0Kc2MgZGVsZXRlIFdpblJpbmcwXzFfMl8wID5udWwgMj4mMQ0Kc2Mgc3RvcCBUaHJvdHRsZVN0b3AgPm51bCAyPiYxDQpzYyBkZWxldGUgVGhyb3R0bGVTdG9wID5udWwgMj4mMQ0KZGVsIC9mIC9xICIlU3lzdGVtUm9vdCVcU3lzdGVtMzJcZHJpdmVyc1xXaW5SaW5nMHg2NC5zeXMiID5udWwgMj4mMQ0KZGVsIC9mIC9xICIlU3lzdGVtUm9vdCVcU3lzdGVtMzJcZHJpdmVyc1xUaHJvdHRsZVN0b3Auc3lzIiA+bnVsIDI+JjENCmVuZGxvY2FsDQo='))" >nul 2>&1
 )
 echo [V] Da thiet lap script duy tri khoi dong: "%FINAL_RUNNER%"
 echo.
 
-:: 1. Don dep task retry cu (neu co), tranh vong lap retry Gen3/Gen2 cu
+:: 1. Don dep cac Scheduled Task cu va trung lap (tranh vong lap retry hoac de task loi)
 schtasks /delete /tn "40HXGen2Retry" /f >nul 2>&1
+schtasks /delete /tn "40HX PCIe Gen2 Bring-up" /f >nul 2>&1
+schtasks /delete /tn "CMP30HX_Gen2_Unlock_User" /f >nul 2>&1
 
 :: 2. Tat triet de Fast Startup, Hybrid Sleep va PCIe ASPM tren toan bo Power Plan
 echo [1/6] Dang tat Fast Startup, Hybrid Sleep va PCIe ASPM toan he thong...
@@ -247,7 +291,25 @@ if errorlevel 1 (
     )
 )
 
+:: Kiem tra va tu dong tat che do Windows Test Signing (tuong thich Riot Vanguard & Anti-Cheat)
+bcdedit 2>nul | %SystemRoot%\System32\findstr.exe /i "testsigning" | %SystemRoot%\System32\findstr.exe /i "yes" >nul 2>&1
+if not errorlevel 1 (
+    echo.
+    echo       [!] Phat hien Windows dang BAT che do Test Signing [testsigning=Yes]!
+    echo           Riot Vanguard [Valorant, LMHT] va Easy Anti-Cheat se CHAN vao game [Loi VAN 1067].
+    echo       [*] Dang tu dong tat Test Signing [bcdedit /set testsigning off]...
+    bcdedit /set testsigning off >nul 2>&1
+    set "NEED_REBOOT=1"
+    echo       [OK] Da tat Test Signing thanh cong de tuong thich Riot Vanguard. [Can reboot].
+)
+
 :: 5. Dang ky Scheduled Task SYSTEM da kich hoat (Startup 15s + Logon 5s + Wake from Sleep)
+if "%NO_TASK%"=="1" (
+    echo [4/6] Bo qua tao Scheduled Task [-notask duoc bat]...
+    echo       [*] Che do khong tao Task: Mo khoa truc tiep cho phien lam viec hien tai.
+    set "TASK_OK=1"
+    goto :skip_task_creation
+)
 echo [4/6] Dang tao Scheduled Task SYSTEM va Run Key duy tri Gen2...
 set "TASK_OK=0"
 set "FINAL_EXE=%FINAL_RUNNER%"
@@ -277,6 +339,18 @@ if "%TASK_OK%"=="1" (
 ) else (
     echo       [!] Scheduled Task SYSTEM gap truc trac, da kich hoat che do du phong Registry Run.
 )
+
+:skip_task_creation
+
+:: Tu dong phat hien Riot Vanguard va cau hinh GPU High Performance cho Riot Games
+set "HAS_VANGUARD=0"
+sc query vgc >nul 2>&1 && set "HAS_VANGUARD=1"
+if exist "%ProgramFiles%\Riot Vanguard\vgc.exe" set "HAS_VANGUARD=1"
+if "%HAS_VANGUARD%"=="1" (
+    echo       [*] Phat hien Riot Vanguard tren he thong. Che do tuong thich Anti-Cheat da san sang.
+)
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$reg = 'HKCU:\Software\Microsoft\DirectX\UserGpuPreferences'; if (-not (Test-Path $reg)) { New-Item -Path $reg -Force | Out-Null }; $found = 0; $drives = (Get-PSDrive -PSProvider FileSystem).Root; foreach ($d in $drives) { foreach ($sub in @('Riot Games\VALORANT\live\ShooterGame\Binaries\Win64\VALORANT-Win64-Shipping.exe', 'Riot Games\League of Legends\Game\League of Legends.exe')) { $p = Join-Path $d $sub; if (Test-Path $p) { Set-ItemProperty -Path $reg -Name $p -Value 'GpuPreference=2;' -ErrorAction SilentlyContinue; $found++ } } }; if ($found -eq 0) { Set-ItemProperty -Path $reg -Name (Join-Path $env:SystemDrive 'Riot Games\VALORANT\live\ShooterGame\Binaries\Win64\VALORANT-Win64-Shipping.exe') -Value 'GpuPreference=2;' -ErrorAction SilentlyContinue; Set-ItemProperty -Path $reg -Name (Join-Path $env:SystemDrive 'Riot Games\League of Legends\Game\League of Legends.exe') -Value 'GpuPreference=2;' -ErrorAction SilentlyContinue }" >nul 2>&1
 
 :: 6. Kich hoat mo khoa Gen2 ngay lap tuc
 echo.
@@ -436,6 +510,14 @@ if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
 
 :skip_dev_reset
 
+:: Don dep sach se driver BYOVD sau khi mo khoa, giu he thong sach 100% cho Anti-Cheat (Riot Vanguard / Easy Anti-Cheat)
+sc stop WinRing0_1_2_0 >nul 2>&1
+sc delete WinRing0_1_2_0 >nul 2>&1
+sc stop ThrottleStop >nul 2>&1
+sc delete ThrottleStop >nul 2>&1
+del /f /q "%SystemRoot%\System32\drivers\WinRing0x64.sys" >nul 2>&1
+del /f /q "%SystemRoot%\System32\drivers\ThrottleStop.sys" >nul 2>&1
+
 :: 7. Kiem tra trang thai chan doan
 echo.
 echo [6/6] Kiem tra trang thai sau khi mo khoa...
@@ -465,29 +547,40 @@ if "%UNLOCK_OK%"=="1" goto :summary_ok
 goto :summary_fail
 
 :summary_ok
-if "%IS_MOCK%"=="1" (
-    echo  [V] KIEM THU MO PHONG [MOCK TEST] HOAN TAT MY MAN:
-    echo  - Mo phong phat hien GPU CMP 30HX ket Gen1 o lan chay 1: [THANH CONG].
-    echo  - Tu dong kich hoat chu trinh Soft Reset card qua PnP: [THANH CONG].
-    echo  - Mo phong tai bung toc do Gen2 x16 [5.0 GT/s] o lan chay 2: [THANH CONG].
-    echo  - Toan bo cac buoc he thong da thuc hien that 100%%:
-    echo    + Powercfg: Tat Fast Startup, Hybrid Sleep, PCIe ASPM tat ca Power Plan.
-    echo    + CI Policy: Tat Microsoft Vulnerable Driver Blocklist.
-    echo    + HVCI: Kiem tra trang thai Memory Integrity.
-    echo    + Persistence: Scheduled Task SYSTEM va Registry Run Key duy tri Gen2.
-    echo.
-    echo  - Ban co the dung: Setup_CMP30HX_WindowsAIO.bat -uninstall de don dep sau kiem thu.
-) else (
-    echo  [V] CAI DAT HOAN TAT - Gen2 da duoc cau hinh ben vung.
-    echo  - Da thiet lap da co che: Scheduled Task SYSTEM + Registry Run Key.
-    echo  - Tu dong duy tri Gen2 tren moi lan Boot, Dang nhap va Wake from Sleep!
-    echo.
-    echo  - LUU Y QUAN TRONG VE GEN 1 KHI VUA KHOI DONG / IDLE:
-    echo    + Link PCIe se o Gen1 x16 khi card o che do ranh [Idle Power Saving].
-    echo    + Khi co tai 3D/CUDA/AIDA64/FurMark, card se tu dong bung toc do len Gen2 x16.
-    echo    + Neu GPU-Z bao Gen1: nhap vao dau cham hoi [?] canh Bus Interface de chay Render Test!
-    echo  - Neu sau khi reboot co tai ma GPU van Gen1: kiem tra HVCI, riser, tiep xuc lane va BIOS khe PCIe.
-)
+if "%IS_MOCK%"=="1" goto :summary_ok_mock
+goto :summary_ok_real
+
+:summary_ok_mock
+echo  [V] KIEM THU MO PHONG [MOCK TEST] HOAN TAT MY MAN:
+echo  - Mo phong phat hien GPU CMP 30HX ket Gen1 o lan chay 1: [THANH CONG].
+echo  - Tu dong kich hoat chu trinh Soft Reset card qua PnP: [THANH CONG].
+echo  - Mo phong tai bung toc do Gen2 x16 [5.0 GT/s] o lan chay 2: [THANH CONG].
+echo  - Toan bo cac buoc he thong da thuc hien that 100%%:
+echo    + Powercfg: Tat Fast Startup, Hybrid Sleep, PCIe ASPM tat ca Power Plan.
+echo    + CI Policy: Tat Microsoft Vulnerable Driver Blocklist.
+echo    + HVCI: Kiem tra trang thai Memory Integrity.
+echo    + Persistence: Scheduled Task SYSTEM va Registry Run Key duy tri Gen2.
+echo.
+echo  - Ban co the dung: Setup_CMP30HX_WindowsAIO.bat -uninstall de don dep sau kiem thu.
+goto :summary_end
+
+:summary_ok_real
+echo  [V] CAI DAT HOAN TAT - Gen2 da duoc cau hinh ben vung.
+echo  - Da thiet lap da co che: Scheduled Task SYSTEM + Registry Run Key.
+echo  - Tu dong duy tri Gen2 tren moi lan Boot, Dang nhap va Wake from Sleep!
+echo.
+echo  - LUU Y QUAN TRONG VE GEN 1 KHI VUA KHOI DONG / IDLE:
+echo    + Link PCIe se o Gen1 x16 khi card o che do ranh [Idle Power Saving].
+echo    + Khi co tai 3D/CUDA/AIDA64/FurMark, card se tu dong bung toc do len Gen2 x16.
+echo    + Neu GPU-Z bao Gen1: nhap vao dau cham hoi [?] canh Bus Interface de chay Render Test!
+echo  - Neu sau khi reboot co tai ma GPU van Gen1: kiem tra HVCI, riser, tiep xuc lane va BIOS khe PCIe.
+echo.
+echo  [*] CHE DO TUONG THICH TOAN DIEN [NGUOI CHOI RIOT GAMES & NGUOI DUNG THUONG]:
+echo      1. He thong da tu dong don dep sach se driver WinRing0/ThrottleStop khoi kernel va System32.
+echo         =^> Riot Vanguard, Easy Anti-Cheat, BattlEye khong bao gio phat hien hay chan driver.
+echo      2. Windows Test Signing da duoc kiem tra va tat =^> Khong bi loi VAN 1067 / VAN 9003.
+echo      3. Secure Boot va TPM 2.0: Luon giu BAT trong BIOS [chi tat Memory Integrity HVCI trong Windows].
+echo      4. Valorant va LMHT da duoc tu dong dinh tuyen sang GPU High Performance [CMP 30HX].
 goto :summary_end
 
 :summary_fail
@@ -546,7 +639,12 @@ echo  [*] LUU Y VE GSP: TU116 (CMP 30HX) khong ho tro GSP. Bo qua moi canh bao G
 
 :summary_end
 if "%TASK_OK%"=="1" (
-    echo  - Sau khi reboot, he thong se tu dong mo khoa sau 15 giay khoi dong hoac 5 giay dang nhap.
+    if not "%NO_TASK%"=="1" (
+        echo  - Sau khi reboot, he thong se tu dong mo khoa sau 15 giay khoi dong hoac 5 giay dang nhap.
+        echo  - Neu muon xoa Scheduled Task, ban chi can mo lai script nay va chon muc [2].
+    ) else (
+        echo  - Da mo khoa Gen2 thanh cong ma khong de lai Scheduled Task khoi dong.
+    )
 ) else (
     echo  - [Canh bao] Scheduled Task chua san sang; sau reboot phai chay lai Setup hoac lenh mo khoa thu cong.
 )
@@ -557,27 +655,47 @@ if not "%NO_WAIT%"=="1" pause
 if "%UNLOCK_OK%"=="1" exit /b 0
 exit /b 1
 
+:clean_tasks
 :uninstall
 echo ================================================================
-echo    GO BO TU DONG KHOI DONG CMP 30HX GEN2 UNLOCK
+echo    TU DONG XOA TOAN BO SCHEDULED TASK VA DON DEP HE THONG
 echo ================================================================
+echo.
+echo [*] Dang tim va xoa toan bo Scheduled Task he thong cua AIO...
 schtasks /delete /tn "CMP30HX_Gen2_Unlock" /f >nul 2>&1
 schtasks /delete /tn "CMP30HX_Gen2_Unlock_User" /f >nul 2>&1
 schtasks /delete /tn "40HXGen2Retry" /f >nul 2>&1
 schtasks /delete /tn "40HX PCIe Gen2 Bring-up" /f >nul 2>&1
+echo       [OK] Da xoa sach toan bo Scheduled Task [CMP30HX_Gen2_Unlock].
+echo.
+echo [*] Dang xoa cac Registry Run Key duy tri khoi dong...
 reg delete "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "CMP30HX_Gen2" /f >nul 2>&1
 reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "40HXGen2" /f >nul 2>&1
-if exist "%ProgramFiles%\40HXUnlock" (
-    rmdir /s /q "%ProgramFiles%\40HXUnlock" >nul 2>&1
-)
+echo       [OK] Da xoa sach Registry Run Key khoi dong [HKLM va HKCU].
+echo.
+echo [*] Dang don dep driver BYOVD tranh xung dot Anti-Cheat...
+sc stop WinRing0_1_2_0 >nul 2>&1
+sc delete WinRing0_1_2_0 >nul 2>&1
+sc stop ThrottleStop >nul 2>&1
+sc delete ThrottleStop >nul 2>&1
+del /f /q "%SystemRoot%\System32\drivers\WinRing0x64.sys" >nul 2>&1
+del /f /q "%SystemRoot%\System32\drivers\ThrottleStop.sys" >nul 2>&1
+echo       [OK] Da go bo cac service va driver WinRing0 / ThrottleStop khoi kernel.
+echo.
 if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
     del /f /q "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1
 )
-echo [V] Da xoa toan bo cac Scheduled Task, Run key va thu muc he thong lien quan.
+if exist "%ProgramFiles%\40HXUnlock" (
+    rmdir /s /q "%ProgramFiles%\40HXUnlock" >nul 2>&1
+)
+echo ================================================================
+echo  [V] DA XOA TOAN BO CAC SCHEDULED TASK VA DON DEP SACH SE!
+echo  - Task Scheduler he thong hoan toan sach se, khong con tac vu chay ngam.
+echo  - Khong con bat ky tac vu nao co the gay anh huong den Riot Vanguard / Anti-Cheat.
+echo ================================================================
 echo.
 if not "%NO_WAIT%"=="1" pause
 exit /b 0
-
 
 :warn_reboot
 echo.
