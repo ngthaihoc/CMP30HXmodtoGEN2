@@ -828,8 +828,14 @@ echo  [*] CHE DO TUONG THICH TOAN DIEN [NGUOI CHOI RIOT GAMES & NGUOI DUNG THUON
 echo      1. He thong da tu dong don dep sach se driver WinRing0/ThrottleStop khoi kernel va System32.
 echo         =^> Riot Vanguard, Easy Anti-Cheat, BattlEye khong bao gio phat hien hay chan driver.
 echo      2. Windows Test Signing da duoc kiem tra va tat =^> Khong bi loi VAN 1067 / VAN 9003.
-echo      3. Secure Boot va TPM 2.0: Luon giu BAT trong BIOS [chi tat Memory Integrity HVCI trong Windows].
-echo      4. Valorant va LMHT da duoc tu dong dinh tuyen sang GPU High Performance [CMP 30HX].
+echo      3. Chinh sach Secure Boot ^& TPM 2.0 theo tung loai card:
+echo         + Voi CMP 30HX: Secure Boot va TPM 2.0 luon giu BAT trong BIOS [Choi tot ca Valorant ^& LMHT].
+echo         + Voi CMP 40HX [Phai tat Secure Boot trong BIOS de nap EFI mo khoa Tensor Core]:
+echo           - Lien Minh Huyen Thoai (LMHT): Choi binh thuong tren ca Win 10 ^& Win 11.
+echo           - Valorant tren Win 11: Riot bat buoc Secure Boot [loi VAN 9003/VAN 1067].
+echo             =^> De choi Valorant voi 40HX: Khuyen nghi dung Windows 10 (khong ep Secure Boot).
+echo      4. Valorant va LMHT da duoc tu dong dinh tuyen sang GPU High Performance.
+echo      5. Neu truoc day tung dung ban cu/ban goc bi chan game, chi can chay script nay 1 lan roi reboot!
 exit /b 0
 
 :SummaryFailMissingStatus
