@@ -27,10 +27,11 @@ type UnlockState struct {
 	Width     uint32 // 协商链路宽度 lanes (0=未知; ×1/×2/×4/×8/×16/×32)
 	TLS       uint32 // GPU LNKCTL2 目标速率 (0=未知); v2.5.1: Speed<2 而 TLS>=2
 	//               // = 空闲省电降速(已配置, 负载自动回升), 不是解锁失败
-	SS0      uint32 // 算力标志寄存器
-	SS1      uint32
-	SS0OK    bool // 成功读到 SS0
-	Unlocked bool // SS0 == 0x88888888
+	SS0           uint32 // 算力标志寄存器
+	SS1           uint32
+	SS0OK         bool // 成功读到 SS0
+	Unlocked      bool // SS0 == 0x88888888
+	ComputeReport *ComputeReport // Báo cáo giải mã Tensor Core định kiểu (ComputeInspector)
 }
 
 // 40HX 在 PCI 枚举里的 LocationInformation 形如 "PCI bus 1, device 0, function 0"
@@ -209,14 +210,14 @@ func ReadUnlockStateV2(retries int, delayMs int) *UnlockState {
 			st.TLS = v & 0xF
 		}
 	}
+	bus := NewProductionBus(wh, 0)
+	inspector := NewComputeInspector(bus)
+	if rep, _ := inspector.InspectCompute(bdf, prof); rep != nil {
+		st.ComputeReport = rep
+	}
 	if !prof.FirmwareUnlock {
 		return st
 	}
-	bar0raw, err := PciRd(wh, bdf, 0x10)
-	if err != nil {
-		return st
-	}
-	bar0 := uint64(bar0raw & 0xFFFFFFF0)
 
 	// v2.5: ThrottleStop BYOVD 通道
 	th, err3 := OpenThrottleStop()
@@ -229,11 +230,19 @@ func ReadUnlockStateV2(retries int, delayMs int) *UnlockState {
 	}
 	defer CloseHandle(th)
 	st.TSOK = true
-	if v, err := TSRead(th, bar0+SS0Offset); err == nil {
-		st.SS0, st.SS0OK, st.Unlocked = v, true, v == 0x88888888
-	}
-	if v, err := TSRead(th, bar0+SS1Offset); err == nil {
-		st.SS1 = v
+
+	// Ủy quyền cho Deep Module ComputeInspector thực hiện kiểm tra an toàn BOOT_0 và giải mã SS0/SS1
+	bus = NewProductionBus(wh, th)
+	inspector = NewComputeInspector(bus)
+	rep, _ := inspector.InspectCompute(bdf, prof)
+	if rep != nil {
+		st.ComputeReport = rep
+		if rep.Status == ComputeStatusUnlocked || rep.Status == ComputeStatusLocked {
+			st.SS0 = rep.SS0
+			st.SS1 = rep.SS1
+			st.SS0OK = true
+			st.Unlocked = rep.Unlocked
+		}
 	}
 	return st
 }
