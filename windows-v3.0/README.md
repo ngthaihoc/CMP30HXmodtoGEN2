@@ -229,7 +229,18 @@ Sau khi vào Windows, nhấp đúp vào **`40HXCheck.exe`**:
 
 ---
 
-## <img src="https://api.iconify.design/lucide/trash-2.svg?color=%23ef4444" width="22" height="22" align="center" /> 6. Gỡ Cài Đặt Hoàn Toàn
+## <img src="https://api.iconify.design/lucide/cpu.svg?color=%2310b981" width="22" height="22" align="center" /> 6. Kiến Trúc Deep Module & Cơ Chế An Toàn (v3.0.0)
+
+Phiên bản v3.0.0 áp dụng kiến trúc **Deep Module** với các tầng trừu tượng hoá mạnh mẽ:
+- **`LinkNegotiator`**: Đóng gói toàn bộ máy trạng thái huấn luyện link PCIe, kẹp eFuse Gen2 cho TU116, tối ưu hóa DEVCTL MRRS 512B (`0x2000`) và chuỗi ghi shadow register MMIO (`PRIV_MISC_1`, `XVE_OVR`, `LINK_CONFIG_0`, `PL_LINK_RATE`, `CYA_0`).
+- **`ComputeInspector`**: Kiểm tra an toàn `BOOT_0` (`0x16` cho TU106) chống crash hệ thống và giải mã định kiểu Tensor Core (`SS0 == 0x88888888`, `SS1 == 0x40966C`).
+- **`HardwareBus` (Seam 1)**: Tách biệt hoàn toàn kernel driver (`WinRing0`, `ThrottleStop`) khỏi nghiệp vụ chính, kèm `MockHardwareBus` cho phép kiểm thử đơn vị độc lập.
+- **`StatusContract` (Seam 2)**: Chuẩn hoá hợp đồng trạng thái định kiểu (`STATUS_CODE=GEN2_SUCCESS`, v.v.) giữa Go Engine và các script Batch.
+- **Tương thích Anti-Cheat (Riot Vanguard / EAC)**: Cơ chế nạp driver kernel tạm thời (Dùng-Xong-Rút) dọn sạch dịch vụ và tệp `.sys` ngay sau khi ghi thanh ghi, không cần bật Test Signing, bảo đảm an toàn khi chơi game.
+
+---
+
+## <img src="https://api.iconify.design/lucide/trash-2.svg?color=%23ef4444" width="22" height="22" align="center" /> 7. Gỡ Cài Đặt Hoàn Toàn
 
 Để đưa hệ thống về trạng thái nguyên bản xuất xưởng:
 1. Nhấp đúp vào **`40HXUninstaller.exe`** với quyền Administrator (hoặc chạy `40HXInstaller.exe -uninstall`).
@@ -242,11 +253,11 @@ Sau khi vào Windows, nhấp đúp vào **`40HXCheck.exe`**:
 
 ---
 
-## <img src="https://api.iconify.design/lucide/shield-alert.svg?color=%23ef4444" width="22" height="22" align="center" /> 7. Quy Tắc An Toàn Phần Cứng Cốt Lõi
+## <img src="https://api.iconify.design/lucide/shield-alert.svg?color=%23ef4444" width="22" height="22" align="center" /> 8. Quy Tắc An Toàn Phần Cứng Cốt Lõi
 
 1. **Không nạp firmware 40HX lên 30HX**: Tuyệt đối không sao chép `40HXUNLK.EFI` hay blob GA102/TU106 lên CMP 30HX. Cấu trúc VBIOS và bộ điều khiển hoàn toàn khác biệt.
 2. **Không ép Gen3 trên CMP 30HX**: eFuse đã đứt vật lý, mọi thao tác ép Gen3 đều vô hiệu và kích hoạt vòng lặp lỗi retrain.
-3. **Không gọi Reset cứng**: Không kích hoạt `gen2RootLinkDisable`, `gen2HardFallback` hoặc PnP device restart trên CMP 30HX.
+3. **Không gọi Reset cứng**: Không kích hoạt `gen2RootLinkDisable`, `gen2HardFallback` hoặc PnP device restart tự ý trên CMP 30HX (chỉ chạy khi có cờ `-hard`).
 4. **Nguyên tắc Fail-closed**: Luôn kiểm tra tính sẵn sàng của PCIe Capability và readback an toàn trước khi thực hiện bất kỳ lệnh ghi nào vào PCI Config hoặc MMIO.
 
 ---
