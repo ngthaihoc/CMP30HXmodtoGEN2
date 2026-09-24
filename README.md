@@ -206,7 +206,59 @@ Hệ thống sẽ tự động dọn dẹp sạch sẽ:
 
 ---
 
-## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 6. Ghi Chú Kỹ Thuật Tóm Tắt
+## <img src="https://api.iconify.design/lucide/cpu.svg?color=%2310b981" width="22" height="22" align="center" /> 6. Kiến Trúc Deep Module & Độ Tin Cậy Phần Cứng (v3.0.0)
+
+Phiên bản v3.0.0 được tái cấu trúc toàn diện theo kiến trúc **Deep Module** với 2 đường ranh giới kỹ thuật (Seams) độc lập:
+1. **`LinkNegotiator`**:
+   - Đóng gói toàn bộ máy trạng thái đàm phán link PCIe, kẹp cứng giới hạn phần cứng eFuse Gen2 cho TU116, tối ưu hóa DEVCTL MRRS 512B (`0x2000`) và chuỗi ghi shadow register MMIO (`PRIV_MISC_1`, `XVE_OVR`, `LINK_CONFIG_0`, `PL_LINK_RATE`, `CYA_0`).
+   - Tự động phát hiện trạng thái ngủ tiết kiệm điện (ASPM) bằng cơ chế lấy mẫu nhanh (Fast-polling 75ms) để ghi nhận link speed tức thì, loại bỏ tình trạng nhận diện sai tốc độ link.
+2. **`ComputeInspector` (Dành cho CMP 40HX)**:
+   - Tích hợp lớp bảo vệ chống crash phần cứng: đọc và kiểm tra thanh ghi `BOOT_0` (`0x00`) để xác thực đúng họ chip TU106 (`0x16xxxxxx`) trước khi truy xuất vùng nhớ BAR0.
+   - Giải mã định kiểu chuẩn hóa thanh ghi kép `SS0` (`0x409664` - cờ mở khoá chính `0x88888888`, ~50 TFLOPS FP16) và `SS1` (`0x40966C` - cờ phụ đồng bộ EFI loader).
+3. **`HardwareBus` (Seam 1)**:
+   - Tách rời hoàn toàn giao tiếp driver cấp kernel (`WinRing0`, `ThrottleStop`) khỏi logic nghiệp vụ của ứng dụng.
+   - Cung cấp `MockHardwareBus` giả lập không gian PCI config và bộ nhớ vật lý MMIO, cho phép chạy trọn vẹn bộ test unit độc lập không cần phần cứng thật.
+4. **`StatusContract` (Seam 2)**:
+   - Chuẩn hoá định dạng trao đổi dữ liệu trạng thái có cấu trúc (`STATUS_CODE=GEN2_SUCCESS`, `SPEED_CURRENT`, `WIDTH_CURRENT`, `TLS_TARGET`, `ERROR_CODE`) giữa Go engine và các script Batch/PowerShell.
+   - Ngăn chặn triệt để lỗi báo thành công giả khi script bị crash hoặc mất tệp trạng thái.
+
+---
+
+## <img src="https://api.iconify.design/lucide/shield-check.svg?color=%2306b6d4" width="22" height="22" align="center" /> 7. Tương Thích Hoàn Toàn Với Anti-Cheat (Riot Vanguard, EAC, BattlEye)
+
+Người dùng CMP 40HX và CMP 30HX hoàn toàn có thể chơi các tựa game có bảo mật gắt gao như **Valorant, League of Legends (Riot Vanguard), Apex Legends, Fortnite (Easy Anti-Cheat / BattlEye)**:
+
+- **Cơ chế Dùng-Xong-Rút (Transient BYOVD on-demand)**:
+  - Driver kernel (`WinRing0x64.sys`, `ThrottleStop.sys`) chỉ được nạp lên bộ nhớ trong vài mili-giây lúc hệ thống khởi động hoặc đăng nhập để cấu hình thanh ghi PCIe.
+  - Ngay sau khi đàm phán link hoàn tất, công cụ tự động dừng dịch vụ (`sc stop`), xoá dịch vụ (`sc delete`) và xoá bỏ tệp `.sys` khỏi thư mục hệ thống.
+  - Khi game hoặc Vanguard (`vgk.sys`) khởi chạy, hệ điều hành hoàn toàn sạch sẽ, không tồn tại bất kỳ driver danh sách đen hay tiến trình chạy ngầm nào.
+- **Không yêu cầu Windows Test Signing**:
+  - Không cần lệnh `bcdedit /set testsigning on` nguy hiểm (vốn bị Vanguard chặn 100%).
+  - Môi trường Windows giữ nguyên chứng thực toàn vẹn mã gốc của Microsoft.
+- **Pre-boot EFI cho CMP 40HX**:
+  - Tensor Core được mở khoá ở giai đoạn UEFI trước khi Windows khởi động. Đến khi Windows và driver anti-cheat nạp, card đã ở trạng thái mở khoá tự nhiên ở mức phần cứng.
+
+---
+
+## <img src="https://api.iconify.design/lucide/check-square.svg?color=%23f59e0b" width="22" height="22" align="center" /> 8. Bộ Kiểm Thử Tự Động Toàn Diện (Automated Test Suite)
+
+Dự án đi kèm bộ kiểm thử tự động 100% giúp phát hiện hồi quy và bảo đảm an toàn trước khi triển khai:
+- **13 Go Unit Tests (`40hxcore`)**: Kiểm tra kẹp eFuse TU116, tối ưu DEVCTL MRRS 512B, chuỗi shadow register MMIO, phục hồi Soft PnP, phân tích trạng thái `StatusContract` và giải mã Tensor Core.
+- **10 Mock Test Suites (`Test_Mock_CMP30HX.bat`)**:
+  - Test Suite 1: Kịch bản thành công nhanh (Gen1 $\rightarrow$ Soft Reset $\rightarrow$ Gen2).
+  - Test Suite 2: Kịch bản xử lý thất bại an toàn.
+  - Test Suite 3: Xử lý tình huống driver WinRing0 bị chặn bởi HVCI / Blocklist.
+  - Test Suite 4: Xử lý tình huống không tìm thấy GPU trên bus PCI.
+  - Test Suite 5: Kiểm tra quy trình gỡ bỏ và dọn dẹp sạch sẽ hệ thống.
+  - Test Suite 6: Kích hoạt Resizable BAR 1-Click AIO (Happy Path).
+  - Test Suite 7: Khóa an toàn ReBAR chặn máy tính xách tay (Laptop Safety Guard).
+  - Test Suite 8: Gỡ bỏ và khôi phục mặc định Resizable BAR.
+  - Test Suite 9: Cơ chế phòng vệ chống báo thành công ảo khi mất tệp trạng thái.
+  - Test Suite 10: Chế độ chạy độc lập chẩn đoán hệ thống (Preflight Only).
+
+---
+
+## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 9. Ghi Chú Kỹ Thuật Tóm Tắt
 
 > [!NOTE]
 > - **Tại sao trần là Gen2 x16 mà không thể lên Gen3?**  
