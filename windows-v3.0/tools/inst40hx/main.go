@@ -1320,9 +1320,20 @@ func gen2Main() {
 	if cur >= targetGen {
 		gen2Succeeded = true
 		fmt.Printf("[Gen%d] Đã đạt Gen%d, không cần thao tác thêm.\n", targetGen, cur)
-		hxcore.WriteGen2Status(fmt.Sprintf("✅ Gen%d không cần thao tác: Băng thông hiện tại đã là Gen%d\nQuyền thực thi: %s\nVị trí %s: %02x:%02x.%x\n",
-			targetGen, cur, map[bool]string{true: "Quản trị viên (Admin)/SYSTEM", false: "Người dùng thường (Bị hạn chế)"}[isAdmin()],
-			gpuProfile.Name, gpuBus, (gpuBDF>>3)&0x1F, gpuBDF&7))
+		stContract := hxcore.StatusContract{
+			StatusCode:   hxcore.StatusGen2Success,
+			SpeedCurrent: cur,
+			WidthCurrent: hxcore.LinkWidth(wh, gpuBDF),
+			TLSTarget:    targetGen,
+			ErrorCode:    "NONE",
+			Details: []string{
+				fmt.Sprintf("Kết luận: ✅ Gen%d không cần thao tác: Băng thông hiện tại đã là Gen%d", targetGen, cur),
+				fmt.Sprintf("Quyền thực thi: %s", map[bool]string{true: "Quản trị viên (Admin)/SYSTEM", false: "Người dùng thường (Bị hạn chế)"}[isAdmin()]),
+				fmt.Sprintf("Vị trí %s: %02x:%02x.%x", gpuProfile.Name, gpuBus, (gpuBDF>>3)&0x1F, gpuBDF&7),
+				fmt.Sprintf("đã đạt mục tiêu Gen%d thành công", targetGen),
+			},
+		}
+		_ = hxcore.WriteStructuredGen2Status(stContract)
 		gen2Notify(fmt.Sprintf("PCIe đã đạt Gen%d, không cần thao tác thêm.", cur))
 		return
 	}
@@ -1585,19 +1596,6 @@ func gen2Main() {
 
 func gen2MainCMP30HX(pWh *syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUProfile, root uint32, targetGen uint32) {
 	wh := *pWh
-	if targetGen > 2 {
-		fmt.Printf("[Gen%d-30HX] Lưu ý: CMP 30HX (TU116) bị đứt eFuse bit 3 (8.0 GT/s) mức phần cứng die, trần vật lý là Gen2. Tự động chuyển về Gen2.\n", targetGen)
-		targetGen = 2
-	}
-	fmt.Printf("[Gen%d-30HX] Bắt đầu quy trình mở khoá và huấn luyện lại PCIe Gen%d cho %s (DEV_%04X)\n", targetGen, targetGen, gpuProfile.Name, gpuProfile.DeviceID)
-	gpuBus := (gpuBDF >> 8) & 0xFF
-
-	speedVectorMask := uint32(0x00000006)
-	xveOvrVal := uint32(6)
-	expectedPhy := uint32(0x50000000)
-
-	// Runtime BAR0 MMIO Injection
-	// Đối với TU116: Mở giới hạn PHY Lane (0x25000000 -> 0x50000000), mở véc-tơ tốc độ LNKCAP/LNKCAP2
 	sysDir := os.Getenv("SystemRoot") + "\\System32\\drivers"
 	if _, err := os.Stat(filepath.Join(sysDir, "ThrottleStop.sys")); err != nil {
 		copyEmbedTo(filepath.Join(sysDir, "ThrottleStop.sys"), "ThrottleStop.sys")
@@ -1605,319 +1603,83 @@ func gen2MainCMP30HX(pWh *syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUPr
 	ensureSvcLoaded("ThrottleStop", "ThrottleStop.sys")
 
 	var th syscall.Handle
-	var bar0Phys uint64
-	var origCap, origCtl2 uint32
-	th, err := hxcore.OpenThrottleStop()
-	if err != nil {
-		fmt.Printf("[Gen%d-30HX][!] Driver ThrottleStop chưa được mở (%v), bỏ qua inject MMIO\n", targetGen, err)
-	} else {
+	if t, err := hxcore.OpenThrottleStop(); err == nil {
+		th = t
 		defer func() {
 			if th != 0 {
 				hxcore.CloseHandle(th)
 			}
 		}()
-		bar0raw, berr := hxcore.PciRd(wh, gpuBDF, 0x10)
-		if berr != nil || bar0raw == 0 || bar0raw == 0xFFFFFFFF {
-			fmt.Printf("[Gen%d-30HX][!] Địa chỉ BAR0 bất thường: 0x%08X (err=%v)\n", targetGen, bar0raw, berr)
-		} else {
-			bar0Phys = uint64(bar0raw & 0xFFFFFFF0)
-			boot0, berr := hxcore.TSRead(th, bar0Phys+0x0)
-			if berr != nil || (boot0&0xFF000000) != 0x16000000 {
-				fmt.Printf("[Gen%d-30HX][!] Kiểm tra BAR0 thất bại (BOOT_0=0x%08X, kỳ vọng 0x16xxxxxx), huỷ bỏ inject MMIO\n", targetGen, boot0)
-			} else {
-				fmt.Printf("[Gen%d-30HX] Kiểm tra BAR0 hợp lệ: 0x%08X (BOOT_0=0x%08X, TU116)\n", targetGen, bar0Phys, boot0)
-				fmt.Printf("[Gen%d-30HX] [MMIO] Đang cấu hình TU116 PCIe Gen%d...\n", targetGen, targetGen)
-
-				// 1. Ghi XVE hardware override và cấu hình (mở khoá hỗ trợ Gen2)
-				// Thứ tự quan trọng: PRIV_MISC_1 (0x8841C) tắt chống ghi shadow register,
-				// sau đó ghi XVE_OVR (0x8872C) ghi đè tốc độ, rồi ghi LINK_CONFIG_0 và CYA_0
-				pl0 := []struct {
-					off  uint64
-					val  uint32
-					name string
-				}{
-					{0x0008841C, 0xE0B42D00, "PRIV_MISC_1"},
-					{0x0008872C, xveOvrVal, fmt.Sprintf("XVE_OVR=%d", xveOvrVal)},
-					{0x0008C040, 0x80085800, "LINK_CONFIG_0"},
-					{0x0008C1C0, 0x00240036, "PL_LINK_RATE"},
-					{0x0008C2C0, 0x068731B3, "CYA_0"},
-					{0x0008872C, xveOvrVal, fmt.Sprintf("XVE_OVR=%d_CONFIRM", xveOvrVal)},
-				}
-				fmt.Println(fmt.Sprintf("[Gen%d-30HX] [MMIO] Đang ghi thanh ghi điều khiển phần cứng XVE và ghi đè tốc độ...", targetGen))
-				for _, p := range pl0 {
-					_ = hxcore.TSWrite(th, bar0Phys+p.off, p.val)
-					rb, _ := hxcore.TSRead(th, bar0Phys+p.off)
-					fmt.Printf("[Gen%d-30HX] [MMIO] %-14s (0x%06X): Ghi 0x%08X -> Đọc lại 0x%08X\n", targetGen, p.name, p.off, p.val, rb)
-					if p.off == 0x0008C2C0 && (rb&(1<<2)) != 0 {
-						fmt.Printf("[Gen%d-30HX][warn] CYA_0 bit 2 (DIS_G2) vẫn được bật (0x%08X), có thể cản trở Gen2!\n", targetGen, rb)
-					}
-				}
-
-				// 2. PCIe Capability register injection:
-				// LNKCAP (0x088084): bits[3:0] đổi thành targetGen (Max Link Speed = Gen2)
-				origCap, _ = hxcore.TSRead(th, bar0Phys+0x00088084)
-				newCap := (origCap & 0xFFFFFFF0) | targetGen
-				_ = hxcore.TSWrite(th, bar0Phys+0x00088084, newCap)
-				rbCap, _ := hxcore.TSRead(th, bar0Phys+0x00088084)
-				fmt.Printf("[Gen%d-30HX] [MMIO] LNKCAP  (0x088084): Ghi 0x%08X -> Đọc lại 0x%08X\n", targetGen, newCap, rbCap)
-
-				// LNKCAP2 (0x0880A4): Ghi speedVectorMask (Gen2: 0x6)
-				_ = hxcore.TSWrite(th, bar0Phys+0x000880A4, speedVectorMask)
-				rbCap2A4, _ := hxcore.TSRead(th, bar0Phys+0x000880A4)
-				fmt.Printf("[Gen%d-30HX] [MMIO] LNKCAP2 (0x0880A4): Ghi 0x%08X -> Đọc lại 0x%08X\n", targetGen, speedVectorMask, rbCap2A4)
-
-				// XVE 0xF0 (0x0880F0): Ghi speedVectorMask
-				_ = hxcore.TSWrite(th, bar0Phys+0x000880F0, speedVectorMask)
-				rbCap2F0, _ := hxcore.TSRead(th, bar0Phys+0x000880F0)
-				fmt.Printf("[Gen%d-30HX] [MMIO] XVE_F0  (0x0880F0): Ghi 0x%08X -> Đọc lại 0x%08X\n", targetGen, speedVectorMask, rbCap2F0)
-
-				// LNKCTL2 (0x0880A8): bits[3:0] đổi thành targetGen (TLS = Gen2)
-				origCtl2, _ = hxcore.TSRead(th, bar0Phys+0x000880A8)
-				newCtl2 := (origCtl2 & 0xFFFFFFF0) | targetGen
-				_ = hxcore.TSWrite(th, bar0Phys+0x000880A8, newCtl2)
-				rbCtl2, _ := hxcore.TSRead(th, bar0Phys+0x000880A8)
-				fmt.Printf("[Gen%d-30HX] [MMIO] LNKCTL2 (0x0880A8): Ghi 0x%08X -> Đọc lại 0x%08X\n", targetGen, newCtl2, rbCtl2)
-
-				// 3. Đọc trạng thái xung nhịp PHY Lane (0x08C4B0..): (0x25000000=2.5G/Gen1, 0x50000000=5.0G/Gen2)
-				phyL0, _ := hxcore.TSRead(th, bar0Phys+0x0008C4B0)
-				fmt.Printf("[Gen%d-30HX] [MMIO] Trạng thái ban đầu PHY Lane 0 (0x08C4B0): 0x%08X\n", targetGen, phyL0)
-			}
-		}
+	} else {
+		fmt.Printf("[Gen%d-30HX][!] Driver ThrottleStop chưa được mở (%v), tiếp tục thử nghiệm\n", targetGen, err)
 	}
 
-	for _, b := range []struct {
-		bdf uint32
-		tag string
-	}{{gpuBDF, "GPU"}, {root, "ROOT"}} {
-		if b.bdf == 0xFFFFFFFF {
-			continue
-		}
-		cap := hxcore.PcieCap(wh, b.bdf)
-		if cap == 0 {
-			continue
-		}
-		curRaw, err := hxcore.PciRd(wh, b.bdf, cap+0x30)
-		if err != nil {
-			fmt.Printf("[Gen%d-30HX][!] %s Đọc LNKCTL2 thất bại: %v\n", targetGen, b.tag, err)
-			gen2StatusFail(fmt.Sprintf("CMP 30HX %s Đọc LNKCTL2 thất bại: %v", b.tag, err))
-			return
-		}
-		nv := uint16(curRaw&0xFFF0) | uint16(targetGen)
-		if err := hxcore.PciWr(wh, b.bdf, cap+0x30, []byte{byte(nv), byte(nv >> 8)}); err != nil {
-			fmt.Printf("[Gen%d-30HX][!] %s Ghi LNKCTL2 thất bại: %v\n", targetGen, b.tag, err)
-			gen2StatusFail(fmt.Sprintf("CMP 30HX %s Ghi LNKCTL2 thất bại: %v", b.tag, err))
-			return
-		}
-		rb, rerr := hxcore.PciRd(wh, b.bdf, cap+0x30)
-		if rerr != nil || rb&0xF != targetGen {
-			if b.tag == "GPU" {
-				fmt.Printf("[Gen%d-30HX] GPU LNKCTL2 là chỉ đọc/không dính (0x%08X, TLS=%d; trong dự tính, phụ thuộc vào ROOT Port điều khiển huấn luyện lại)\n", targetGen, rb, rb&0xF)
-			} else {
-				fmt.Printf("[Gen%d-30HX][!] %s Đọc lại LNKCTL2 thất bại: 0x%08X\n", targetGen, b.tag, rb)
-				gen2StatusFail(fmt.Sprintf("CMP 30HX %s Đọc lại LNKCTL2 chưa xác nhận TLS=%d", b.tag, targetGen))
-				return
-			}
-		} else {
-			fmt.Printf("[Gen%d-30HX] %s LNKCTL2 TLS=%d (0x%04X -> 0x%04X)\n", targetGen, b.tag, targetGen, curRaw&0xFFFF, rb&0xFFFF)
-		}
+	bus := hxcore.NewProductionBus(wh, th)
+	negotiator := hxcore.NewLinkNegotiator(bus)
+	allowStage2 := hasArg("-hard")
+
+	fmt.Printf("[Gen%d-30HX] Khởi chạy LinkNegotiator cho %s (DEV_%04X)...\n", targetGen, gpuProfile.Name, gpuProfile.DeviceID)
+	res, err := negotiator.Negotiate(gpuBDF, gpuProfile, root, targetGen, allowStage2)
+	if err != nil {
+		fmt.Printf("[Gen%d-30HX][!] Lỗi thương lượng link: %v\n", targetGen, err)
+		gen2StatusFail(fmt.Sprintf("Lỗi thương lượng link: %v", err))
+		return
 	}
 
-	// Kiểm tra và tối ưu PCIe Device Control (DEVCTL, cap+0x08):
-	// bits[14:12] = Max Read Request Size (MRRS). Nếu là 128B (000b), DMA đọc sẽ bị phân mảnh, giới hạn thông lượng ~2.5 GB/s.
-	// Tối ưu lên 512B (2 << 12 = 0x2000) giúp loại bỏ phân mảnh TLP.
-	if cap := hxcore.PcieCap(wh, gpuBDF); cap != 0 {
-		if dctl, err := hxcore.PciRd(wh, gpuBDF, cap+0x08); err == nil {
-			mrrs := (dctl >> 12) & 0x7
-			mps := (dctl >> 5) & 0x7
-			fmt.Printf("[Gen%d-30HX] [DEVCTL] Hiện tại MPS=%d (%d bytes), MRRS=%d (%d bytes)\n",
-				targetGen, mps, 128<<mps, mrrs, 128<<mrrs)
-			if mrrs < 2 {
-				newDctl := uint16((dctl &^ 0x7000) | (2 << 12))
-				_ = hxcore.PciWr(wh, gpuBDF, cap+0x08, []byte{byte(newDctl), byte(newDctl >> 8)})
-				rbDctl, _ := hxcore.PciRd(wh, gpuBDF, cap+0x08)
-				fmt.Printf("[Gen%d-30HX] [DEVCTL] Tối ưu MRRS -> 512 bytes (0x%04X -> 0x%04X)\n", targetGen, dctl&0xFFFF, rbDctl&0xFFFF)
-			}
-		}
-	}
-
-	// Vô hiệu hoá ASPM của GPU và ROOT Port, đảm bảo Common Clock Configuration (CCC, 0x0140)
-	gen2RestoreGPULnkctl(wh, gpuBDF)
-	if root != 0xFFFFFFFF {
-		if rcap := hxcore.PcieCap(wh, root); rcap != 0 {
-			if rctl, err := hxcore.PciRd(wh, root, rcap+0x10); err == nil {
-				curRootCtl := uint16(rctl & 0xFFFF)
-				if (curRootCtl&0x0140) != 0x0140 || (curRootCtl&0x3) != 0 {
-					wantRoot := (curRootCtl &^ 0x3) | 0x0140
-					_ = hxcore.PciWr(wh, root, rcap+0x10, []byte{byte(wantRoot), byte(wantRoot >> 8)})
-					rbRoot, _ := hxcore.PciRd(wh, root, rcap+0x10)
-					fmt.Printf("[Gen%d-30HX] ROOT LNKCTL khôi phục/vô hiệu hoá ASPM 0x%04X -> 0x%04X\n", targetGen, curRootCtl, rbRoot&0xFFFF)
-				}
-			}
-		}
-	}
-
-	retrain := func(bdf uint32) error {
-		cap := hxcore.PcieCap(wh, bdf)
-		if cap == 0 {
-			return errors.New("PCIe capability missing")
-		}
-		ctl, err := hxcore.PciRd(wh, bdf, cap+0x10)
-		if err != nil {
-			return err
-		}
-		lo := uint16(ctl & 0xFFFF)
-		clear := []byte{byte(lo &^ 0x20), byte(lo >> 8)}
-		if err := hxcore.PciWr(wh, bdf, cap+0x10, clear); err != nil {
-			return err
-		}
-		time.Sleep(300 * time.Millisecond)
-		ctl2, err := hxcore.PciRd(wh, bdf, cap+0x10)
-		if err != nil {
-			return err
-		}
-		set := uint16(ctl2&0xFFFF) | 0x20
-		return hxcore.PciWr(wh, bdf, cap+0x10, []byte{byte(set), byte(set >> 8)})
-	}
-
-	cur := hxcore.LinkSpeed(wh, gpuBDF)
-	for attempt := 0; attempt < 6; attempt++ {
-		bdf, tag := gpuBDF, "GPU"
-		if attempt%2 == 0 && root != 0xFFFFFFFF {
-			bdf, tag = root, "ROOT"
-		}
-		fmt.Printf("[Gen%d-30HX] Huấn luyện lại link #%d (phía %s)...\n", targetGen, attempt+1, tag)
-		if err := retrain(bdf); err != nil {
-			fmt.Printf("[Gen%d-30HX][!] Huấn luyện lại link phía %s thất bại: %v\n", targetGen, tag, err)
-		}
-		// Fast polling: kiểm tra link speed mỗi 75ms (tối đa 25 lần = 1.875s)
-		// Ngay khi khoá link Gen2 thì nhận diện ngay, tránh bị ASPM hạ tốc về Gen1 khi rảnh
-		for poll := 0; poll < 25; poll++ {
-			time.Sleep(75 * time.Millisecond)
-			cur = hxcore.LinkSpeed(wh, gpuBDF)
-			if cur >= targetGen {
-				break
-			}
-		}
-		if cur >= targetGen {
-			break
-		}
-	}
-
-	// Stage 2: Tự động Soft Reset PnP GPU nếu Stage 1 chưa đạt
-	if cur < targetGen && (hasArg("-hard") || gen2AutoHardEnabled()) {
-		if hasArg("-hard") {
-			fmt.Printf("[Gen%d-30HX] Huấn luyện lại chưa đạt → -hard kích hoạt Soft Reset PnP GPU\n", targetGen)
-		} else {
-			fmt.Printf("[Gen%d-30HX] Huấn luyện lại chưa đạt (hiện tại Gen%d) → Tự động thực thi Stage 2: Soft Reset PnP GPU giải phóng DMA locks...\n", targetGen, cur)
-		}
-		if gen2PnpRecoverGPU(gpuProfile.DeviceID) {
-			gen2ReopenDrivers(&th, pWh)
-			wh = *pWh
-			time.Sleep(2 * time.Second)
-			if th != 0 && bar0Phys != 0 {
-				_ = hxcore.TSWrite(th, bar0Phys+0x0008841C, 0xE0B42D00)
-				_ = hxcore.TSWrite(th, bar0Phys+0x0008872C, xveOvrVal)
-				_ = hxcore.TSWrite(th, bar0Phys+0x0008C040, 0x80085800)
-				_ = hxcore.TSWrite(th, bar0Phys+0x0008C1C0, 0x00240036)
-				_ = hxcore.TSWrite(th, bar0Phys+0x0008C2C0, 0x068731B3)
-				if origCap != 0 {
-					_ = hxcore.TSWrite(th, bar0Phys+0x00088084, (origCap&0xFFFFFFF0)|targetGen)
-				}
-				_ = hxcore.TSWrite(th, bar0Phys+0x000880A4, speedVectorMask)
-				_ = hxcore.TSWrite(th, bar0Phys+0x000880F0, speedVectorMask)
-				if origCtl2 != 0 {
-					_ = hxcore.TSWrite(th, bar0Phys+0x000880A8, (origCtl2&0xFFFFFFF0)|targetGen)
-				}
-			}
-			gen2SetTLS(wh, gpuBDF, uint16(targetGen))
-			if root != 0xFFFFFFFF {
-				gen2SetTLS(wh, root, uint16(targetGen))
-			}
-			gen2RestoreGPULnkctl(wh, gpuBDF)
-			for attempt := 0; attempt < 4; attempt++ {
-				bdf, tag := gpuBDF, "GPU"
-				if attempt%2 == 0 && root != 0xFFFFFFFF {
-					bdf, tag = root, "ROOT"
-				}
-				fmt.Printf("[Gen%d-30HX] [PnP Reset] Huấn luyện lại sau Soft Reset #%d (%s)...\n", targetGen, attempt+1, tag)
-				_ = retrain(bdf)
-				// Fast polling: kiểm tra link speed mỗi 75ms (tối đa 25 lần = 1.875s)
-				for poll := 0; poll < 25; poll++ {
-					time.Sleep(75 * time.Millisecond)
-					cur = hxcore.LinkSpeed(wh, gpuBDF)
-					if cur >= targetGen {
-						break
-					}
-				}
-				if cur >= targetGen {
-					break
-				}
-			}
-		}
-	}
-
-	tls := uint32(0)
-	if cap := hxcore.PcieCap(wh, gpuBDF); cap != 0 {
-		if v, err := hxcore.PciRd(wh, gpuBDF, cap+0x30); err == nil {
-			tls = v & 0xF
-		}
-	}
-	rootTls := uint32(0)
-	if root != 0xFFFFFFFF {
-		if rcap := hxcore.PcieCap(wh, root); rcap != 0 {
-			if v, err := hxcore.PciRd(wh, root, rcap+0x30); err == nil {
-				rootTls = v & 0xF
-			}
-		}
-	}
-	width := hxcore.LinkWidth(wh, gpuBDF)
-	verdict := fmt.Sprintf("❌ Gen%d chưa đạt: Vẫn đang ở Gen%d x%d (GPU TLS=Gen%d, Root TLS=Gen%d)", targetGen, cur, width, tls, rootTls)
-	ok := false
-	if cur >= targetGen {
-		ok = true
-		verdict = fmt.Sprintf("✅ Mở khoá Gen%d thành công: Băng thông hiện tại Gen%d x%d", targetGen, cur, width)
-		gen2RestoreGPULnkctl(wh, gpuBDF)
-		if th != 0 && bar0Phys != 0 {
-			phyL0, _ := hxcore.TSRead(th, bar0Phys+0x0008C4B0)
-			fmt.Printf("[Gen%d-30HX] [MMIO] Trạng thái PHY Lane 0 sau huấn luyện (0x08C4B0): 0x%08X (kỳ vọng 0x%08X)\n", targetGen, phyL0, expectedPhy)
-		}
-		fmt.Printf("[Gen%d-30HX] Khởi động lại service NVDisplay để nạp lại hàng đợi DMA driver...\n", targetGen)
-		gen2RestartNVDisplay()
-	} else if tls >= targetGen {
-		ok = true
-		verdict = fmt.Sprintf("🟢 Gen%d đã cấu hình (TLS=Gen%d): Hiện đang Gen%d x%d do trạng thái tiết kiệm điện PCIe rảnh", targetGen, tls, cur, width)
-	}
-	fmt.Printf("[Gen%d-30HX] %s\n", targetGen, verdict)
-
-	gen2Succeeded = ok
-	if ok {
+	gen2Succeeded = res.Success
+	if res.Success {
 		deleteGen2Retry()
 	} else if hxcore.DriverStrategy() != hxcore.DriverStrategyResident {
 		scheduleGen2Retry(retryDepth())
 	}
 
-	st := fmt.Sprintf("Kết luận: %s\nQuyền thực thi: %s\n%s Vị trí: %02x:%02x.%x\nRoot Port: %02x:%02x.%x\nBăng thông: Hiện tại Gen%d x%d / GPU TLS=Gen%d / Root TLS=Gen%d\n",
-		verdict,
-		map[bool]string{true: "Quản trị viên (Admin)/SYSTEM", false: "Người dùng thường (Bị hạn chế)"}[isAdmin()],
-		gpuProfile.Name, gpuBus, (gpuBDF>>3)&0x1F, gpuBDF&7,
-		(root>>8)&0xFF, (root>>3)&0x1F, root&7,
-		cur, width, tls, rootTls)
-	if err := hxcore.WriteGen2Status(st); err != nil {
-		fmt.Printf("[Gen%d-30HX] Ghi file trạng thái thất bại: %v\n", targetGen, err)
+	fmt.Printf("[Gen%d-30HX] %s\n", res.TargetGen, res.Verdict)
+
+	// Ghi nhận trạng thái có cấu trúc Seam 2
+	statusCode := hxcore.StatusGen1Stuck
+	if res.Success {
+		statusCode = hxcore.StatusGen2Success
 	}
+	gpuBus := (gpuBDF >> 8) & 0xFF
+	details := []string{
+		fmt.Sprintf("Kết luận: %s", res.Verdict),
+		fmt.Sprintf("Quyền thực thi: %s", map[bool]string{true: "Quản trị viên (Admin)/SYSTEM", false: "Người dùng thường (Bị hạn chế)"}[isAdmin()]),
+		fmt.Sprintf("%s Vị trí: %02x:%02x.%x", gpuProfile.Name, gpuBus, (gpuBDF>>3)&0x1F, gpuBDF&7),
+		fmt.Sprintf("Root Port: %02x:%02x.%x", (root>>8)&0xFF, (root>>3)&0x1F, root&7),
+		fmt.Sprintf("Băng thông: Hiện tại Gen%d x%d / GPU TLS=Gen%d / Root TLS=Gen%d", res.CurrentSpeed, res.CurrentWidth, res.TargetTLS, res.RootTLS),
+		"MRRS: 512B [Đã tối ưu]",
+	}
+	if res.Success {
+		details = append(details, fmt.Sprintf("đã đạt mục tiêu Gen%d thành công", res.TargetGen))
+	} else {
+		details = append(details, fmt.Sprintf("chưa đạt mục tiêu Gen%d", res.TargetGen))
+	}
+
+	stContract := hxcore.StatusContract{
+		StatusCode:   statusCode,
+		SpeedCurrent: res.CurrentSpeed,
+		WidthCurrent: res.CurrentWidth,
+		TLSTarget:    res.TargetGen,
+		ErrorCode:    "NONE",
+		Details:      details,
+	}
+	if err := hxcore.WriteStructuredGen2Status(stContract); err != nil {
+		fmt.Printf("[Gen%d-30HX] Ghi file trạng thái thất bại: %v\n", res.TargetGen, err)
+	}
+
 	if !hasArg("-silent") && !hasArg("-y") {
 		icon := uint(mbIconInfo)
-		txt := fmt.Sprintf("Băng thông PCIe: Hiện tại Gen%d x%d (GPU TLS=Gen%d, Root TLS=Gen%d)\n", cur, width, tls, rootTls)
-		if ok {
-			if cur < targetGen {
-				txt += fmt.Sprintf("\nGen1 lúc nhàn rỗi là tiết kiệm điện bình thường; hãy chạy GPU-Z Render Test hoặc tải 3D/CUDA để xác nhận Gen%d.", targetGen)
+		txt := fmt.Sprintf("Băng thông PCIe: Hiện tại Gen%d x%d (GPU TLS=Gen%d, Root TLS=Gen%d)\n", res.CurrentSpeed, res.CurrentWidth, res.TargetTLS, res.RootTLS)
+		if res.Success {
+			if res.CurrentSpeed < res.TargetGen {
+				txt += fmt.Sprintf("\nGen1 lúc nhàn rỗi là tiết kiệm điện bình thường; hãy chạy GPU-Z Render Test hoặc tải 3D/CUDA để xác nhận Gen%d.", res.TargetGen)
 			}
-			txt += fmt.Sprintf("\n=== MỞ KHOÁ GEN%d THÀNH CÔNG ===", targetGen)
+			txt += fmt.Sprintf("\n=== MỞ KHOÁ GEN%d THÀNH CÔNG ===", res.TargetGen)
 		} else {
-			txt += fmt.Sprintf("\nVẫn ở Gen%d, chưa đạt Gen%d. Xem %s và kiểm tra HVCI, riser/khe PCIe, BIOS; sau đó thử lại.", cur, targetGen, filepath.Join(os.TempDir(), "40HX_installer.log"))
+			txt += fmt.Sprintf("\nVẫn ở Gen%d, chưa đạt Gen%d. Xem %s và kiểm tra HVCI, riser/khe PCIe, BIOS; sau đó thử lại.", res.CurrentSpeed, res.TargetGen, filepath.Join(os.TempDir(), "40HX_installer.log"))
 			icon = mbIconError
 		}
-		msgbox(fmt.Sprintf("CMP 30HX Gen%d", targetGen), txt, icon)
+		msgbox(fmt.Sprintf("CMP 30HX Gen%d", res.TargetGen), txt, icon)
 	}
 }
 
@@ -2446,7 +2208,21 @@ func gen2Notify(txt string) {
 // gen2StatusFail: Ghi lý do Gen2 không thực thi/thất bại vào file trạng thái
 func gen2StatusFail(reason string) {
 	ident := map[bool]string{true: "Quản trị viên/SYSTEM", false: "Người dùng thường (Bị hạn chế)"}[isAdmin()]
-	hxcore.WriteGen2Status("❌ Gen2 Chưa thực thi: " + reason + "\nQuyền thực thi: " + ident + "\n")
+	code := hxcore.StatusDrvFail
+	errCode := "DRV_BLOCKED"
+	low := strings.ToLower(reason)
+	if strings.Contains(low, "pci") || strings.Contains(low, "không tìm thấy") || strings.Contains(low, "chưa định vị") {
+		code = hxcore.StatusNoGPU
+		errCode = "GPU_NOT_FOUND"
+	}
+	_ = hxcore.WriteStructuredGen2Status(hxcore.StatusContract{
+		StatusCode: code,
+		ErrorCode:  errCode,
+		Details: []string{
+			"❌ Gen2 Chưa thực thi: " + reason,
+			"Quyền thực thi: " + ident,
+		},
+	})
 }
 
 // ===================== Gỡ cài đặt / Trạng thái =====================

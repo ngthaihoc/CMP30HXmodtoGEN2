@@ -487,7 +487,9 @@ func check() {
 	}
 	w("  Trạng thái mở khoá : %s\n", state)
 	comp := "Không thể đọc"
-	if st.SS0OK {
+	if st.ComputeReport != nil {
+		comp = st.ComputeReport.Verdict
+	} else if st.SS0OK {
 		comp = fmt.Sprintf("%s (SS0=0x%08X SS1=0x%08X)",
 			map[bool]string{true: "✓ Tối đa", false: "✗ Bị khoá"}[st.Unlocked], st.SS0, st.SS1)
 	}

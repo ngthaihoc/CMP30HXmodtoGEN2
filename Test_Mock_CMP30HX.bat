@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 setlocal EnableDelayedExpansion
 chcp 65001 >nul
 title CMP 30HX Gen2 Automated Mock Test Suite
@@ -66,6 +66,8 @@ for %%a in (%*) do (
     if /i "%%~a"=="-fail" set "TARGET_CMD=cmd_fail"
     if /i "%%~a"=="-winring0" set "TARGET_CMD=cmd_winring0"
     if /i "%%~a"=="-nogpu" set "TARGET_CMD=cmd_nogpu"
+    if /i "%%~a"=="-missing-status" set "TARGET_CMD=cmd_missing_status"
+    if /i "%%~a"=="-preflight" set "TARGET_CMD=cmd_preflight"
     if /i "%%~a"=="-rebar" set "TARGET_CMD=cmd_rebar"
     if /i "%%~a"=="-rebar-happy" set "TARGET_CMD=cmd_rebar_happy"
     if /i "%%~a"=="-rebar-laptop" set "TARGET_CMD=cmd_rebar_laptop"
@@ -90,30 +92,34 @@ echo  [2] Test Suite 2: Kiem thu Gen2 nhanh that bai (Soft Reset khong the cuu v
 echo  [3] Test Suite 3: Kiem thu Gen2 driver WinRing0 bi chan (HVCI / Blocklist)
 echo  [4] Test Suite 4: Kiem thu Gen2 khong tim thay GPU CMP 30HX tren bus PCI
 echo  [5] Test Suite 5: Don dep / Go bo Gen2 he thong (Uninstall Gen2)
+echo  [6] Test Suite 9: Kiem thu Co che phong thu chan bao thanh cong ao khi mat Status
+echo  [7] Test Suite 10: Kiem thu Che do chay doc lap Chan doan he thong (Preflight Only)
 echo.
 echo  --- CAC TEST SUITE RESIZABLE BAR [Setup_ReBar_CMP30HX.bat] ---
-echo  [6] Test Suite 6: Kiem thu Resizable BAR 1-Click AIO (Happy Path)
-echo  [7] Test Suite 7: Kiem thu Khoa an toan ReBAR chan Laptop (Laptop Guard)
-echo  [8] Test Suite 8: Don dep / Go bo Resizable BAR (Uninstall ReBAR)
+echo  [8] Test Suite 6: Kiem thu Resizable BAR 1-Click AIO (Happy Path)
+echo  [9] Test Suite 7: Kiem thu Khoa an toan ReBAR chan Laptop (Laptop Guard)
+echo  [10] Test Suite 8: Don dep / Go bo Resizable BAR (Uninstall ReBAR)
 echo.
 echo  --- FULL AUTOMATED TEST RUNNER ---
-echo  [9] Full Test Suite: Chay tat ca 8 Suites + Assertions + Report
+echo  [A] Full Test Suite: Chay tat ca 10 Suites + Assertions + Report
 echo  [0] Thoat
 echo.
 echo ================================================================
-set /p "CHOICE=Nhap lua chon cua ban [1-9, 0] (Mac dinh: 9): "
-if "%CHOICE%"=="" set "CHOICE=9"
+set /p "CHOICE=Nhap lua chon cua ban [1-10, A, 0] (Mac dinh: A): "
+if "%CHOICE%"=="" set "CHOICE=A"
 
-if "%CHOICE%"=="1" goto :cmd_run
-if "%CHOICE%"=="2" goto :cmd_fail
-if "%CHOICE%"=="3" goto :cmd_winring0
-if "%CHOICE%"=="4" goto :cmd_nogpu
-if "%CHOICE%"=="5" goto :cmd_clean
-if "%CHOICE%"=="6" goto :cmd_rebar_happy
-if "%CHOICE%"=="7" goto :cmd_rebar_laptop
-if "%CHOICE%"=="8" goto :cmd_rebar_clean
-if "%CHOICE%"=="9" goto :cmd_auto
-if "%CHOICE%"=="0" exit /b 0
+if /i "%CHOICE%"=="1" goto :cmd_run
+if /i "%CHOICE%"=="2" goto :cmd_fail
+if /i "%CHOICE%"=="3" goto :cmd_winring0
+if /i "%CHOICE%"=="4" goto :cmd_nogpu
+if /i "%CHOICE%"=="5" goto :cmd_clean
+if /i "%CHOICE%"=="6" goto :cmd_missing_status
+if /i "%CHOICE%"=="7" goto :cmd_preflight
+if /i "%CHOICE%"=="8" goto :cmd_rebar_happy
+if /i "%CHOICE%"=="9" goto :cmd_rebar_laptop
+if /i "%CHOICE%"=="10" goto :cmd_rebar_clean
+if /i "%CHOICE%"=="A" goto :cmd_auto
+if /i "%CHOICE%"=="0" exit /b 0
 
 echo [!] Lua chon khong hop le.
 timeout /t 2 >nul
@@ -196,6 +202,24 @@ set "SUB_EC=!ERRORLEVEL!"
 if not "!IS_CLI!"=="1" pause
 exit /b !SUB_EC!
 
+:cmd_missing_status
+cls
+echo [*] KHOI CHAY TEST SUITE 9 (MISSING STATUS GUARD)...
+call :test_suite_missing_status
+call :print_summary
+set "SUB_EC=!ERRORLEVEL!"
+if not "!IS_CLI!"=="1" pause
+exit /b !SUB_EC!
+
+:cmd_preflight
+cls
+echo [*] KHOI CHAY TEST SUITE 10 (PREFLIGHT DIAGNOSTIC STANDALONE)...
+call :test_suite_preflight
+call :print_summary
+set "SUB_EC=!ERRORLEVEL!"
+if not "!IS_CLI!"=="1" pause
+exit /b !SUB_EC!
+
 :cmd_rebar_happy
 cls
 echo [*] KHOI CHAY TEST SUITE 6 (REBAR 1-CLICK AIO HAPPY PATH)...
@@ -239,12 +263,14 @@ exit /b !FINAL_EC!
 :cmd_auto
 cls
 echo ================================================================
-echo    CHAY KIEM THU TU DONG TOAN BO 8 TEST SUITES VA ASSERTIONS
+echo    CHAY KIEM THU TU DONG TOAN BO 10 TEST SUITES VA ASSERTIONS
 echo ================================================================
 call :test_suite_happy
 call :test_suite_fail
 call :test_suite_winring0
 call :test_suite_nogpu
+call :test_suite_missing_status
+call :test_suite_preflight
 call :test_suite_uninstall
 call :test_suite_rebar_happy
 call :test_suite_rebar_laptop
@@ -267,9 +293,10 @@ echo.
 echo     --- Ket qua kiem tra (Assertions - Suite 1) ---
 call :assert_exit_code "0" "!EC!" "Setup tra ve ExitCode 0 [Thanh cong]"
 call :assert_file_exists "%STATUS_FILE%" "File gen2_status.txt duoc tao hop le"
+call :assert_file_contains "%STATUS_FILE%" "STATUS_CODE=GEN2_SUCCESS" "Seam 2: Token STATUS_CODE=GEN2_SUCCESS hop le"
 call :assert_file_contains "%STATUS_FILE%" "GPU TLS=Gen2" "Nhan trang thai GPU TLS=Gen2"
 call :assert_file_contains "%STATUS_FILE%" "MRRS: 512B" "Nhan trang thai MRRS: 512B da toi uu"
-call :assert_file_contains "%STATUS_FILE%" "da dat muc tieu Gen2 thanh cong!" "Xac nhan dong trang thai hoan tat"
+call :assert_file_contains "%STATUS_FILE%" "da dat muc tieu Gen2 thanh cong" "Xac nhan dong trang thai hoan tat"
 call :assert_task_exists "CMP30HX_Gen2_Unlock" "Scheduled Task SYSTEM da duoc dang ky"
 call :assert_reg_exists "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" "CMP30HX_Gen2" "Registry Run Key HKLM da duoc tao"
 call :assert_file_exists "%RUN_BAT%" "File script duy tri RunUnlock.bat ton tai"
@@ -285,7 +312,8 @@ echo.
 echo     --- Ket qua kiem tra (Assertions - Suite 2) ---
 call :assert_exit_code "1" "!EC!" "Setup tra ve ExitCode 1 khi mo phong that bai"
 call :assert_file_exists "%STATUS_FILE%" "File gen2_status.txt duoc ghi nhan"
-call :assert_file_contains "%STATUS_FILE%" "chua dat muc tieu Gen2!" "Xac nhan trang thai chua dat Gen2"
+call :assert_file_contains "%STATUS_FILE%" "STATUS_CODE=GEN1_STUCK" "Seam 2: Token STATUS_CODE=GEN1_STUCK hop le"
+call :assert_file_contains "%STATUS_FILE%" "chua dat muc tieu Gen2" "Xac nhan trang thai chua dat Gen2"
 exit /b 0
 
 :test_suite_winring0
@@ -298,6 +326,7 @@ echo.
 echo     --- Ket qua kiem tra (Assertions - Suite 3) ---
 call :assert_exit_code "1" "!EC!" "Setup tra ve ExitCode 1 khi driver bi chan"
 call :assert_file_exists "%STATUS_FILE%" "File gen2_status.txt duoc tao"
+call :assert_file_contains "%STATUS_FILE%" "STATUS_CODE=DRV_FAIL" "Seam 2: Token STATUS_CODE=DRV_FAIL hop le"
 call :assert_file_contains "%STATUS_FILE%" "WinRing0" "File status ghi nhan loi driver WinRing0"
 exit /b 0
 
@@ -311,7 +340,33 @@ echo.
 echo     --- Ket qua kiem tra (Assertions - Suite 4) ---
 call :assert_exit_code "1" "!EC!" "Setup tra ve ExitCode 1 khi khong tim thay GPU"
 call :assert_file_exists "%STATUS_FILE%" "File gen2_status.txt duoc tao"
+call :assert_file_contains "%STATUS_FILE%" "STATUS_CODE=NO_GPU" "Seam 2: Token STATUS_CODE=NO_GPU hop le"
 call :assert_file_contains "%STATUS_FILE%" "PCI" "File status ghi nhan loi PCI bus"
+exit /b 0
+
+:test_suite_missing_status
+echo.
+echo [*] [TEST SUITE 9] Kiem thu co che phong thu chan bao thanh cong ao khi mat Status file...
+call :clean_baseline
+call "%TARGET_BAT%" -mock-missing-status -nocheck -nowait -noadmin
+set "EC=!ERRORLEVEL!"
+echo.
+echo     --- Ket qua kiem tra (Assertions - Suite 9) ---
+call :assert_exit_code "1" "!EC!" "Setup tra ve ExitCode 1 khi khong co status file"
+call :assert_file_not_exists "%STATUS_FILE%" "Xac nhan file gen2_status.txt khong ton tai (mo phong crash)"
+exit /b 0
+
+:test_suite_preflight
+echo.
+echo [*] [TEST SUITE 10] Kiem thu che do chay doc lap Preflight Diagnostic [-preflight]...
+call :clean_baseline
+call "%TARGET_BAT%" -preflight -nocheck -nowait -noadmin
+set "EC=!ERRORLEVEL!"
+echo.
+echo     --- Ket qua kiem tra (Assertions - Suite 10) ---
+call :assert_exit_code "0" "!EC!" "Preflight diagnostic doc lap tra ve ExitCode 0"
+call :assert_file_not_exists "%STATUS_FILE%" "Khong khoi chay installer khi chi kiem tra preflight"
+call :assert_task_not_exists "CMP30HX_Gen2_Unlock" "Khong dang ky Scheduled Task khi chi kiem tra preflight"
 exit /b 0
 
 :test_suite_uninstall
@@ -467,7 +522,7 @@ echo       [PASS] %~3
 set /a PASSED_TESTS+=1
 exit /b 0
 :fail_re
-echo       [FAIL] %~3 [Registry key/value khong ton tai: %~1 -^> %~2]
+echo       [FAIL] %~3 [Registry key/value khong ton tai: %~1 -> %~2]
 set /a FAILED_TESTS+=1
 exit /b 0
 
@@ -479,7 +534,7 @@ echo       [PASS] %~3
 set /a PASSED_TESTS+=1
 exit /b 0
 :fail_rne
-echo       [FAIL] %~3 [Registry value van chua bi xoa: %~1 -^> %~2]
+echo       [FAIL] %~3 [Registry value van chua bi xoa: %~1 -> %~2]
 set /a FAILED_TESTS+=1
 exit /b 0
 
