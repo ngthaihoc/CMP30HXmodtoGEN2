@@ -3,6 +3,7 @@ package hxcore
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -356,10 +357,12 @@ func (n *LinkNegotiator) retrainPulse(bdf uint32) error {
 // -------------------------------------------------------------
 
 type MockHardwareBus struct {
-	pciConfig      map[uint64]uint32
-	mmio           map[uint64]uint32
-	PnpResetCalled bool
-	OnPnpReset     func(devID uint16) bool
+	pciConfig              map[uint64]uint32
+	mmio                   map[uint64]uint32
+	PnpResetCalled         bool
+	OnPnpReset             func(devID uint16) bool
+	RestartNVDisplayCalled bool
+	OnRestartNVDisplay     func() error
 }
 
 func NewMockHardwareBus() *MockHardwareBus {
@@ -440,6 +443,10 @@ func (m *MockHardwareBus) PnpResetDevice(devID uint16) bool {
 }
 
 func (m *MockHardwareBus) RestartNVDisplay() error {
+	m.RestartNVDisplayCalled = true
+	if m.OnRestartNVDisplay != nil {
+		return m.OnRestartNVDisplay()
+	}
 	return nil
 }
 
@@ -489,9 +496,39 @@ func (p *ProductionBus) PnpResetDevice(devID uint16) bool {
 }
 
 func (p *ProductionBus) RestartNVDisplay() error {
-	_, _ = RunOut("sc.exe", "stop", "NVDisplay.ContainerLocalSystem")
-	time.Sleep(500 * time.Millisecond)
+	// 1. Đảm bảo cấu hình service là auto để không bị vô hiệu hoá
+	_, _ = RunOut("sc.exe", "config", "NVDisplay.ContainerLocalSystem", "start=", "auto")
+
+	// 2. Yêu cầu dừng service
+	out, _ := RunOut("sc.exe", "stop", "NVDisplay.ContainerLocalSystem")
+	if strings.Contains(string(out), "1060") {
+		// Service không tồn tại trên hệ thống (không có driver NVIDIA)
+		return nil
+	}
+
+	// 3. Đợi service dừng hoàn toàn (chuyển sang trạng thái 1 STOPPED) thay vì sleep mù 500ms
+	for i := 0; i < 25; i++ { // tối đa 5 giây
+		time.Sleep(200 * time.Millisecond)
+		qOut, err := RunOut("sc.exe", "query", "NVDisplay.ContainerLocalSystem")
+		if err != nil || strings.Contains(string(qOut), "STOPPED") {
+			break
+		}
+	}
+
+	// 4. Khởi động lại service
 	_, err := RunOut("sc.exe", "start", "NVDisplay.ContainerLocalSystem")
+
+	// 5. Xác nhận service đã ở trạng thái 4 RUNNING; nếu gặp lỗi 1056 (đang chuyển trạng thái) thì thử lại
+	for i := 0; i < 25; i++ { // tối đa 5 giây
+		time.Sleep(200 * time.Millisecond)
+		qOut, qErr := RunOut("sc.exe", "query", "NVDisplay.ContainerLocalSystem")
+		if qErr == nil && strings.Contains(string(qOut), "RUNNING") {
+			return nil
+		}
+		if strings.Contains(string(qOut), "STOPPED") {
+			_, err = RunOut("sc.exe", "start", "NVDisplay.ContainerLocalSystem")
+		}
+	}
 	return err
 }
 

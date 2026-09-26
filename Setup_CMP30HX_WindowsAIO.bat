@@ -51,6 +51,10 @@ for %%a in (%*) do (
     if /i "%%~a"=="/notask" set "NO_TASK=1"
     if /i "%%~a"=="-preflight" set "DO_PREFLIGHT_ONLY=1"
     if /i "%%~a"=="/preflight" set "DO_PREFLIGHT_ONLY=1"
+    if /i "%%~a"=="-fix-nvcpl" set "DO_FIX_NVCPL=1"
+    if /i "%%~a"=="/fix-nvcpl" set "DO_FIX_NVCPL=1"
+    if /i "%%~a"=="-fixnvcpl" set "DO_FIX_NVCPL=1"
+    if /i "%%~a"=="/fixnvcpl" set "DO_FIX_NVCPL=1"
 )
 
 set "HAS_CLI_FLAG=0"
@@ -103,6 +107,7 @@ cd /d "%~dp0"
 
 if "%DO_CLEAN_TASKS%"=="1" goto :clean_tasks
 if "%DO_UNINSTALL%"=="1" goto :uninstall
+if "%DO_FIX_NVCPL%"=="1" goto :FixNvidiaControlPanel
 if "%HAS_CLI_FLAG%"=="0" goto :aio_menu
 goto :start_aio
 
@@ -125,11 +130,16 @@ echo   [2] Go bo cai dat (Tu dong xoa Scheduled Task va Don dep)
 echo       - Tu dong xoa sach Scheduled Task, Registry Run key cua script
 echo       - Go bo hoan toan khoi he thong
 echo.
-echo   [3] Thoat
+echo   [3] Khoi phuc va Sua loi mat NVIDIA Control Panel
+echo       - Dat lai service NVDisplay.ContainerLocalSystem ve tu dong [Auto] va khoi dong
+echo       - Phuc hoi dang ky Desktop Context Menu handler
+echo.
+echo   [4] Thoat
 echo.
 echo ================================================================
-%SystemRoot%\System32\choice.exe /c 123 /t 8 /d 1 /m "Nhap lua chon cua ban [1-3] (Tu dong chon [1] sau 8 giay): "
-if errorlevel 3 exit /b 0
+%SystemRoot%\System32\choice.exe /c 1234 /t 8 /d 1 /m "Nhap lua chon cua ban [1-4] (Tu dong chon [1] sau 8 giay): "
+if errorlevel 4 exit /b 0
+if errorlevel 3 goto :FixNvidiaControlPanel
 if errorlevel 2 goto :clean_tasks
 if errorlevel 1 goto :start_aio
 goto :start_aio
@@ -310,6 +320,8 @@ if not exist "%FINAL_RUNNER%" (
         echo sc delete ThrottleStop ^>nul 2^>^&1
         echo del /f /q "%%SystemRoot%%\System32\drivers\WinRing0x64.sys" ^>nul 2^>^&1
         echo del /f /q "%%SystemRoot%%\System32\drivers\ThrottleStop.sys" ^>nul 2^>^&1
+        echo sc config NVDisplay.ContainerLocalSystem start= auto ^>nul 2^>^&1
+        echo sc start NVDisplay.ContainerLocalSystem ^>nul 2^>^&1
         echo endlocal
     ) > "%FINAL_RUNNER%"
 )
@@ -619,7 +631,7 @@ exit /b 0
 
 :PnpSoftReset
 echo       [*] Dang tu dong thuc hien chu trinh Soft Reset [Disable - Enable qua PnP]...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$devs = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -match 'VEN_10DE&(DEV_2189|DEV_1F0B)' }; if ($devs) { foreach ($d in $devs) { try { & pnputil /restart-device $d.InstanceId >$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {}; try { $st = (Get-PnpDevice -InstanceId $d.InstanceId -ErrorAction SilentlyContinue).Status; if ($st -ne 'OK') { Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } } catch {} }; Start-Sleep -Seconds 2; try { Restart-Service NVDisplay.ContainerLocalSystem -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 } catch {} } else { Write-Host 'Khong tim thay Instance ID qua PnP' }" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$devs = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -match 'VEN_10DE&(DEV_2189|DEV_1F0B)' }; if ($devs) { foreach ($d in $devs) { try { & pnputil /restart-device $d.InstanceId >$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {}; try { $st = (Get-PnpDevice -InstanceId $d.InstanceId -ErrorAction SilentlyContinue).Status; if ($st -ne 'OK') { Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } } catch {} }; Start-Sleep -Seconds 2; try { sc.exe config NVDisplay.ContainerLocalSystem start= auto | Out-Null; Restart-Service NVDisplay.ContainerLocalSystem -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; $s = Get-Service -Name NVDisplay.ContainerLocalSystem -ErrorAction SilentlyContinue; if ($s -and $s.Status -ne 'Running') { Start-Service NVDisplay.ContainerLocalSystem -ErrorAction SilentlyContinue } } catch {} } else { Write-Host 'Khong tim thay Instance ID qua PnP' }" >nul 2>&1
 exit /b 0
 
 
@@ -711,7 +723,7 @@ exit /b 0
 
 
 :: ================================================================
-:: MODULE 5: CLEANUP BYOVD DRIVERS
+:: MODULE 5: CLEANUP BYOVD DRIVERS & RESTORE DISPLAY SERVICES
 :: ================================================================
 :CleanupBYOVD
 sc stop WinRing0_1_2_0 >nul 2>&1
@@ -720,6 +732,7 @@ sc stop ThrottleStop >nul 2>&1
 sc delete ThrottleStop >nul 2>&1
 del /f /q "%SystemRoot%\System32\drivers\WinRing0x64.sys" >nul 2>&1
 del /f /q "%SystemRoot%\System32\drivers\ThrottleStop.sys" >nul 2>&1
+call :EnsureNvidiaControlPanelHealthy
 exit /b 0
 
 
@@ -944,6 +957,41 @@ echo ================================================================
 echo  [V] DA XOA TOAN BO CAC SCHEDULED TASK VA DON DEP SACH SE!
 echo  - Task Scheduler he thong hoan toan sach se, khong con tac vu chay ngam.
 echo  - Khong con bat ky tac vu nao co the gay anh huong den Riot Vanguard / Anti-Cheat.
+echo ================================================================
+echo.
+if not "%NO_WAIT%"=="1" pause
+exit /b 0
+
+
+:: ================================================================
+:: MODULE 8: ENSURE & FIX NVIDIA CONTROL PANEL HEALTH
+:: ================================================================
+:EnsureNvidiaControlPanelHealthy
+sc config NVDisplay.ContainerLocalSystem start= auto >nul 2>&1
+sc query NVDisplay.ContainerLocalSystem 2>nul | %SystemRoot%\System32\findstr.exe /i "RUNNING" >nul 2>&1
+if errorlevel 1 (
+    sc start NVDisplay.ContainerLocalSystem >nul 2>&1
+)
+reg add "HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext" /ve /t REG_SZ /d "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}" /f >nul 2>&1
+exit /b 0
+
+:FixNvidiaControlPanel
+echo ================================================================
+echo    KHOI PHUC VA SUA LOI MAT NVIDIA CONTROL PANEL [DCH ^& SHELL]
+echo ================================================================
+echo.
+echo [*] Dang kiem tra va khoi phuc service NVDisplay.ContainerLocalSystem...
+sc config NVDisplay.ContainerLocalSystem start= auto >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Restart-Service -Name 'NVDisplay.ContainerLocalSystem' -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; $s = Get-Service -Name 'NVDisplay.ContainerLocalSystem' -ErrorAction SilentlyContinue; if ($s -and $s.Status -ne 'Running') { Start-Service -Name 'NVDisplay.ContainerLocalSystem' -ErrorAction SilentlyContinue }" >nul 2>&1
+echo       [OK] Service NVDisplay.ContainerLocalSystem da duoc dat ve tu dong [Auto] va khoi chay.
+echo.
+echo [*] Dang dang ky lai Desktop Context Menu Handler cho NVIDIA Control Panel...
+reg add "HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext" /ve /t REG_SZ /d "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}" /f >nul 2>&1
+echo       [OK] Da khoi phuc khoa Registry Context Menu [NvCplDesktopContext].
+echo.
+echo ================================================================
+echo  [V] HOAN TAT KHOI PHUC NVIDIA CONTROL PANEL!
+echo  - Ban co the nhap chuot phai tren Desktop de kiem tra lai menu NVIDIA Control Panel.
 echo ================================================================
 echo.
 if not "%NO_WAIT%"=="1" pause
