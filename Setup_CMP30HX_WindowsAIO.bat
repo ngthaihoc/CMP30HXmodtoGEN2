@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 setlocal
 chcp 65001 >nul
 title CMP 30HX Gen2 x16 Auto Setup
