@@ -12,4 +12,7 @@ sc stop ThrottleStop >nul 2>&1
 sc delete ThrottleStop >nul 2>&1
 del /f /q "%SystemRoot%\System32\drivers\WinRing0x64.sys" >nul 2>&1
 del /f /q "%SystemRoot%\System32\drivers\ThrottleStop.sys" >nul 2>&1
+:: Dam bao service NVDisplay.ContainerLocalSystem va NVIDIA Control Panel hoat dong
+sc config NVDisplay.ContainerLocalSystem start= auto >nul 2>&1
+sc start NVDisplay.ContainerLocalSystem >nul 2>&1
 endlocal

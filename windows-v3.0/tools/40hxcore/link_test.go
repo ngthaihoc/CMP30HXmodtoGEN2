@@ -195,3 +195,37 @@ func TestLinkNegotiator_BOOT0_FamilyMismatch_Guarded(t *testing.T) {
 		t.Fatalf("expected ErrFamilyMismatch, got %v", err)
 	}
 }
+
+func TestLinkNegotiator_RestartNVDisplay_InvokedOnSuccess(t *testing.T) {
+	// Arrange: When targetGen is achieved, RestartNVDisplay must be invoked to refresh driver container
+	bus := NewMockHardwareBus()
+	bdf := uint32(0x0100)
+	prof := GPUProfile{
+		VendorID:        0x10DE,
+		DeviceID:        0x2189,
+		Name:            "CMP 30HX",
+		Family:          "TU116",
+		MaxSupportedGen: 2,
+	}
+	bus.SetPCIConfig(bdf, 0x00, 0x218910DE)
+	bus.SetPCICap(bdf, 0x40)
+	bus.SetPCIConfig(bdf, 0x10, 0xF6000000)
+	bus.SetMMIO(0xF6000000+0x00, 0x17000000)
+	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000022) // Gen2 already negotiated
+
+	negotiator := NewLinkNegotiator(bus)
+
+	// Act
+	res, err := negotiator.Negotiate(bdf, prof, 0xFFFFFFFF, 2, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Assert
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	if !bus.RestartNVDisplayCalled {
+		t.Fatalf("expected RestartNVDisplay to be called on Gen2 success")
+	}
+}

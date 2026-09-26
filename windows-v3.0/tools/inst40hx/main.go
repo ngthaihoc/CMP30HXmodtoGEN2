@@ -1920,9 +1920,9 @@ func gen2PnpRecover40HX() bool {
 	return gen2PnpRecoverGPU(0x1F0B)
 }
 
-// Khởi động lại NVDisplay Container (phục hồi hiển thị GPU-Z / Task Manager)
+// Khởi động lại NVDisplay Container (phục hồi hiển thị GPU-Z / Task Manager / NVIDIA Control Panel)
 func gen2RestartNVDisplay() {
-	ps := `Restart-Service NVDisplay.ContainerLocalSystem -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2`
+	ps := `sc.exe config NVDisplay.ContainerLocalSystem start= auto | Out-Null; Restart-Service NVDisplay.ContainerLocalSystem -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; $s = Get-Service -Name NVDisplay.ContainerLocalSystem -ErrorAction SilentlyContinue; if ($s -and $s.Status -ne 'Running') { Start-Service NVDisplay.ContainerLocalSystem -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }`
 	out, err := exec.Command("powershell", "-NoProfile", "-Command", ps).CombinedOutput()
 	fmt.Printf("    NVDisplay Container khởi động lại: %s (err=%v)\n", strings.TrimSpace(string(out)), err)
 }
