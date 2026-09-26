@@ -150,6 +150,15 @@ sudo ./Setup_CMP30HX_LinuxAIO.sh
 3. **BAR0 MMIO Direct Injection**: Can thiệp thanh ghi kernel (`XVE_OVR`, `PRIV_MISC_1`, `LINK_CONFIG_0`, `LNKCAP`, `LNKCTL2`).
 4. **Tối ưu MRRS 512B & Retrain Link**: Cấu hình Target Link Speed = Gen2, nâng Max Read Request Size lên 512 Bytes (DEVCTL) và thực hiện chu trình retrain đạt trần ~6.4 GB/s.
 5. **Cài đặt Systemd Service & Sleep Hook**: Tự động kích hoạt service `cmp30hx-gen2-unlock.service` và sleep hook `/lib/systemd/system-sleep/cmp30hx-unlock` để duy trì Gen2 sau khi reboot hoặc wake up.
+6. **Đồng bộ chuẩn Seam 2 StatusContract**: Xuất tệp trạng thái chuẩn hoá (`gen2_status.txt` hoặc qua cờ `--status-file`) với định dạng máy đọc:
+   ```text
+   STATUS_CODE=GEN2_SUCCESS
+   SPEED_CURRENT=2
+   WIDTH_CURRENT=16
+   TLS_TARGET=2
+   ERROR_CODE=NONE
+   TIMESTAMP=2026-09-26T05:30:00Z
+   ```
 
 **Các lệnh tiện ích trên Linux:**
 - Kiểm tra trạng thái link & MRRS hiện tại:
@@ -159,6 +168,14 @@ sudo ./Setup_CMP30HX_LinuxAIO.sh
 - Gỡ bỏ hoàn toàn systemd service và hook:
   ```bash
   sudo ./Setup_CMP30HX_LinuxAIO.sh --uninstall
+  ```
+- Kiểm thử giả lập (Mock Test) không cần GPU thật và không cần quyền root:
+  ```bash
+  ./Setup_CMP30HX_LinuxAIO.sh -test --no-root
+  ```
+- Chạy bộ kiểm thử tự động toàn diện trên Linux / WSL (8 suites, 42 assertions):
+  ```bash
+  chmod +x Test_Mock_CMP30HX_Linux.sh && ./Test_Mock_CMP30HX_Linux.sh
   ```
 
 ---
@@ -228,6 +245,14 @@ Phiên bản v3.0.0 được tái cấu trúc toàn diện theo kiến trúc **D
 
 Người dùng CMP 40HX và CMP 30HX hoàn toàn có thể chơi các tựa game có bảo mật gắt gao như **Valorant, League of Legends (Riot Vanguard), Apex Legends, Fortnite (Easy Anti-Cheat / BattlEye)**:
 
+- **Giải pháp Riot Vanguard trên Windows 11 qua `UnlockRiotGame.exe`**:
+  - **Với CMP 40HX (TU106)**: Riot Vanguard trên Windows 11 yêu cầu bắt buộc Secure Boot = Enabled và TPM 2.0. Tuy nhiên firmware `40HXUNLK.EFI` chưa có chữ ký số của Microsoft. Công cụ `windows-v3.0/release/UnlockRiotGame.exe` tự động:
+    1. Tạo chứng chỉ bảo mật X.509 (`CMP40HX_Key.cer`) với thuật toán SHA256.
+    2. Ký số Authenticode cho `40HXUNLK.EFI` (trong cả thư mục phát hành lẫn phân vùng ESP).
+    3. Xuất file chứng chỉ `CMP40HX_Key.cer` ra ổ C:\, Desktop và phân vùng ESP (`\EFI\40HX\`).
+    4. Cung cấp hướng dẫn trực quan yêu cầu người dùng chụp lại màn hình, khởi động lại vào BIOS, chuyển sang **Custom Mode** và nạp chứng chỉ `CMP40HX_Key.cer` vào cơ sở dữ liệu chữ ký tin cậy **`db`** (Key Management -> Authorized Signatures -> Append Key).
+    5. Kết quả: Hệ thống vừa giữ nguyên **Secure Boot BẬT** để đáp ứng kiểm tra của Riot Vanguard (`vgk.sys`), vừa thực thi firmware `40HXUNLK.EFI` để mở khoá toàn bộ Tensor Core (`SS0=0x88888888`, ~50 TFLOPS) và PCIe Gen2.
+  - **Với CMP 30HX (TU116)**: Do silicon TU116 không có Tensor Core và mở khoá Gen2 hoàn toàn qua ghi đè thanh ghi BAR0 MMIO trong Windows ring-0 (không nạp EFI loader), người dùng **giữ nguyên Secure Boot BẬT trong BIOS** bình thường mà không cần nạp thêm key, tương thích 100% với Riot Games.
 - **Cơ chế Dùng-Xong-Rút (Transient BYOVD on-demand)**:
   - Driver kernel (`WinRing0x64.sys`, `ThrottleStop.sys`) chỉ được nạp lên bộ nhớ trong vài mili-giây lúc hệ thống khởi động hoặc đăng nhập để cấu hình thanh ghi PCIe.
   - Ngay sau khi đàm phán link hoàn tất, công cụ tự động dừng dịch vụ (`sc stop`), xoá dịch vụ (`sc delete`) và xoá bỏ tệp `.sys` khỏi thư mục hệ thống.
@@ -244,7 +269,8 @@ Người dùng CMP 40HX và CMP 30HX hoàn toàn có thể chơi các tựa game
 
 Dự án đi kèm bộ kiểm thử tự động 100% giúp phát hiện hồi quy và bảo đảm an toàn trước khi triển khai:
 - **13 Go Unit Tests (`40hxcore`)**: Kiểm tra kẹp eFuse TU116, tối ưu DEVCTL MRRS 512B, chuỗi shadow register MMIO, phục hồi Soft PnP, phân tích trạng thái `StatusContract` và giải mã Tensor Core.
-- **10 Mock Test Suites (`Test_Mock_CMP30HX.bat`)**:
+- **18 Go Unit Tests (`unlockriot`)**: Kiểm tra toàn diện ma trận chính sách tương thích Riot Games (GPU TU106/TU116, Windows 10/11, Secure Boot Enabled/Disabled), quản lý chứng chỉ ký số Authenticode và mock interface.
+- **10 Mock Test Suites trên Windows (`Test_Mock_CMP30HX.bat`)**:
   - Test Suite 1: Kịch bản thành công nhanh (Gen1 $\rightarrow$ Soft Reset $\rightarrow$ Gen2).
   - Test Suite 2: Kịch bản xử lý thất bại an toàn.
   - Test Suite 3: Xử lý tình huống driver WinRing0 bị chặn bởi HVCI / Blocklist.
@@ -255,6 +281,16 @@ Dự án đi kèm bộ kiểm thử tự động 100% giúp phát hiện hồi q
   - Test Suite 8: Gỡ bỏ và khôi phục mặc định Resizable BAR.
   - Test Suite 9: Cơ chế phòng vệ chống báo thành công ảo khi mất tệp trạng thái.
   - Test Suite 10: Chế độ chạy độc lập chẩn đoán hệ thống (Preflight Only).
+- **8 Mock Test Suites trên Linux (`Test_Mock_CMP30HX_Linux.sh`)**:
+  - Chạy kiểm thử tự động 42 assertions trên WSL / Linux / CI không cần GPU vật lý:
+    + Suite 1: Happy Path (Mở khóa Gen 2 x16 thành công, exit code 0).
+    + Suite 2: Idle Mode (TLS=Gen2, link tạm hạ Gen1 do tiết kiệm điện).
+    + Suite 3: Retrain Failure (Xử lý lỗi timeout sau 6 lượt retrain, exit code 1).
+    + Suite 4: No GPU (Xử lý tình huống không có card, mã lỗi ERR_NO_GPU).
+    + Suite 5: Status Inspection (Kiểm tra hiển thị BDF, MRRS 512B, ASPM).
+    + Suite 6: Uninstall Service (Gỡ bỏ sạch sẽ service và sleep hook).
+    + Suite 7: Schema Validation (Kiểm tra toàn vẹn định dạng Seam 2 StatusContract).
+    + Suite 8: Non-root execution safety (Xác nhận cờ `--no-root` chạy an toàn).
 
 ---
 

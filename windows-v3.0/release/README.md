@@ -29,10 +29,11 @@ Từ bản v2.5 trở đi **không cần bật chế độ Test Signing**, hệ 
 3. [Cài đặt và cấu hình](#3-cài-đặt-và-cấu-hình)
 4. [Kiểm tra sau khi khởi động lại (Nhấp đúp 40HXCheck.exe)](#4-kiểm-tra-sau-khi-khởi-động-lại-nhấp-đúp-40hxcheckexe)
 5. [Xử lý sự cố](#5-xử-lý-sự-cố)
-6. [Lưu ý khi sử dụng hàng ngày](#6-lưu-ý-khi-sử-dụng-hàng-ngày)
-7. [Gỡ cài đặt và hoàn nguyên](#7-gỡ-cài-đặt-và-hoàn-nguyên)
-8. [Lỗi boot EFI? Hướng dẫn cứu hộ khẩn cấp](#8-lỗi-boot-efi-hướng-dẫn-cứu-hộ-khẩn-cấp)
-9. [Lịch sử phiên bản](#9-lịch-sử-phiên-bản)
+6. [Tương thích Riot Games (Valorant / Vanguard) & Secure Boot](#6-tương-thích-riot-games-valorant--vanguard--secure-boot)
+7. [Lưu ý khi sử dụng hàng ngày](#7-lưu-ý-khi-sử-dụng-hàng-ngày)
+8. [Gỡ cài đặt và hoàn nguyên](#8-gỡ-cài-đặt-và-hoàn-nguyên)
+9. [Lỗi boot EFI? Hướng dẫn cứu hộ khẩn cấp](#9-lỗi-boot-efi-hướng-dẫn-cứu-hộ-khẩn-cấp)
+10. [Lịch sử phiên bản](#10-lịch-sử-phiên-bản)
 
 ---
 
@@ -43,6 +44,7 @@ Từ bản v2.5 trở đi **không cần bật chế độ Test Signing**, hệ 
 | `40HXInstaller.exe` | **Giao diện cài đặt + Quản lý** (Mặc định mở GUI; hỗ trợ đầy đủ tham số dòng lệnh) |
 | `40HXUninstaller.exe` | **Gỡ cài đặt tự động** (Nhấp đúp chuột → Yêu cầu quyền Administrator) |
 | `40HXCheck.exe` | **Chẩn đoán độc lập** (Nhấp đúp kiểm tra ngay: Trạng thái Năng lực tính toán + Gen2; chủ yếu ở chế độ đọc, tự dọn dẹp sau khi đo) |
+| `UnlockRiotGame.exe` | **Mở khoá tương thích Riot Games / Vanguard**: Tự động tạo chứng chỉ, ký Authenticode cho `40HXUNLK.EFI` và hướng dẫn nạp key vào BIOS `db` (Custom Mode) trên Windows 11 cho CMP 40HX; kiểm tra và giữ nguyên Secure Boot cho CMP 30HX |
 | `OpenCL.exe` | **Kiểm tra năng lực tính toán** (Nhấp đúp để chạy, so sánh hiệu năng số thực OpenCL trước và sau khi mở khoá; đối chiếu bảng thông số ở đầu trang) |
 | `files\40HXUNLK.EFI` | Firmware mở khoá (Bộ cài dùng để triển khai; tệp dùng để tạo USB boot cứu hộ cũng là file này) |
 | `make_usb_efi.bat` | **Phương án dự phòng boot**: Tự động nhận diện USB và chép EFI mở khoá (Dùng khi boot USB thủ công, xem mục 2.2; tham số `/restore` để hoàn nguyên USB) |
@@ -99,7 +101,7 @@ Vị trí tham khảo trên một số dòng bo mạch chủ:
 ### 2.4 Chế độ boot và cấu hình nguồn điện
 
 **Chế độ boot bắt buộc phải là UEFI + GPT.** Việc mở khoá năng lực tính toán dựa vào firmware nạp trong môi trường UEFI. Nếu ổ đĩa dùng chuẩn cũ BIOS Legacy + MBR
-sẽ không có phân vùng EFI, dẫn đến việc không thể cài đặt EFI mở khoá —— đây là nguyên nhân gốc rễ của lỗi "không cài được EFI / tốc độ tính toán luôn bị khoá".
+sẽ không có phân vùng EFI, dẫn đến việc không thể cài đặt EFI mở khoá: đây là nguyên nhân gốc rễ của lỗi "không cài được EFI / tốc độ tính toán luôn bị khoá".
 
 Cách kiểm tra: Nhấn `Win + R` → Nhập `msinfo32` → Enter, nhìn vào dòng "BIOS Mode":
 - Hiển thị **UEFI** → Chuẩn xác, bình thường;
@@ -123,7 +125,7 @@ Cách kiểm tra: Nhấn `Win + R` → Nhập `msinfo32` → Enter, nhìn vào d
 > Lưu ý bổ sung: Vùng ① trên GUI còn cung cấp tuỳ chọn "High Performance Power Plan" (không bắt buộc). Bộ cài tự động xử lý
 > việc tắt Fast Startup + tắt ASPM; tuỳ chọn High Performance có thể tick chọn trên GUI hoặc cài thủ công (xem mục 3.0).
 
-> Lưu ý: Dù đã tắt ASPM, một số phiên bản driver vẫn có thể tự hạ xuống Gen1 khi card rảnh rỗi —— đây là hành vi tiết kiệm điện bình thường của phần cứng,
+> Lưu ý: Dù đã tắt ASPM, một số phiên bản driver vẫn có thể tự hạ xuống Gen1 khi card rảnh rỗi: đây là hành vi tiết kiệm điện bình thường của phần cứng,
 > khi đào coin hoặc chạy AI tải liên tục, liên kết sẽ tự động chuyển về Gen2 sau vài giây. Tiêu chuẩn đánh giá mở khoá Gen2 thành công chuẩn xác nhất là
 > **Tốc độ mục tiêu (Target Link Speed - TLS)** (40HXCheck.exe sẽ hiển thị "Mục tiêu Gen2 / TLS=Gen2"), chứ không phụ thuộc vào tốc độ tức thời lúc không tải.
 > Nếu muốn hạn chế tối đa việc hạ tốc độ, bạn có thể vào NVIDIA Control Panel chỉnh chế độ Power management mode của 40HX thành "Prefer maximum performance" (tuỳ chọn).
@@ -237,7 +239,7 @@ Các cách xác nhận khác: Kiểm tra bằng GPU-Z thấy Bus Interface hiể
 | 4 thanh ghi PL0 đều ghi thành công nhưng TLS vẫn ở Gen1 | Driver/GSP can thiệp ghi đè chính sách liên kết trong vòng mili-giây (**không phải lỗi khoá firmware BIOS, không lấy số lô .06/.04 làm thước đo**; **tuyệt đối KHÔNG flash VBIOS**) | Tác vụ đăng nhập (nếu đã tạo) mặc định sẽ tự động chạy Stage2 rollback (Gen2AutoHard); **nếu chưa tạo tác vụ thì hệ thống không tự chạy, hãy đăng ký tác vụ trước**; sau đó vào GUI ② bấm [Kích hoạt Gen2 & Cài đặt tự khởi động] hoặc [Kích hoạt Gen2 ngay] để thử lại; nếu vẫn không được hãy gửi file chẩn đoán và nhật ký cho tác giả |
 | Phần mềm diệt virus chặn file driver | Một số ít phần mềm diệt virus nhận nhầm driver kích hoạt Gen2 | Khi cài đặt đã **tự động thêm loại trừ vào Windows Defender** (chỉ loại trừ file của dự án, không tắt bảo vệ máy); nếu vẫn bị xoá, hãy khôi phục file trong Security Center rồi chạy lại bộ cài |
 | Hệ thống đa card / Cắm khe phụ bị lỗi | Lệch pha thời gian tín hiệu bus sau chip cầu | Chuyển card 40HX sang cắm ở khe PCIe x16 đầu tiên, hoặc tạm thời tháo bớt card phụ để kiểm tra |
-| GPU-Z báo PCIe x8 | Không liên quan đến việc mở khoá — do phân chia số lane giữa khe M.2 và PCIe trên bo mạch chủ | Tra cứu sách hướng dẫn bo mạch chủ về chia sẻ băng thông khe M.2/PCIe, chuyển card sang khe x16 độc lập |
+| GPU-Z báo PCIe x8 | Không liên quan đến việc mở khoá, do phân chia số lane giữa khe M.2 và PCIe trên bo mạch chủ | Tra cứu sách hướng dẫn bo mạch chủ về chia sẻ băng thông khe M.2/PCIe, chuyển card sang khe x16 độc lập |
 | Phần mềm diệt virus bên thứ ba (Huorong, 360...) xoá driver | Phần mềm bên thứ ba không đọc danh sách loại trừ của Defender | Thêm thủ công 4 đường dẫn driver vào danh sách tin cậy: file ThrottleStop.sys, WinRing0x64.sys trong thư mục `%SystemRoot%\System32\drivers\` và cùng 2 file .sys đó trong thư mục `%ProgramData%\40HXUnlock\drivers\` |
 | Driver bị cách ly liên tục (dấu hiệu sắp bị Code 43) | Phần mềm diệt virus liên tục xoá file .sys | Nếu dùng Defender: GUI vùng ① tick "Tắt bảo vệ thời gian thực của Defender" rồi bấm cài đặt; nếu dùng phần mềm bên thứ 3: thêm vào danh sách tin cậy theo dòng trên |
 | Sau khi mở khoá bị khởi động lại liên tục / Không vào được Windows | Lỗi cổng vào khởi động hoặc cơ sở dữ liệu BCD bị lỗi | Tắt nguồn rút điện rồi bật lại; nếu vẫn lỗi, làm theo mục 8 dùng USB cài Windows (xoá `\EFI\40HX` + chạy lệnh `bootrec /rebuildbcd`) |
@@ -252,29 +254,75 @@ Chạy `40HXCheck.exe` một lần sẽ tự động thu thập đầy đủ cá
 
 ---
 
-## 6. Lưu ý khi sử dụng hàng ngày
+## 6. Tương thích Riot Games (Valorant / Vanguard) & Secure Boot
+
+Khi chơi các tựa game của Riot Games (Valorant, League of Legends, TFT) được bảo vệ bởi **Riot Vanguard** trên Windows 11:
+
+### 6.1 Sự khác biệt kiến trúc giữa CMP 40HX và CMP 30HX
+
+| Đặc tính | CMP 40HX (TU106) | CMP 30HX (TU116) |
+|---|---|---|
+| **Cơ chế mở khoá Tensor Core** | Bắt buộc nạp payload EFI (`40HXUNLK.EFI`) trước khi boot Windows để ghi `SS0 = 0x88888888` | Không có Tensor Core trong silicon TU116 (không dùng EFI bootloader) |
+| **Cơ chế mở khoá PCIe Gen2** | Ghi thanh ghi bóng MMIO + Retrain link | Ghi thanh ghi bóng BAR0 MMIO + DEVCTL MRRS 512B (`0x2000`) |
+| **Yêu cầu Secure Boot trên Win 11** | Bắt buộc bật Secure Boot (`SecureBoot == 1`) cho Vanguard, nhưng EFI loader chưa có chữ ký Microsoft | **Secure Boot BẬT (Enabled) bình thường**, không cần can thiệp BIOS |
+| **Giải pháp tương thích Riot Vanguard** | **Chạy `UnlockRiotGame.exe`**: Ký số Authenticode cho `40HXUNLK.EFI` và nạp chứng chỉ `CMP40HX_Key.cer` vào BIOS `db` (Custom Mode) | Hệ thống tự nhiên tương thích 100% khi bật Secure Boot và nạp driver transient |
+
+### 6.2 Hướng dẫn chi tiết cho CMP 40HX trên Windows 11 (Qua `UnlockRiotGame.exe`)
+
+1. **Khởi chạy công cụ**:
+   - Nhấp đúp vào **`UnlockRiotGame.exe`** (yêu cầu quyền Administrator).
+   - Công cụ sẽ tự động phát hiện GPU (`TU106` hay `TU116`), phiên bản Windows và trạng thái Secure Boot.
+2. **Ký số tự động (Automated Authenticode Signing)**:
+   - Nhấn nút **[1. Bắt đầu Ký số EFI & Xuất Key BIOS]**.
+   - Công cụ sẽ tạo chứng chỉ số X.509 tự ký (`CMP40HX_Key.cer`) với thuật toán SHA256.
+   - Tự động ký số bảo mật cho tệp `40HXUNLK.EFI` (cả trong thư mục phát hành lẫn trong phân vùng ESP `\EFI\40HX\`).
+   - Tự động sao chép chứng chỉ `CMP40HX_Key.cer` vào 3 vị trí:
+     - `C:\CMP40HX_Key.cer` (gốc ổ C để BIOS dễ duyệt tệp)
+     - Desktop của người dùng
+     - Phân vùng ESP (`\EFI\40HX\CMP40HX_Key.cer`)
+3. **Quy trình nạp Key vào BIOS `db` (Quan trọng)**:
+   - Nhấn nút **[2. Xem hướng dẫn nạp Key vào BIOS]** và **chụp lại ảnh màn hình bằng điện thoại** trước khi khởi động lại:
+     + Khởi động lại máy tính, bấm `Del` hoặc `F2` để vào BIOS.
+     + Chuyển chế độ Secure Boot Mode từ **Standard** sang **Custom**.
+     + Vào mục **Key Management** (hoặc Secure Boot Policy).
+     + Chọn mục **Authorized Signatures (db)** -> chọn **Append Key** (hoặc Enroll Signature / Add Signature).
+     + Duyệt đến ổ đĩa C: hoặc phân vùng ESP, chọn file **`CMP40HX_Key.cer`**.
+     + Lưu thay đổi và khởi động lại (`F10` -> Save & Exit).
+4. **Kết quả đạt được**:
+   - Hệ điều hành Windows 11 báo `SecureBoot == 1` và TPM 2.0 hợp lệ.
+   - Riot Vanguard (`vgk.sys`) xác nhận hệ thống an toàn và cho phép chơi Valorant, LoL mượt mà.
+   - Đồng thời `40HXUNLK.EFI` được firmware tin cậy và thực thi, mở khoá trọn vẹn Tensor Core (`SS0=0x88888888`, ~50 TFLOPS) và PCIe Gen2!
+
+### 6.3 Hướng dẫn cho CMP 30HX (Không cần nạp EFI)
+
+- CMP 30HX hoàn toàn **không sử dụng firmware EFI**, quá trình mở khoá Gen2 diễn ra hoàn toàn trong không gian ring-0 của Windows sau khi hệ điều hành khởi động.
+- Do đó, bạn có thể **bật Secure Boot bình thường trong BIOS**. Riot Vanguard sẽ hoạt động trơn tru mà không cần chuyển BIOS sang Custom Mode hay nạp thêm key.
+
+---
+
+## 7. Lưu ý khi sử dụng hàng ngày
 
 1. **Việc mở khoá chỉ có hiệu lực tạm thời cho mỗi phiên khởi động, không ghi đè vĩnh viễn vào phần cứng.** Mỗi lần bật máy, firmware mở khoá sẽ nạp lại mã can thiệp. Nếu một lần bật máy nào đó thấy bị mất mở khoá? **Chỉ cần tắt hẳn máy rồi bật lại** là sẽ bình thường.
-2. **Khuyến nghị giữ phiên bản driver NVIDIA ổn định.** Nếu sau này cập nhật driver NVIDIA mới mà card bị khoá lại thì đây là hiện tượng bình thường——chỉ cần chạy lại bộ cài Installer một lần là xong.
+2. **Khuyến nghị giữ phiên bản driver NVIDIA ổn định.** Nếu sau này cập nhật driver NVIDIA mới mà card bị khoá lại thì đây là hiện tượng bình thường, chỉ cần chạy lại bộ cài Installer một lần là xong.
 3. **Bộ công cụ này chỉ tác động lên duy nhất card CMP 40HX**, hoàn toàn không ảnh hưởng đến các card đồ hoạ khác trên cùng máy tính.
 4. Chơi game, chạy mô hình AI hay render video đều hoạt động bình thường; mặc định chế độ "Dùng xong gỡ ngay" sẽ không để lại bất kỳ driver chạy ngầm nào trong hệ thống (trừ khi bạn chọn chế độ ③ Dịch vụ thường trú).
-5. **Tương thích với phần mềm diệt virus**: Khi cài đặt, chương trình sẽ tự động thêm driver vào danh sách loại trừ của Windows Defender (chỉ loại trừ file của dự án, không tắt bảo vệ của hệ thống). **Phần mềm diệt virus bên thứ ba không đọc danh sách của Defender**——nếu bị chặn, vui lòng thêm thủ công 4 đường dẫn driver được liệt kê ở mục 5.2 vào danh sách trắng.
+5. **Tương thích với phần mềm diệt virus**: Khi cài đặt, chương trình sẽ tự động thêm driver vào danh sách loại trừ của Windows Defender (chỉ loại trừ file của dự án, không tắt bảo vệ của hệ thống). **Phần mềm diệt virus bên thứ ba không đọc danh sách của Defender**, nếu bị chặn, vui lòng thêm thủ công 4 đường dẫn driver được liệt kê ở mục 5.2 vào danh sách trắng.
 6. **Tắt bảo vệ thời gian thực của Defender (Tuỳ chọn)**: Tại GUI vùng ① có tuỳ chọn "Tắt bảo vệ thời gian thực của Defender", nếu tính năng này đang bật thì bộ cài sẽ tự động tick chọn, bạn bấm [Cài đặt các thành phần đã chọn] thì mới thực thi. Sau khi tắt sẽ duy trì liên tục, muốn bật lại: Mở PowerShell với quyền Administrator chạy: `Set-MpPreference -DisableRealtimeMonitoring $False`. Nếu máy dùng bản Windows rút gọn không có mô-đun Defender hoặc bị tính năng "Tamper Protection" chặn, giao diện và nhật ký sẽ thông báo rõ ràng để bạn nắm được.
 
 ---
 
-## 7. Gỡ cài đặt và hoàn nguyên
+## 8. Gỡ cài đặt và hoàn nguyên
 
 - Tự động: Nhấp đúp chuột vào `40HXUninstaller.exe` (Dùng chung bộ lõi gỡ cài đặt sạch sẽ với `40HXInstaller.exe -uninstall`).
 - Quá trình này sẽ xoá sạch: Các Scheduled Task (kể cả tác vụ thử lại khi lỗi) cùng khoá tự khởi động / Mục boot firmware / Firmware mở khoá trong phân vùng ESP (khôi phục lại file bootx64.efi gốc) / Dịch vụ và file driver / Cấu hình GSP / Khoá chính sách trong Registry / Thư mục đệm ProgramData / Danh sách loại trừ Defender.
-- Các thiết lập nguồn điện (Fast Startup / ASPM / High Performance Plan) **sẽ được giữ nguyên**——nếu muốn khôi phục thủ công xem tại mục 2.4.
+- Các thiết lập nguồn điện (Fast Startup / ASPM / High Performance Plan) **sẽ được giữ nguyên**, nếu muốn khôi phục thủ công xem tại mục 2.4.
 - Sau khi khởi động lại máy, card đồ hoạ sẽ trở về trạng thái xuất xưởng ban đầu. Nếu trong BIOS vẫn còn sót tên mục boot, bạn có thể vào BIOS xoá thủ công.
 
 ---
 
-## 8. Lỗi boot EFI? Hướng dẫn cứu hộ khẩn cấp
+## 9. Lỗi boot EFI? Hướng dẫn cứu hộ khẩn cấp
 
-**Nếu sau khi cài đặt hoặc sau một lần khởi động nào đó gặp phải các trường hợp dưới đây, đừng hoang mang——hệ điều hành của bạn không hề bị hỏng, chỉ có cổng vào khởi động bị kẹt:**
+**Nếu sau khi cài đặt hoặc sau một lần khởi động nào đó gặp phải các trường hợp dưới đây, đừng hoang mang, hệ điều hành của bạn không hề bị hỏng, chỉ có cổng vào khởi động bị kẹt:**
 
 - Màn hình xanh báo mã lỗi `0xc000000f` / `0xc000007b` / `0xc0000098`
 - Thông báo không tìm thấy tệp `\EFI\40HX\40HXUNLK.EFI`
@@ -286,11 +334,11 @@ Gắn ổ đĩa cho phân vùng EFI → Xoá thư mục `\EFI\40HX` → Chạy `
 
 > Tóm tắt quy trình cứu hộ trong một câu: **Xoá mục boot 40HX bị kẹt cùng các file tạm, sau đó để Windows tạo lại cơ sở dữ liệu boot BCD của chính nó**.  
 > Toàn bộ các câu lệnh chi tiết, phương án dự phòng bằng USB Linux hay xử lý trong BIOS đều có sẵn trong cẩm nang cứu hộ, bạn chỉ việc gõ theo.  
-> Sau khi cứu hộ thành công, nếu bạn vẫn muốn mở khoá card thì có thể dùng phương án "USB boot mở khoá thủ công" ở mục 2.2——hoạt động độc lập không phụ thuộc vào mục boot của bo mạch chủ, bảo đảm an toàn tuyệt đối.
+> Sau khi cứu hộ thành công, nếu bạn vẫn muốn mở khoá card thì có thể dùng phương án "USB boot mở khoá thủ công" ở mục 2.2, hoạt động độc lập không phụ thuộc vào mục boot của bo mạch chủ, bảo đảm an toàn tuyệt đối.
 
 ---
 
-## 9. Lịch sử phiên bản
+## 10. Lịch sử phiên bản
 
 - **v3.0.0 (Deep Module Architecture & Vanguard Clean)**: Tái cấu trúc toàn diện kiến trúc phần mềm theo nguyên lý Deep Module với 2 ranh giới Seams rõ ràng:
   - **`LinkNegotiator`**: Đóng gói toàn bộ máy trạng thái huấn luyện PCIe, kẹp cứng giới hạn phần cứng eFuse Gen2 trên TU116, tối ưu DEVCTL MRRS 512B (`0x2000`) nâng băng thông thực tế lên ~6.4 GB/s, chuỗi nạp shadow register MMIO (`PRIV_MISC_1`, `XVE_OVR`, `LINK_CONFIG_0`, `PL_LINK_RATE`, `CYA_0`) và phục hồi an toàn PnP (thời gian xả tụ 2.0s).
@@ -300,8 +348,8 @@ Gắn ổ đĩa cho phân vùng EFI → Xoá thư mục `\EFI\40HX` → Chạy `
   - **Tương thích tuyệt đối Anti-Cheat (Riot Vanguard / EAC / BattlEye)**: Cơ chế nạp driver tạm thời (Dùng-Xong-Rút) dọn dẹp sạch sẽ dịch vụ và file `.sys` ngay sau khi ghi thanh ghi, không cần bật Test Signing, bảo đảm an toàn khi chơi game Valorant / LoL.
   - **Bộ kiểm thử tự động toàn diện**: 13 Go unit tests và 10 Mock test suites (43 assertions) xác thực tự động mọi kịch bản và ranh giới an toàn.
   - Đồng thời kế thừa toàn bộ các cải tiến: Sửa lỗi bo mạch chủ AGESA / bus cao không tìm thấy card trong môi trường EFI; quét ban đầu mở rộng bus 0–16 và fallback CF8/CFC bus 0–255; sửa hiển thị SS1 sang 0x40966C; tự động phân loại lỗi trong nhật ký.
-- **v2.6.0**: Giao diện đồ hoạ GUI cửa sổ đơn hoàn toàn mới (Mặc định mở khi nhấp đúp; không chia tab với 3 khu vực——① Cài đặt thành phần & Môi trường: Tự động đánh dấu mục thiếu, thực thi độc lập từng mục GSP / EFI Compute+Mục boot / Driver Gen2+Loại trừ Defender / Tự khởi động khi đăng nhập / 3 mục nguồn điện(Tắt Fast Startup·Tắt ASPM·Power Plan hiệu năng cao) / Tuỳ chọn "Tắt bảo vệ thời gian thực Defender", sau khi chạy tự động quét lại; ② Chính sách Gen2: 3 chế độ chạy driver (Dùng xong gỡ ngay·Thất bại tự thử lại·Dịch vụ thường trú) + Tự động Stage2 rollback + Thử lại khi lỗi, **mặc định 3 lần / 3 phút**; ③ Nhật ký thời gian thực); Tự động quét kiểm tra môi trường ngay khi mở; bổ sung nhận diện phần mềm diệt virus bên thứ ba, báo cáo trung thực trạng thái Defender (Danh sách loại trừ/Bảo vệ thời gian thực/Thiếu mô-đun), kiểm tra đa tầng "trạng thái driver" (Nguồn sao lưu ProgramData / 4 trạng thái file trong System32 bao gồm cả file 0 byte / Sửa lỗi dịch vụ bị DISABLED), không còn báo nhầm trạng thái "dùng xong gỡ ngay" là chưa cài driver; kiểm tra mục boot 3 trạng thái (Đứng đầu/Có tồn tại nhưng không đứng đầu/Chưa tạo); Khoá nút bấm chống click liên tục trong GUI; sửa lỗi xuống dòng nhật ký; tham số `-uninstall` nâng cấp thành gỡ cài đặt toàn bộ mức thành phần đồng bộ với 40HXUninstaller.exe; gỡ cài đặt dọn dẹp khoá Registry chính sách; giải mã UTF-8 khi báo lỗi loại trừ Defender và nhận diện lỗi "thiếu mô-đun"; kế thừa toàn bộ từ v2.5.1: Tự động Stage2 rollback cho Gen2 (Link Disable + PnP, Gen2AutoHard mặc định bật), đọc-sửa-ghi LNKCTL2, chu trình retrain xen kẽ root/GPU tối đa 4 vòng, đánh giá theo tốc độ mục tiêu TLS, lỗi EFI không làm dừng cài đặt + hướng dẫn mbr2gpt, tạo tác vụ kiểm tra mã thoát 0, chẩn đoán dựa trên file XML tác vụ.
-- **v2.5.1**: Bản sửa lỗi độ tin cậy từ phản hồi cộng đồng——① Lỗi triển khai EFI (Legacy+MBR không có phân vùng EFI...) không làm gián đoạn cài đặt, tác vụ tự khởi động Gen2 vẫn được tạo bình thường, máy chạy Legacy tự động hiển thị hướng dẫn chuyển đổi `mbr2gpt` không mất dữ liệu; ② Tác vụ lịch trình Gen2 sau khi tạo có bước kiểm tra lại + tự động thử lại, tham số `-task` nếu lỗi sẽ trả về mã thoát khác 0; ③ Sửa lỗi chẩn đoán trên Windows tiếng Trung nhận nhầm tác vụ đã tạo thành "chưa tạo"; ④ Cải tiến lõi Gen2: Đọc-sửa-ghi LNKCTL2, retrain xen kẽ root/GPU tối đa 4 vòng (khắc phục cho mainboard không chính hãng/đa card), đánh giá thành công theo tốc độ mục tiêu TLS (tránh báo lỗi nhầm khi card hạ Gen1 lúc rảnh rỗi); ⑤ Tự động tắt Khởi động nhanh và PCIe ASPM, cung cấp lệnh khôi phục; ⑥ manual_install.bat nhấp đúp tự xin quyền Admin, lỗi EFI không dừng script, sửa lỗi đường dẫn ProgramData trong manual_uninstall.bat; ⑦ Kiểm tra tàn dư gỡ cài đặt bổ sung kiểm tra tên tác vụ hiện tại; ⑧ Bổ sung prompt AI hỗ trợ cài đặt ở đầu file README.
+- **v2.6.0**: Giao diện đồ hoạ GUI cửa sổ đơn hoàn toàn mới (Mặc định mở khi nhấp đúp; không chia tab với 3 khu vực: ① Cài đặt thành phần & Môi trường: Tự động đánh dấu mục thiếu, thực thi độc lập từng mục GSP / EFI Compute+Mục boot / Driver Gen2+Loại trừ Defender / Tự khởi động khi đăng nhập / 3 mục nguồn điện(Tắt Fast Startup·Tắt ASPM·Power Plan hiệu năng cao) / Tuỳ chọn "Tắt bảo vệ thời gian thực Defender", sau khi chạy tự động quét lại; ② Chính sách Gen2: 3 chế độ chạy driver (Dùng xong gỡ ngay·Thất bại tự thử lại·Dịch vụ thường trú) + Tự động Stage2 rollback + Thử lại khi lỗi, **mặc định 3 lần / 3 phút**; ③ Nhật ký thời gian thực); Tự động quét kiểm tra môi trường ngay khi mở; bổ sung nhận diện phần mềm diệt virus bên thứ ba, báo cáo trung thực trạng thái Defender (Danh sách loại trừ/Bảo vệ thời gian thực/Thiếu mô-đun), kiểm tra đa tầng "trạng thái driver" (Nguồn sao lưu ProgramData / 4 trạng thái file trong System32 bao gồm cả file 0 byte / Sửa lỗi dịch vụ bị DISABLED), không còn báo nhầm trạng thái "dùng xong gỡ ngay" là chưa cài driver; kiểm tra mục boot 3 trạng thái (Đứng đầu/Có tồn tại nhưng không đứng đầu/Chưa tạo); Khoá nút bấm chống click liên tục trong GUI; sửa lỗi xuống dòng nhật ký; tham số `-uninstall` nâng cấp thành gỡ cài đặt toàn bộ mức thành phần đồng bộ với 40HXUninstaller.exe; gỡ cài đặt dọn dẹp khoá Registry chính sách; giải mã UTF-8 khi báo lỗi loại trừ Defender và nhận diện lỗi "thiếu mô-đun"; kế thừa toàn bộ từ v2.5.1: Tự động Stage2 rollback cho Gen2 (Link Disable + PnP, Gen2AutoHard mặc định bật), đọc-sửa-ghi LNKCTL2, chu trình retrain xen kẽ root/GPU tối đa 4 vòng, đánh giá theo tốc độ mục tiêu TLS, lỗi EFI không làm dừng cài đặt + hướng dẫn mbr2gpt, tạo tác vụ kiểm tra mã thoát 0, chẩn đoán dựa trên file XML tác vụ.
+- **v2.5.1**: Bản sửa lỗi độ tin cậy từ phản hồi cộng đồng: ① Lỗi triển khai EFI (Legacy+MBR không có phân vùng EFI...) không làm gián đoạn cài đặt, tác vụ tự khởi động Gen2 vẫn được tạo bình thường, máy chạy Legacy tự động hiển thị hướng dẫn chuyển đổi `mbr2gpt` không mất dữ liệu; ② Tác vụ lịch trình Gen2 sau khi tạo có bước kiểm tra lại + tự động thử lại, tham số `-task` nếu lỗi sẽ trả về mã thoát khác 0; ③ Sửa lỗi chẩn đoán trên Windows tiếng Trung nhận nhầm tác vụ đã tạo thành "chưa tạo"; ④ Cải tiến lõi Gen2: Đọc-sửa-ghi LNKCTL2, retrain xen kẽ root/GPU tối đa 4 vòng (khắc phục cho mainboard không chính hãng/đa card), đánh giá thành công theo tốc độ mục tiêu TLS (tránh báo lỗi nhầm khi card hạ Gen1 lúc rảnh rỗi); ⑤ Tự động tắt Khởi động nhanh và PCIe ASPM, cung cấp lệnh khôi phục; ⑥ manual_install.bat nhấp đúp tự xin quyền Admin, lỗi EFI không dừng script, sửa lỗi đường dẫn ProgramData trong manual_uninstall.bat; ⑦ Kiểm tra tàn dư gỡ cài đặt bổ sung kiểm tra tên tác vụ hiện tại; ⑧ Bổ sung prompt AI hỗ trợ cài đặt ở đầu file README.
 - **v2.5**: Mở khoá Gen2 không cần bật chế độ "Test Signing" (Hệ thống luôn sạch sẽ, thân thiện với game và phần mềm chống gian lận); Driver Gen2 chỉ nạp trong tích tắc khi mở khoá rồi tự động giải phóng; Công cụ chẩn đoán ưu tiên hiển thị ngay 2 kết quả "Năng lực tính toán + Gen2"; Viết lại toàn bộ bộ cài đặt.
 
 ---
