@@ -1,6 +1,6 @@
 # Hướng Dẫn Cứu Hộ Khẩn Cấp 40HX Unlock (Khôi Phục Khi Lỗi Boot EFI)
 
-> **Tài liệu này CHỈ dùng khi "sau khi cài đặt công cụ mở khoá bị lỗi khởi động EFI"** — khi máy hoạt động bình thường xin đừng can thiệp.
+> **Tài liệu này CHỈ dùng khi "sau khi cài đặt công cụ mở khoá bị lỗi khởi động EFI"**, khi máy hoạt động bình thường xin đừng can thiệp.
 > Phạm vi áp dụng: Khởi động máy hiện màn hình xanh báo lỗi `0xc000000f` / `0xc000007b` / `0xc0000098`,
 > hoặc báo không tìm thấy `\EFI\40HX\40HXUNLK.EFI`, hoặc bị treo ở màn hình 40HX Unlock không vào được Windows.
 
@@ -152,7 +152,7 @@ Truy cập BIOS (bật máy và nhấn liên tục phím Del hoặc F2):
 1. **Menu Boot** → Tìm danh sách mục khởi động, chuyển mục `40HX Unlock` sang **Disabled** hoặc bấm Delete để xoá;
 2. Xác nhận **Windows Boot Manager** được đặt ở vị trí khởi động số 1;
 3. Nếu mục 40HX Unlock không xoá được trong menu boot, hãy thử **Reset CMOS bo mạch chủ**
-   (tháo pin CMOS 30 giây hoặc chọn Load Optimized Defaults trong BIOS) — thao tác này sẽ đặt lại danh sách mục boot NVRAM.
+   (tháo pin CMOS 30 giây hoặc chọn Load Optimized Defaults trong BIOS), thao tác này sẽ đặt lại danh sách mục boot NVRAM.
 
 ---
 
@@ -166,7 +166,7 @@ Truy cập BIOS (bật máy và nhấn liên tục phím Del hoặc F2):
 
 ## 5. Cách Phòng Tránh Sự Cố Lặp Lại
 
-1. **Tuyệt đối không tắt nguồn / ép khởi động lại khi firmware mở khoá đang chạy** — Mất điện giữa chừng khi ghi firmware vào ESP là nguyên nhân chính gây lỗi;
+1. **Tuyệt đối không tắt nguồn / ép khởi động lại khi firmware mở khoá đang chạy**: Mất điện giữa chừng khi ghi firmware vào ESP là nguyên nhân chính gây lỗi;
 2. Trước khi cập nhật Windows lớn hoặc nâng cấp driver đồ hoạ, nên gỡ công cụ mở khoá trước (`40HXUninstaller.exe`), sau khi cập nhật xong mới cài đặt lại;
 3. Nếu có điều kiện, định kỳ dùng DiskGenius / Macrium Reflect sao lưu phân vùng ESP (rất nhỏ, chỉ vài trăm KB);
 4. Để tìm hiểu chi tiết các bước xử lý lỗi khác, xem mục 5 "Xử lý sự cố" và mục 8 trong tệp README.md cùng thư mục.
