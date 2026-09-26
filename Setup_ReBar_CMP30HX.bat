@@ -61,7 +61,10 @@ if "!IS_ADMIN!"=="0" (
 
 if "!IS_ADMIN!"=="0" (
     echo [*] Dang yeu cau quyen Administrator [UAC]...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%comspec%' -ArgumentList '/c \"\"%~f0\" %*\"' -Verb RunAs" >nul 2>&1
+    set "CURRENT_SCRIPT=%~f0"
+    set "CURRENT_DIR=%~dp0"
+    set "SCRIPT_ARGS=%*"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$script=$env:CURRENT_SCRIPT; $dir=$env:CURRENT_DIR; $args=$env:SCRIPT_ARGS; $q=[char]34; $procArgs = if ($args) { '/c ' + $q + $script + $q + ' ' + $args } else { '/c ' + $q + $script + $q }; Start-Process -FilePath $env:ComSpec -ArgumentList $procArgs -WorkingDirectory $dir -Verb RunAs" >nul 2>&1
     if errorlevel 1 (
         echo.
         echo ================================================================
