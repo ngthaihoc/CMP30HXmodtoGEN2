@@ -180,19 +180,27 @@ sudo ./Setup_CMP30HX_LinuxAIO.sh
 
 ---
 
-## <img src="https://api.iconify.design/lucide/check-circle.svg?color=%2306b6d4" width="22" height="22" align="center" /> 3. Kiểm Tra & Xác Nhận Băng Thông
+## <img src="https://api.iconify.design/lucide/shield-check.svg?color=%2306b6d4" width="22" height="22" align="center" /> 3. Tương Thích Hoàn Toàn Với Anti-Cheat (Riot Vanguard, EAC, BattlEye)
 
-Sau khi kích hoạt (hoặc sau khi đăng nhập lại Windows), kiểm tra bằng 2 công cụ sau:
+Người dùng CMP 40HX và CMP 30HX hoàn toàn có thể chơi các tựa game có bảo mật gắt gao như **Valorant, League of Legends (Riot Vanguard), Apex Legends, Fortnite (Easy Anti-Cheat / BattlEye)**:
 
-1. **Kiểm tra tốc độ link PCIe**:
-   - Chạy **`40HXCheck.exe`** (hoặc mở phần mềm **GPU-Z**):
-   - Mục **Bus Interface / PCIe**: Hiển thị chính xác **`PCIe x16 2.0 @ x16 2.0`** (hoặc `Gen2 x16`).
-2. **Kiểm tra băng thông truyền tải thực tế (Xác nhận MRRS 512B)**:
-   - Mở **AIDA64** $\rightarrow$ chọn thanh menu **Tools** $\rightarrow$ chọn **GPGPU Benchmark**.
-   - Chọn card đồ hoạ CMP 30HX và bấm **Run Benchmarks**:
-   - Kiểm tra hai dòng **Memory Read** và **Memory Copy**:
-     - **Thành công**: Đạt khoảng **6.3 – 6.4 GB/s** (đạt trần băng thông lý thuyết của Gen2 x16).
-     - **Chưa tối ưu**: Nếu chỉ đạt ~2.5 GB/s là do MRRS đang ở mức mặc định 128B (chạy lại lệnh `-gen2-30hx` để kích hoạt tối ưu 512B).
+- **Giải pháp Riot Vanguard trên Windows 11 qua `UnlockRiotGame.exe`**:
+  - **Với CMP 40HX (TU106)**: Riot Vanguard trên Windows 11 yêu cầu bắt buộc Secure Boot = Enabled và TPM 2.0. Tuy nhiên firmware `40HXUNLK.EFI` chưa có chữ ký số của Microsoft. Công cụ `windows-v3.0/release/UnlockRiotGame.exe` tự động:
+    1. Tạo chứng chỉ bảo mật X.509 (`CMP40HX_Key.cer`) với thuật toán SHA256.
+    2. Ký số Authenticode cho `40HXUNLK.EFI` (trong cả thư mục phát hành lẫn phân vùng ESP).
+    3. Xuất file chứng chỉ `CMP40HX_Key.cer` ra ổ C:\, Desktop và phân vùng ESP (`\EFI\40HX\`).
+    4. Cung cấp hướng dẫn trực quan yêu cầu người dùng chụp lại màn hình, khởi động lại vào BIOS, chuyển sang **Custom Mode** và nạp chứng chỉ `CMP40HX_Key.cer` vào cơ sở dữ liệu chữ ký tin cậy **`db`** (Key Management -> Authorized Signatures -> Append Key).
+    5. Kết quả: Hệ thống vừa giữ nguyên **Secure Boot BẬT** để đáp ứng kiểm tra của Riot Vanguard (`vgk.sys`), vừa thực thi firmware `40HXUNLK.EFI` để mở khoá toàn bộ Tensor Core (`SS0=0x88888888`, ~50 TFLOPS) và PCIe Gen2.
+  - **Với CMP 30HX (TU116)**: Do silicon TU116 không có Tensor Core và mở khoá Gen2 hoàn toàn qua ghi đè thanh ghi BAR0 MMIO trong Windows ring-0 (không nạp EFI loader), người dùng **giữ nguyên Secure Boot BẬT trong BIOS** bình thường mà không cần nạp thêm key, tương thích 100% với Riot Games.
+- **Cơ chế Dùng-Xong-Rút (Transient BYOVD on-demand)**:
+  - Driver kernel (`WinRing0x64.sys`, `ThrottleStop.sys`) chỉ được nạp lên bộ nhớ trong vài mili-giây lúc hệ thống khởi động hoặc đăng nhập để cấu hình thanh ghi PCIe.
+  - Ngay sau khi đàm phán link hoàn tất, công cụ tự động dừng dịch vụ (`sc stop`), xoá dịch vụ (`sc delete`) và xoá bỏ tệp `.sys` khỏi thư mục hệ thống.
+  - Khi game hoặc Vanguard (`vgk.sys`) khởi chạy, hệ điều hành hoàn toàn sạch sẽ, không tồn tại bất kỳ driver danh sách đen hay tiến trình chạy ngầm nào.
+- **Không yêu cầu Windows Test Signing**:
+  - Không cần lệnh `bcdedit /set testsigning on` nguy hiểm (vốn bị Vanguard chặn 100%).
+  - Môi trường Windows giữ nguyên chứng thực toàn vẹn mã gốc của Microsoft.
+- **Pre-boot EFI cho CMP 40HX**:
+  - Tensor Core được mở khoá ở giai đoạn UEFI trước khi Windows khởi động. Đến khi Windows và driver anti-cheat nạp, card đã ở trạng thái mở khoá tự nhiên ở mức phần cứng.
 
 ---
 
@@ -223,27 +231,19 @@ Hệ thống sẽ tự động dọn dẹp sạch sẽ:
 
 ---
 
-## <img src="https://api.iconify.design/lucide/shield-check.svg?color=%2306b6d4" width="22" height="22" align="center" /> 6. Tương Thích Hoàn Toàn Với Anti-Cheat (Riot Vanguard, EAC, BattlEye)
+## <img src="https://api.iconify.design/lucide/check-circle.svg?color=%2306b6d4" width="22" height="22" align="center" /> 6. Kiểm Tra & Xác Nhận Băng Thông
 
-Người dùng CMP 40HX và CMP 30HX hoàn toàn có thể chơi các tựa game có bảo mật gắt gao như **Valorant, League of Legends (Riot Vanguard), Apex Legends, Fortnite (Easy Anti-Cheat / BattlEye)**:
+Sau khi kích hoạt (hoặc sau khi đăng nhập lại Windows), kiểm tra bằng 2 công cụ sau:
 
-- **Giải pháp Riot Vanguard trên Windows 11 qua `UnlockRiotGame.exe`**:
-  - **Với CMP 40HX (TU106)**: Riot Vanguard trên Windows 11 yêu cầu bắt buộc Secure Boot = Enabled và TPM 2.0. Tuy nhiên firmware `40HXUNLK.EFI` chưa có chữ ký số của Microsoft. Công cụ `windows-v3.0/release/UnlockRiotGame.exe` tự động:
-    1. Tạo chứng chỉ bảo mật X.509 (`CMP40HX_Key.cer`) với thuật toán SHA256.
-    2. Ký số Authenticode cho `40HXUNLK.EFI` (trong cả thư mục phát hành lẫn phân vùng ESP).
-    3. Xuất file chứng chỉ `CMP40HX_Key.cer` ra ổ C:\, Desktop và phân vùng ESP (`\EFI\40HX\`).
-    4. Cung cấp hướng dẫn trực quan yêu cầu người dùng chụp lại màn hình, khởi động lại vào BIOS, chuyển sang **Custom Mode** và nạp chứng chỉ `CMP40HX_Key.cer` vào cơ sở dữ liệu chữ ký tin cậy **`db`** (Key Management -> Authorized Signatures -> Append Key).
-    5. Kết quả: Hệ thống vừa giữ nguyên **Secure Boot BẬT** để đáp ứng kiểm tra của Riot Vanguard (`vgk.sys`), vừa thực thi firmware `40HXUNLK.EFI` để mở khoá toàn bộ Tensor Core (`SS0=0x88888888`, ~50 TFLOPS) và PCIe Gen2.
-  - **Với CMP 30HX (TU116)**: Do silicon TU116 không có Tensor Core và mở khoá Gen2 hoàn toàn qua ghi đè thanh ghi BAR0 MMIO trong Windows ring-0 (không nạp EFI loader), người dùng **giữ nguyên Secure Boot BẬT trong BIOS** bình thường mà không cần nạp thêm key, tương thích 100% với Riot Games.
-- **Cơ chế Dùng-Xong-Rút (Transient BYOVD on-demand)**:
-  - Driver kernel (`WinRing0x64.sys`, `ThrottleStop.sys`) chỉ được nạp lên bộ nhớ trong vài mili-giây lúc hệ thống khởi động hoặc đăng nhập để cấu hình thanh ghi PCIe.
-  - Ngay sau khi đàm phán link hoàn tất, công cụ tự động dừng dịch vụ (`sc stop`), xoá dịch vụ (`sc delete`) và xoá bỏ tệp `.sys` khỏi thư mục hệ thống.
-  - Khi game hoặc Vanguard (`vgk.sys`) khởi chạy, hệ điều hành hoàn toàn sạch sẽ, không tồn tại bất kỳ driver danh sách đen hay tiến trình chạy ngầm nào.
-- **Không yêu cầu Windows Test Signing**:
-  - Không cần lệnh `bcdedit /set testsigning on` nguy hiểm (vốn bị Vanguard chặn 100%).
-  - Môi trường Windows giữ nguyên chứng thực toàn vẹn mã gốc của Microsoft.
-- **Pre-boot EFI cho CMP 40HX**:
-  - Tensor Core được mở khoá ở giai đoạn UEFI trước khi Windows khởi động. Đến khi Windows và driver anti-cheat nạp, card đã ở trạng thái mở khoá tự nhiên ở mức phần cứng.
+1. **Kiểm tra tốc độ link PCIe**:
+   - Chạy **`40HXCheck.exe`** (hoặc mở phần mềm **GPU-Z**):
+   - Mục **Bus Interface / PCIe**: Hiển thị chính xác **`PCIe x16 2.0 @ x16 2.0`** (hoặc `Gen2 x16`).
+2. **Kiểm tra băng thông truyền tải thực tế (Xác nhận MRRS 512B)**:
+   - Mở **AIDA64** $\rightarrow$ chọn thanh menu **Tools** $\rightarrow$ chọn **GPGPU Benchmark**.
+   - Chọn card đồ hoạ CMP 30HX và bấm **Run Benchmarks**:
+   - Kiểm tra hai dòng **Memory Read** và **Memory Copy**:
+     - **Thành công**: Đạt khoảng **6.3 – 6.4 GB/s** (đạt trần băng thông lý thuyết của Gen2 x16).
+     - **Chưa tối ưu**: Nếu chỉ đạt ~2.5 GB/s là do MRRS đang ở mức mặc định 128B (chạy lại lệnh `-gen2-30hx` để kích hoạt tối ưu 512B).
 
 ---
 

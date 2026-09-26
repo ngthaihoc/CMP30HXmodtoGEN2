@@ -178,19 +178,29 @@ TIMESTAMP=2026-09-26T05:30:00Z
 
 ---
 
-## <img src="https://api.iconify.design/lucide/check-circle.svg?color=%2306b6d4" width="22" height="22" align="center" /> 3. 验证与带宽测试
+---
 
-在完成解锁后（或重新登录系统后），可通过以下两款工具进行验证：
+## <img src="https://api.iconify.design/lucide/shield-check.svg?color=%2306b6d4" width="22" height="22" align="center" /> 3. 完美兼容反作弊系统 (Riot Vanguard, EAC, BattlEye)
 
-1. **检查 PCIe 链路速度**：
-   - 运行 **`40HXCheck.exe`**（或打开 **GPU-Z**）：
-   - 查看 **Bus Interface / PCIe** 栏目：应正确显示 **`PCIe x16 2.0 @ x16 2.0`**（或 `Gen2 x16`）。
-2. **测试实际传输带宽（验证 MRRS 512B 优化）**：
-   - 打开 **AIDA64** $\rightarrow$ 点击菜单栏 **Tools（工具）** $\rightarrow$ 选择 **GPGPU Benchmark**。
-   - 选中 CMP 30HX 显卡，点击 **Run Benchmarks**：
-   - 观察 **Memory Read** 与 **Memory Copy** 两项读写数据：
-     - **成功达标**：达到约 **6.3 – 6.4 GB/s**（达到 Gen2 x16 理论带宽上限）。
-     - **未优化**：若仅有 ~2.5 GB/s，说明 MRRS 仍处于默认的 128B 状态（需重新运行 `40HXInstaller.exe -gen2-30hx` 激活 512B 优化）。
+CMP 40HX 与 CMP 30HX 用户可畅玩具有高强度反作弊机制的游戏，如 **Valorant（无畏契约）、英雄联盟（Riot Vanguard）、Apex 英雄、堡垒之夜（EAC / BattlEye）**：
+
+- **通过 `UnlockRiotGame.exe` 解决 Windows 11 下 Riot Vanguard 限制**：
+  - **针对 CMP 40HX (TU106)**：Windows 11 下的 Riot Vanguard 强制要求 Secure Boot = Enabled 与 TPM 2.0。然而预引导固件 `40HXUNLK.EFI` 属于第三方未经微软认证的 EFI 程序。自动化工具 `windows-v3.0/release/UnlockRiotGame.exe` 可全自动：
+    1. 生成自签名 X.509 安全证书（`CMP40HX_Key.cer`，SHA256 签名）。
+    2. 使用 Authenticode 技术为 `40HXUNLK.EFI` 进行数字签名（同时签署发布目录与活动 ESP 分区中的文件）。
+    3. 将证书文件 `CMP40HX_Key.cer` 导出到 C 盘根目录、桌面以及 ESP 分区（`\EFI\40HX\`）。
+    4. 弹出图文说明界面，提示用户拍照保存步骤，重启电脑进入主板 BIOS，将安全启动切换为 **Custom Mode（自定义模式）**，并将 `CMP40HX_Key.cer` 导入可信签名数据库 **`db`**（Key Management -> Authorized Signatures -> Append Key）。
+    5. 达成效果：系统既保持 **Secure Boot 开启状态** 以满足 Riot Vanguard (`vgk.sys`) 的检测，主板又能执行 `40HXUNLK.EFI` 固件以解锁全部 Tensor Core 算力（`SS0=0x88888888`，~50 TFLOPS）与 PCIe Gen2。
+  - **针对 CMP 30HX (TU116)**：由于 TU116 核心在物理层面上没有 Tensor Core，且 Gen2 完全通过 Windows ring-0 MMIO 寄存器解锁（无需加载任何 EFI 引导程序），用户**在 BIOS 中正常保持 Secure Boot 开启**即可，无需导入任何密钥，天然 100% 兼容 Riot Vanguard。
+- **用完即释放机制 (Transient BYOVD on-demand)**：
+  - 内核驱动（`WinRing0x64.sys`、`ThrottleStop.sys`）仅在系统开机或用户登录时加载几毫秒以配置 PCIe 寄存器。
+  - 一旦链路协商完成，工具立即停止驱动服务（`sc stop`）、删除服务（`sc delete`）并将 `.sys` 驱动文件从系统目录中移除。
+  - 当游戏或 Vanguard 扫描内核空间时，操作系统处于完全干净状态，不存在任何被列入黑名单的驱动程序或常驻钩子。
+- **无需开启 Windows 测试模式 (Test Signing)**：
+  - 不需要执行危险的 `bcdedit /set testsigning on`（该命令会被 Vanguard 100% 拦截封堵）。
+  - 完整保留微软 Windows 原生代码完整性认证。
+- **CMP 40HX Pre-boot EFI 引导**：
+  - Tensor Core 在 Windows 内核加载之前的 UEFI 阶段就已完成解锁。当 Windows 和反作弊驱动启动时，显卡在硬件底层已处于自然解锁状态。
 
 ---
 
@@ -221,27 +231,19 @@ TIMESTAMP=2026-09-26T05:30:00Z
 
 ---
 
-## <img src="https://api.iconify.design/lucide/shield-check.svg?color=%2306b6d4" width="22" height="22" align="center" /> 6. 完美兼容反作弊系统 (Riot Vanguard, EAC, BattlEye)
+## <img src="https://api.iconify.design/lucide/check-circle.svg?color=%2306b6d4" width="22" height="22" align="center" /> 6. 验证与带宽测试
 
-CMP 40HX 与 CMP 30HX 用户可畅玩具有高强度反作弊机制的游戏，如 **Valorant（无畏契约）、英雄联盟（Riot Vanguard）、Apex 英雄、堡垒之夜（EAC / BattlEye）**：
+在完成解锁后（或重新登录系统后），可通过以下两款工具进行验证：
 
-- **通过 `UnlockRiotGame.exe` 解决 Windows 11 下 Riot Vanguard 限制**：
-  - **针对 CMP 40HX (TU106)**：Windows 11 下的 Riot Vanguard 强制要求 Secure Boot = Enabled 与 TPM 2.0。然而预引导固件 `40HXUNLK.EFI` 属于第三方未经微软认证的 EFI 程序。自动化工具 `windows-v3.0/release/UnlockRiotGame.exe` 可全自动：
-    1. 生成自签名 X.509 安全证书（`CMP40HX_Key.cer`，SHA256 签名）。
-    2. 使用 Authenticode 技术为 `40HXUNLK.EFI` 进行数字签名（同时签署发布目录与活动 ESP 分区中的文件）。
-    3. 将证书文件 `CMP40HX_Key.cer` 导出到 C 盘根目录、桌面以及 ESP 分区（`\EFI\40HX\`）。
-    4. 弹出图文说明界面，提示用户拍照保存步骤，重启电脑进入主板 BIOS，将安全启动切换为 **Custom Mode（自定义模式）**，并将 `CMP40HX_Key.cer` 导入可信签名数据库 **`db`**（Key Management -> Authorized Signatures -> Append Key）。
-    5. 达成效果：系统既保持 **Secure Boot 开启状态** 以满足 Riot Vanguard (`vgk.sys`) 的检测，主板又能执行 `40HXUNLK.EFI` 固件以解锁全部 Tensor Core 算力（`SS0=0x88888888`，~50 TFLOPS）与 PCIe Gen2。
-  - **针对 CMP 30HX (TU116)**：由于 TU116 核心在物理层面上没有 Tensor Core，且 Gen2 完全通过 Windows ring-0 MMIO 寄存器解锁（无需加载任何 EFI 引导程序），用户**在 BIOS 中正常保持 Secure Boot 开启**即可，无需导入任何密钥，天然 100% 兼容 Riot Vanguard。
-- **用完即释放机制 (Transient BYOVD on-demand)**：
-  - 内核驱动（`WinRing0x64.sys`、`ThrottleStop.sys`）仅在系统开机或用户登录时加载几毫秒以配置 PCIe 寄存器。
-  - 一旦链路协商完成，工具立即停止驱动服务（`sc stop`）、删除服务（`sc delete`）并将 `.sys` 驱动文件从系统目录中移除。
-  - 当游戏或 Vanguard 扫描内核空间时，操作系统处于完全干净状态，不存在任何被列入黑名单的驱动程序或常驻钩子。
-- **无需开启 Windows 测试模式 (Test Signing)**：
-  - 不需要执行危险的 `bcdedit /set testsigning on`（该命令会被 Vanguard 100% 拦截封堵）。
-  - 完整保留微软 Windows 原生代码完整性认证。
-- **CMP 40HX Pre-boot EFI 引导**：
-  - Tensor Core 在 Windows 内核加载之前的 UEFI 阶段就已完成解锁。当 Windows 和反作弊驱动启动时，显卡在硬件底层已处于自然解锁状态。
+1. **检查 PCIe 链路速度**：
+   - 运行 **`40HXCheck.exe`**（或打开 **GPU-Z**）：
+   - 查看 **Bus Interface / PCIe** 栏目：应正确显示 **`PCIe x16 2.0 @ x16 2.0`**（或 `Gen2 x16`）。
+2. **测试实际传输带宽（验证 MRRS 512B 优化）**：
+   - 打开 **AIDA64** $\rightarrow$ 点击菜单栏 **Tools（工具）** $\rightarrow$ 选择 **GPGPU Benchmark**。
+   - 选中 CMP 30HX 显卡，点击 **Run Benchmarks**：
+   - 观察 **Memory Read** 与 **Memory Copy** 两项读写数据：
+     - **成功达标**：达到约 **6.3 – 6.4 GB/s**（达到 Gen2 x16 理论带宽上限）。
+     - **未优化**：若仅有 ~2.5 GB/s，说明 MRRS 仍处于默认的 128B 状态（需重新运行 `40HXInstaller.exe -gen2-30hx` 激活 512B 优化）。
 
 ---
 
