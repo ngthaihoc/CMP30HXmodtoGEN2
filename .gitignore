@@ -7,3 +7,4 @@ PROJECT_CONTEXT.md
 .agents/
 skills-lock.json
 Test_Mock_CMP30HX.bat
+.vscode/
