@@ -37,6 +37,25 @@ func ReadGen2Status() string {
 	return string(b)
 }
 
+// EnsureNvidiaControlPanelHealthy: Đảm bảo service NVDisplay.ContainerLocalSystem chạy (Auto)
+// và phục hồi Shell Context Menu handler cho NVIDIA Control Panel để tránh biến mất.
+func EnsureNvidiaControlPanelHealthy() error {
+	_, _ = RunOut("sc.exe", "config", "NVDisplay.ContainerLocalSystem", "start=", "auto")
+	qOut, _ := RunOut("sc.exe", "query", "NVDisplay.ContainerLocalSystem")
+	if !strings.Contains(qOut, "RUNNING") {
+		_, _ = RunOut("sc.exe", "start", "NVDisplay.ContainerLocalSystem")
+		for i := 0; i < 20; i++ {
+			time.Sleep(150 * time.Millisecond)
+			q, err := RunOut("sc.exe", "query", "NVDisplay.ContainerLocalSystem")
+			if err == nil && strings.Contains(q, "RUNNING") {
+				break
+			}
+		}
+	}
+	_, err := RunOut("reg.exe", "add", `HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext`, "/ve", "/t", "REG_SZ", "/d", "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}", "/f")
+	return err
+}
+
 // ServiceInfo: 查询内核驱动服务。
 // 返回 (是否存在, 启动类型 DEMAND/AUTO/DISABLED, 状态 RUNNING/STOPPED/…)
 func ServiceInfo(name string) (bool, string, string) {

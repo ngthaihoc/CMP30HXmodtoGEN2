@@ -523,12 +523,14 @@ func (p *ProductionBus) RestartNVDisplay() error {
 		time.Sleep(200 * time.Millisecond)
 		qOut, qErr := RunOut("sc.exe", "query", "NVDisplay.ContainerLocalSystem")
 		if qErr == nil && strings.Contains(string(qOut), "RUNNING") {
+			_, _ = RunOut("reg.exe", "add", `HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext`, "/ve", "/t", "REG_SZ", "/d", "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}", "/f")
 			return nil
 		}
 		if strings.Contains(string(qOut), "STOPPED") {
 			_, err = RunOut("sc.exe", "start", "NVDisplay.ContainerLocalSystem")
 		}
 	}
+	_, _ = RunOut("reg.exe", "add", `HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext`, "/ve", "/t", "REG_SZ", "/d", "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}", "/f")
 	return err
 }
 

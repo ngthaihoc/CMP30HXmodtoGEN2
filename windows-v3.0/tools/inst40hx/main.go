@@ -1925,6 +1925,7 @@ func gen2RestartNVDisplay() {
 	ps := `sc.exe config NVDisplay.ContainerLocalSystem start= auto | Out-Null; Restart-Service NVDisplay.ContainerLocalSystem -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; $s = Get-Service -Name NVDisplay.ContainerLocalSystem -ErrorAction SilentlyContinue; if ($s -and $s.Status -ne 'Running') { Start-Service NVDisplay.ContainerLocalSystem -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }`
 	out, err := exec.Command("powershell", "-NoProfile", "-Command", ps).CombinedOutput()
 	fmt.Printf("    NVDisplay Container khởi động lại: %s (err=%v)\n", strings.TrimSpace(string(out)), err)
+	_, _ = hxcore.RunOut("reg.exe", "add", `HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext`, "/ve", "/t", "REG_SZ", "/d", "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}", "/f")
 }
 
 // Trong lúc -hard fallback, PnP reset GPU khiến handle cũ \\.\ThrottleStop / WinRing0 có thể bị hỏng -> mở lại

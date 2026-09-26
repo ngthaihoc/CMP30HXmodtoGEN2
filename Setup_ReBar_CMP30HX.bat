@@ -99,7 +99,7 @@ echo ================================================================
 echo.
 echo  [1] Cai dat va Kich hoat Resizable BAR [Full Setup AIO]
 echo  [2] Kiem tra trang thai Resizable BAR hien tai [Status Check]
-echo  [3] Go bo / Khoi phuc mac dinh [Disable ReBAR & Reset Driver]
+echo  [3] Go bo / Khoi phuc mac dinh [Disable ReBAR ^& Reset Driver]
 echo  [4] Chay kiem thu mo phong an toan [Mock Test Simulation]
 echo  [0] Thoat [Exit]
 echo.

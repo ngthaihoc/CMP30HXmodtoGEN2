@@ -15,4 +15,5 @@ del /f /q "%SystemRoot%\System32\drivers\ThrottleStop.sys" >nul 2>&1
 :: Dam bao service NVDisplay.ContainerLocalSystem va NVIDIA Control Panel hoat dong
 sc config NVDisplay.ContainerLocalSystem start= auto >nul 2>&1
 sc start NVDisplay.ContainerLocalSystem >nul 2>&1
+reg add "HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext" /ve /t REG_SZ /d "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}" /f >nul 2>&1
 endlocal

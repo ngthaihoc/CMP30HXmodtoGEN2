@@ -322,6 +322,7 @@ if not exist "%FINAL_RUNNER%" (
         echo del /f /q "%%SystemRoot%%\System32\drivers\ThrottleStop.sys" ^>nul 2^>^&1
         echo sc config NVDisplay.ContainerLocalSystem start= auto ^>nul 2^>^&1
         echo sc start NVDisplay.ContainerLocalSystem ^>nul 2^>^&1
+        echo reg add "HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext" /ve /t REG_SZ /d "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}" /f ^>nul 2^>^&1
         echo endlocal
     ) > "%FINAL_RUNNER%"
 )
@@ -632,6 +633,7 @@ exit /b 0
 :PnpSoftReset
 echo       [*] Dang tu dong thuc hien chu trinh Soft Reset [Disable - Enable qua PnP]...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$devs = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -match 'VEN_10DE&(DEV_2189|DEV_1F0B)' }; if ($devs) { foreach ($d in $devs) { try { & pnputil /restart-device $d.InstanceId >$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {}; try { $st = (Get-PnpDevice -InstanceId $d.InstanceId -ErrorAction SilentlyContinue).Status; if ($st -ne 'OK') { Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } } catch {} }; Start-Sleep -Seconds 2; try { sc.exe config NVDisplay.ContainerLocalSystem start= auto | Out-Null; Restart-Service NVDisplay.ContainerLocalSystem -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; $s = Get-Service -Name NVDisplay.ContainerLocalSystem -ErrorAction SilentlyContinue; if ($s -and $s.Status -ne 'Running') { Start-Service NVDisplay.ContainerLocalSystem -ErrorAction SilentlyContinue } } catch {} } else { Write-Host 'Khong tim thay Instance ID qua PnP' }" >nul 2>&1
+call :EnsureNvidiaControlPanelHealthy
 exit /b 0
 
 
@@ -837,7 +839,7 @@ echo    + Khi co tai 3D/CUDA/AIDA64/FurMark, card se tu dong bung toc do len Gen
 echo    + Neu GPU-Z bao Gen1: nhap vao dau cham hoi [?] canh Bus Interface de chay Render Test!
 echo  - Neu sau khi reboot co tai ma GPU van Gen1: kiem tra HVCI, riser, tiep xuc lane va BIOS khe PCIe.
 echo.
-echo  [*] CHE DO TUONG THICH TOAN DIEN [NGUOI CHOI RIOT GAMES & NGUOI DUNG THUONG]:
+echo  [*] CHE DO TUONG THICH TOAN DIEN [NGUOI CHOI RIOT GAMES ^& NGUOI DUNG THUONG]:
 echo      1. He thong da tu dong don dep sach se driver WinRing0/ThrottleStop khoi kernel va System32.
 echo         =^> Riot Vanguard, Easy Anti-Cheat, BattlEye khong bao gio phat hien hay chan driver.
 echo      2. Windows Test Signing da duoc kiem tra va tat =^> Khong bi loi VAN 1067 / VAN 9003.

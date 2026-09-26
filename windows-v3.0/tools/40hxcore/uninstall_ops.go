@@ -132,6 +132,7 @@ func UninstallDriverServices() {
 			fmt.Printf("  Xoá dịch vụ %s thất bại: %s\n", name, strings.TrimSpace(out))
 		}
 	}
+	_ = EnsureNvidiaControlPanelHealthy()
 }
 
 // UninstallDriverFiles: 删 System32\drivers 下历史 .sys 与 System32\WinRing0x64.dll
