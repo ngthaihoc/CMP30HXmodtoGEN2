@@ -583,6 +583,10 @@ func check() {
 	w("Tác vụ Gen2 : %s\n",
 		map[bool]string{true: "Đã đăng ký (" + taskStatus + ", Kết quả lần trước: " + taskResult + ")",
 			false: "Chưa đăng ký (Cách sửa: Nhấp chuột phải Run as administrator Setup_CMP30HX_WindowsAIO.bat)"}[taskOK])
+	existsNVD, _, stateNVD := hxcore.ServiceInfo("NVDisplay.ContainerLocalSystem")
+	if existsNVD {
+		w("NVIDIA Container: %s\n", map[bool]string{true: "✓ Đang chạy (Auto)", false: "⚠ Không chạy (" + stateNVD + ")"}[stateNVD == "RUNNING"])
+	}
 
 	if !st.SS0OK || st.Speed < 2 {
 		if gs := hxcore.ReadGen2Status(); gs != "" {
@@ -684,16 +688,19 @@ func check() {
 		tips = append(tips, "· Tính năng tiết kiệm điện PCIe (ASPM) đang bật: Lúc nghỉ hạ về Gen1 là bình thường, có tải sẽ tự tăng lại;\n  Nếu muốn cố định tốc độ cao có thể tắt: powercfg -setacvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0\n  (thêm -setdcvalueindex cùng tham số, sau đó -setactive SCHEME_CURRENT để áp dụng)")
 	}
 	if !taskOK {
-		tips = append(tips, "· Tác vụ lịch trình Gen2 chưa đăng ký: Sau khi đăng nhập sẽ không tự động mở khoá —\n  Mở 40HXInstaller.exe -> ② Bấm [Thực thi Gen2 và cài đặt tự khởi động]; hoặc ① Chọn [Tự khởi động Gen2 khi đăng nhập] bấm [Cài đặt các mục đã chọn]")
+		tips = append(tips, "· Tác vụ lịch trình Gen2 chưa đăng ký: Sau khi đăng nhập sẽ không tự động mở khoá:\n  Mở 40HXInstaller.exe -> ② Bấm [Thực thi Gen2 và cài đặt tự khởi động]; hoặc ① Chọn [Tự khởi động Gen2 khi đăng nhập] bấm [Cài đặt các mục đã chọn]")
 	}
 	if st.SS0OK && st.TLS < 2 && st.TLS >= 1 && st.Unlocked {
-		tips = append(tips, "· Tốc độ mục tiêu (TLS) vẫn là Gen1: Ghi mở khoá chưa có hiệu lực — Nếu nhật ký cho thấy thanh ghi PL0 đều OK nhưng đọc lại LNKCTL2 vẫn Gen1,\n  thường do driver ghi đè lại trong tích tắc; Tác vụ đăng nhập sẽ tự động chạy Stage2; nếu vẫn thất bại hãy bấm [Thực thi Gen2 ngay] trong GUI ②. Đã xác nhận không phải bảo vệ ghi firmware, **KHÔNG CẦN FLASH VBIOS** — nếu vẫn lỗi gửi chẩn đoán và installer.log phản hồi tác giả")
+		tips = append(tips, "· Tốc độ mục tiêu (TLS) vẫn là Gen1: Ghi mở khoá chưa có hiệu lực. Nếu nhật ký cho thấy thanh ghi PL0 đều OK nhưng đọc lại LNKCTL2 vẫn Gen1,\n  thường do driver ghi đè lại trong tích tắc; Tác vụ đăng nhập sẽ tự động chạy Stage2; nếu vẫn thất bại hãy bấm [Thực thi Gen2 ngay] trong GUI ②. Đã xác nhận không phải bảo vệ ghi firmware, **KHÔNG CẦN FLASH VBIOS**, nếu vẫn lỗi gửi chẩn đoán và installer.log phản hồi tác giả")
 	}
 	if st.SS0OK && st.Unlocked && st.Speed < 2 && st.TLS >= 2 {
 		tips = append(tips, "· Tốc độ mục tiêu đã cấu hình (TLS=Gen2/Gen3) nhưng liên kết hiện tại Gen1: Thường do nghỉ tiết kiệm điện (bình thường, có tải tự tăng); nếu liên tục tải vẫn Gen1: Bấm [Thực thi Gen2 ngay] trong GUI ② để huấn luyện lại; hoặc dùng dòng lệnh `40HXInstaller.exe -gen2 -hard`")
 	}
 	if !taskOK && st.SS0OK && st.Unlocked && (st.Speed >= 2 || st.TLS >= 2) {
-		tips = append(tips, "· Lưu ý: Trạng thái tốc độ cao hiện tại đến từ đo đạc thanh ghi mục tiêu (TLS); Nếu lần khởi động này chưa có tác vụ tự động nào chạy, giá trị này có thể là tàn dư lần trước — tắt máy hẳn hoặc reset card sẽ bị khoá lại. Vui lòng dùng GUI ② [Thực thi Gen2 và cài đặt tự khởi động] để hoàn tất một bước")
+		tips = append(tips, "· Lưu ý: Trạng thái tốc độ cao hiện tại đến từ đo đạc thanh ghi mục tiêu (TLS); Nếu lần khởi động này chưa có tác vụ tự động nào chạy, giá trị này có thể là tàn dư lần trước: tắt máy hẳn hoặc reset card sẽ bị khoá lại. Vui lòng dùng GUI ② [Thực thi Gen2 và cài đặt tự khởi động] để hoàn tất một bước")
+	}
+	if existsNVD && stateNVD != "RUNNING" {
+		tips = append(tips, "· Dịch vụ NVDisplay.ContainerLocalSystem không chạy (NVIDIA Control Panel có thể bị ẩn): Chạy Setup_CMP30HX_WindowsAIO.bat chọn [3] Khôi phục NVIDIA Control Panel")
 	}
 	if throttleStopAppRunning() && !drvOK {
 		tips = append(tips, "· Phát hiện phần mềm ThrottleStop đang chạy và driver công cụ chưa sẵn sàng: Công cụ tự động tái sử dụng driver của ThrottleStop; nếu vẫn lỗi, hãy đóng ThrottleStop rồi chạy lại bộ cài")
