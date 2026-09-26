@@ -221,25 +221,7 @@ TIMESTAMP=2026-09-26T05:30:00Z
 
 ---
 
-## <img src="https://api.iconify.design/lucide/cpu.svg?color=%2310b981" width="22" height="22" align="center" /> 6. 深度模块架构与硬件可靠性 (v3.0.0)
-
-v3.0.0 版本按照 **Deep Module** 理念重构了代码库，设立了清晰的工程接缝：
-1. **`LinkNegotiator`**：
-   - 完整封装 PCIe 链路协商状态机，严格硬件锁死 TU116 eFuse Gen2 边界，将 DEVCTL MRRS 优化至 512B (`0x2000`)，规范 MMIO 影子寄存器写入时序（`PRIV_MISC_1`、`XVE_OVR`、`LINK_CONFIG_0`、`PL_LINK_RATE`、`CYA_0`）。
-   - 内置 75ms 快速轮询机制，可在完成协商瞬间捕捉并锁定链路速率，彻底消除闲置降频造成的虚假 Gen1 误报。
-2. **`ComputeInspector`（用于 CMP 40HX）**：
-   - 实施 Fail-Closed 硬件保护：在访问 BAR0 物理内存前必须读取并校验 `BOOT_0` 寄存器（`0x00`），确认芯片属于 TU106 家族（`0x16xxxxxx`）。
-   - 提供类型安全的双寄存器解码：`SS0`（`0x409664`，主解锁标志 `0x88888888`，~50 TFLOPS FP16）与 `SS1`（`0x40966C`，镜像验证）。
-3. **`HardwareBus` (Seam 1)**：
-   - 将内核驱动句柄（`WinRing0`、`ThrottleStop`）与核心业务逻辑完全解耦。
-   - 提供 `MockHardwareBus` 模拟 PCI 配置空间和 MMIO 内存，无需真实显卡即可进行 100% 单元测试。
-4. **`StatusContract` (Seam 2)**：
-   - 规范化 Go 引擎与 Batch / Shell 脚本之间的状态数据契约（`STATUS_CODE=GEN2_SUCCESS`、`SPEED_CURRENT`、`WIDTH_CURRENT`、`TLS_TARGET`、`ERROR_CODE`）。
-   - 杜绝因脚本异常中断或状态文件丢失引发的虚假成功报告。
-
----
-
-## <img src="https://api.iconify.design/lucide/shield-check.svg?color=%2306b6d4" width="22" height="22" align="center" /> 7. 完美兼容反作弊系统 (Riot Vanguard, EAC, BattlEye)
+## <img src="https://api.iconify.design/lucide/shield-check.svg?color=%2306b6d4" width="22" height="22" align="center" /> 6. 完美兼容反作弊系统 (Riot Vanguard, EAC, BattlEye)
 
 CMP 40HX 与 CMP 30HX 用户可畅玩具有高强度反作弊机制的游戏，如 **Valorant（无畏契约）、英雄联盟（Riot Vanguard）、Apex 英雄、堡垒之夜（EAC / BattlEye）**：
 
@@ -263,7 +245,7 @@ CMP 40HX 与 CMP 30HX 用户可畅玩具有高强度反作弊机制的游戏，�
 
 ---
 
-## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 8. 核心技术说明
+## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 7. 核心技术说明
 
 > [!NOTE]
 > - **为什么上限只能到 Gen2 x16，无法开启 Gen3？**  

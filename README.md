@@ -223,25 +223,7 @@ Hệ thống sẽ tự động dọn dẹp sạch sẽ:
 
 ---
 
-## <img src="https://api.iconify.design/lucide/cpu.svg?color=%2310b981" width="22" height="22" align="center" /> 6. Kiến Trúc Deep Module & Độ Tin Cậy Phần Cứng (v3.0.0)
-
-Phiên bản v3.0.0 được tái cấu trúc toàn diện theo kiến trúc **Deep Module** với 2 đường ranh giới kỹ thuật (Seams) độc lập:
-1. **`LinkNegotiator`**:
-   - Đóng gói toàn bộ máy trạng thái đàm phán link PCIe, kẹp cứng giới hạn phần cứng eFuse Gen2 cho TU116, tối ưu hóa DEVCTL MRRS 512B (`0x2000`) và chuỗi ghi shadow register MMIO (`PRIV_MISC_1`, `XVE_OVR`, `LINK_CONFIG_0`, `PL_LINK_RATE`, `CYA_0`).
-   - Tự động phát hiện trạng thái ngủ tiết kiệm điện (ASPM) bằng cơ chế lấy mẫu nhanh (Fast-polling 75ms) để ghi nhận link speed tức thì, loại bỏ tình trạng nhận diện sai tốc độ link.
-2. **`ComputeInspector` (Dành cho CMP 40HX)**:
-   - Tích hợp lớp bảo vệ chống crash phần cứng: đọc và kiểm tra thanh ghi `BOOT_0` (`0x00`) để xác thực đúng họ chip TU106 (`0x16xxxxxx`) trước khi truy xuất vùng nhớ BAR0.
-   - Giải mã định kiểu chuẩn hóa thanh ghi kép `SS0` (`0x409664` - cờ mở khoá chính `0x88888888`, ~50 TFLOPS FP16) và `SS1` (`0x40966C` - cờ phụ đồng bộ EFI loader).
-3. **`HardwareBus` (Seam 1)**:
-   - Tách rời hoàn toàn giao tiếp driver cấp kernel (`WinRing0`, `ThrottleStop`) khỏi logic nghiệp vụ của ứng dụng.
-   - Cung cấp `MockHardwareBus` giả lập không gian PCI config và bộ nhớ vật lý MMIO, cho phép chạy trọn vẹn bộ test unit độc lập không cần phần cứng thật.
-4. **`StatusContract` (Seam 2)**:
-   - Chuẩn hoá định dạng trao đổi dữ liệu trạng thái có cấu trúc (`STATUS_CODE=GEN2_SUCCESS`, `SPEED_CURRENT`, `WIDTH_CURRENT`, `TLS_TARGET`, `ERROR_CODE`) giữa Go engine và các script Batch/PowerShell.
-   - Ngăn chặn triệt để lỗi báo thành công giả khi script bị crash hoặc mất tệp trạng thái.
-
----
-
-## <img src="https://api.iconify.design/lucide/shield-check.svg?color=%2306b6d4" width="22" height="22" align="center" /> 7. Tương Thích Hoàn Toàn Với Anti-Cheat (Riot Vanguard, EAC, BattlEye)
+## <img src="https://api.iconify.design/lucide/shield-check.svg?color=%2306b6d4" width="22" height="22" align="center" /> 6. Tương Thích Hoàn Toàn Với Anti-Cheat (Riot Vanguard, EAC, BattlEye)
 
 Người dùng CMP 40HX và CMP 30HX hoàn toàn có thể chơi các tựa game có bảo mật gắt gao như **Valorant, League of Legends (Riot Vanguard), Apex Legends, Fortnite (Easy Anti-Cheat / BattlEye)**:
 
@@ -265,7 +247,7 @@ Người dùng CMP 40HX và CMP 30HX hoàn toàn có thể chơi các tựa game
 
 ---
 
-## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 8. Ghi Chú Kỹ Thuật Tóm Tắt
+## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 7. Ghi Chú Kỹ Thuật Tóm Tắt
 
 > [!NOTE]
 > - **Tại sao trần là Gen2 x16 mà không thể lên Gen3?**  

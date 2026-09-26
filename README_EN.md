@@ -221,25 +221,7 @@ The uninstaller cleanly removes:
 
 ---
 
-## <img src="https://api.iconify.design/lucide/cpu.svg?color=%2310b981" width="22" height="22" align="center" /> 6. Deep Module Architecture & Hardware Reliability (v3.0.0)
-
-Version v3.0.0 refactors the codebase following **Deep Module** principles around two distinct engineering seams:
-1. **`LinkNegotiator`**:
-   - Encapsulates the entire PCIe link retrain state machine, strictly clamps the TU116 eFuse Gen2 hardware limit, optimizes DEVCTL MRRS to 512B (`0x2000`), and sequences MMIO shadow register writes (`PRIV_MISC_1`, `XVE_OVR`, `LINK_CONFIG_0`, `PL_LINK_RATE`, `CYA_0`).
-   - Detects ASPM idle downclocking via fast polling (75ms intervals) to instantly latch link speed upon negotiation, eliminating false negative stuck-at-Gen1 reports.
-2. **`ComputeInspector` (For CMP 40HX)**:
-   - Implements fail-closed hardware protection: reads and verifies the `BOOT_0` register (`0x00`) to confirm the TU106 silicon family (`0x16xxxxxx`) before any BAR0 memory access.
-   - Provides strongly-typed decoding of dual registers `SS0` (`0x409664` - primary unlock flag `0x88888888`, ~50 TFLOPS FP16) and `SS1` (`0x40966C` - secondary mirror matching the EFI loader).
-3. **`HardwareBus` (Seam 1)**:
-   - Completely decouples kernel driver handles (`WinRing0`, `ThrottleStop`) from domain business logic.
-   - Supplies `MockHardwareBus` to emulate PCI configuration space and physical MMIO memory, enabling full test coverage without physical hardware.
-4. **`StatusContract` (Seam 2)**:
-   - Standardizes structured status exchange (`STATUS_CODE=GEN2_SUCCESS`, `SPEED_CURRENT`, `WIDTH_CURRENT`, `TLS_TARGET`, `ERROR_CODE`) between the Go engine and Batch/PowerShell wrappers.
-   - Eliminates false positive reporting caused by script crashes or missing status files.
-
----
-
-## <img src="https://api.iconify.design/lucide/shield-check.svg?color=%2306b6d4" width="22" height="22" align="center" /> 7. Full Anti-Cheat Compatibility (Riot Vanguard, EAC, BattlEye)
+## <img src="https://api.iconify.design/lucide/shield-check.svg?color=%2306b6d4" width="22" height="22" align="center" /> 6. Full Anti-Cheat Compatibility (Riot Vanguard, EAC, BattlEye)
 
 Users of CMP 40HX and CMP 30HX can play protected games like **Valorant, League of Legends (Riot Vanguard), Apex Legends, and Fortnite (Easy Anti-Cheat / BattlEye)** without interference:
 
@@ -263,7 +245,7 @@ Users of CMP 40HX and CMP 30HX can play protected games like **Valorant, League 
 
 ---
 
-## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 8. Technical Notes
+## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 7. Technical Notes
 
 > [!NOTE]
 > - **Why is Gen2 x16 the ceiling, and why not Gen3?**  
