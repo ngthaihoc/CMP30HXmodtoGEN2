@@ -245,7 +245,7 @@ Phiên bản v3.0.0 áp dụng kiến trúc **Deep Module** với các tầng tr
   - **CMP 40HX**: Riot Vanguard trên Windows 11 yêu cầu Secure Boot = Enabled và TPM 2.0. `UnlockRiotGame.exe` tự động ký số Authenticode cho `40HXUNLK.EFI`, xuất chứng chỉ `CMP40HX_Key.cer` ra ổ C:, Desktop và ESP, hướng dẫn người dùng nạp key vào BIOS `db` (Custom Mode). Nhờ vậy, Secure Boot vẫn BẬT cho Vanguard trong khi `40HXUNLK.EFI` vẫn chạy được để mở khoá Tensor Core `SS0=0x88888888` và Gen2.
   - **CMP 30HX**: Hoàn toàn không dùng firmware EFI (mở khoá qua MMIO ring-0), vì vậy Secure Boot có thể giữ nguyên BẬT trong BIOS, tương thích 100% với Riot Vanguard mà không cần nạp key.
   - **Mô hình Dùng-Xong-Rút (Transient BYOVD)**: Driver kernel chỉ nạp trong mili-giây lúc khởi động rồi giải phóng ngay lập tức, không để lại driver trong danh sách đen khi game kiểm tra.
-- **Bộ kiểm thử tự động toàn diện**: 13 Go unit tests (`40hxcore`), 18 Go unit tests (`unlockriot`), 10 Mock test suites Windows (`Test_Mock_CMP30HX.bat`), và 8 Mock test suites Linux (`Test_Mock_CMP30HX_Linux.sh`).
+- **Bộ kiểm thử tự động toàn diện**: 13 Go unit tests (`40hxcore`), 18 Go unit tests (`unlockriot`), và 8 Mock test suites Linux (`Test_Mock_CMP30HX_Linux.sh`).
 
 ---
 

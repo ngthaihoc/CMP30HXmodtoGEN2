@@ -263,36 +263,7 @@ Users of CMP 40HX and CMP 30HX can play protected games like **Valorant, League 
 
 ---
 
-## <img src="https://api.iconify.design/lucide/check-square.svg?color=%23f59e0b" width="22" height="22" align="center" /> 8. Automated Test Suite
-
-The project includes automated regression testing to guarantee hardware safety:
-- **13 Go Unit Tests (`40hxcore`)**: Tests TU116 eFuse clamping, DEVCTL MRRS 512B optimization, MMIO shadow register sequencing, soft PnP recovery, `StatusContract` parsing, and Tensor Core decoding.
-- **18 Go Unit Tests (`unlockriot`)**: Comprehensive coverage of the Riot Games policy matrix (TU106/TU116, Windows 10/11, Secure Boot Enabled/Disabled), Authenticode certificate management, and mock interfaces.
-- **10 Mock Test Suites on Windows (`Test_Mock_CMP30HX.bat`)**:
-  - Test Suite 1: Fast success path (Gen1 $\rightarrow$ Soft Reset $\rightarrow$ Gen2).
-  - Test Suite 2: Safe failure path handling.
-  - Test Suite 3: WinRing0 driver blocked by HVCI / Blocklist.
-  - Test Suite 4: GPU not found on PCI bus.
-  - Test Suite 5: Complete uninstallation and system cleanup.
-  - Test Suite 6: Resizable BAR 1-Click AIO (Happy Path).
-  - Test Suite 7: Laptop safety guard blocking risky flashing.
-  - Test Suite 8: Resizable BAR removal and baseline restoration.
-  - Test Suite 9: Missing status defense guard preventing false positive reports.
-  - Test Suite 10: Standalone preflight diagnostic mode.
-- **8 Mock Test Suites on Linux (`Test_Mock_CMP30HX_Linux.sh`)**:
-  - 42 automated assertions running on WSL, Linux, or CI without physical hardware:
-    + Suite 1: Happy Path (Gen2 x16 successful unlock, exit code 0).
-    + Suite 2: Idle Mode (TLS=Gen2, link temporarily downclocked to Gen1 due to ASPM).
-    + Suite 3: Retrain Failure (Handles timeout after 6 retrain cycles, exit code 1).
-    + Suite 4: No GPU (Handles missing GPU condition, error code ERR_NO_GPU).
-    + Suite 5: Status Inspection (Verifies BDF detection, MRRS 512B, and ASPM display).
-    + Suite 6: Uninstall Service (Clean removal of systemd service and sleep hooks).
-    + Suite 7: Schema Validation (Verifies Seam 2 StatusContract header integrity).
-    + Suite 8: Non-root execution safety (Confirms safe execution under `--no-root`).
-
----
-
-## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 9. Technical Notes
+## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 8. Technical Notes
 
 > [!NOTE]
 > - **Why is Gen2 x16 the ceiling, and why not Gen3?**  
