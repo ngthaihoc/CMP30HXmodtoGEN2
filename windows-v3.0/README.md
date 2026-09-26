@@ -94,6 +94,7 @@ schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%CD%\windows-v3.0\release\40HX
 | `40HXInstaller.exe` | **Giao diện cài đặt và quản lý** (Mặc định mở GUI; hỗ trợ tham số dòng lệnh) |
 | `40HXUninstaller.exe` | **Gỡ cài đặt tự động** (Nhấp đúp $\rightarrow$ Yêu cầu quyền Administrator) |
 | `40HXCheck.exe` | **Chẩn đoán độc lập** (Kiểm tra Hashrate/Năng lực tính toán + Tốc độ link PCIe Gen2; tự thu hồi driver sau khi đo) |
+| `UnlockRiotGame.exe` | **Mở khoá tương thích Riot Games / Vanguard**: Ký số Authenticode cho `40HXUNLK.EFI` và hướng dẫn nạp key vào BIOS `db` (Custom Mode) trên Windows 11 cho CMP 40HX; kiểm tra và giữ nguyên Secure Boot cho CMP 30HX |
 | `OpenCL.exe` | **Kiểm tra năng lực tính toán (CMP 40HX)** (So sánh hiệu năng FP16/FP32 trước và sau khi mở khoá) |
 | `files\40HXUNLK.EFI` | Firmware EFI mở khoá (Chỉ dành cho CMP 40HX TU106; không nạp cho 30HX) |
 | `WinRing0x64.sys` | Driver truy cập PCI Configuration Space và MMIO |
@@ -138,10 +139,10 @@ schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%CD%\windows-v3.0\release\40HX
 3. Khởi động lại máy tính. Màn hình khởi động sẽ hiện thông báo mở khoá trong 1-2 giây rồi vào Windows.
 4. Sau khi đăng nhập, tiến trình nền tự động hoàn thành mở khoá Gen2 và dọn dẹp driver khỏi bộ nhớ.
 
-### 3.2 Cài đặt cho CMP 30HX (Chi tiết từng bước — Bỏ qua cài đặt 40HX)
+### 3.2 Cài đặt cho CMP 30HX (Chi tiết từng bước: Bỏ qua cài đặt 40HX)
 
 > [!IMPORTANT]
-> **Lưu ý đặc biệt — Bỏ qua toàn bộ các bước cấu hình của CMP 40HX:**
+> **Lưu ý đặc biệt (Bỏ qua toàn bộ các bước cấu hình của CMP 40HX):**
 > - **KHÔNG chỉnh sửa BIOS**: Không cần tắt Secure Boot, không cần bật CSM, không bắt buộc Above 4G (khác với 40HX phải nạp EFI bootloader không chứng thực).
 > - **KHÔNG nạp tệp EFI (`40HXUNLK.EFI`)**: CMP 30HX chạy hoàn toàn trên môi trường Windows thông qua MMIO override, không sử dụng firmware bootloader.
 > - **KHÔNG nhấn "Cài đặt toàn bộ" trên GUI của `40HXInstaller.exe`**: Nút bấm này sẽ cấu hình EFI và GSP dành riêng cho nhân TU106 (40HX).
@@ -200,6 +201,10 @@ schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%CD%\windows-v3.0\release\40HX
 40HXInstaller.exe -gen2         # Kích hoạt Gen2 cho CMP 40HX ngay lập tức
 40HXInstaller.exe -gen2-30hx    # Kích hoạt Gen2 cho CMP 30HX (áp dụng chuẩn TU116 và tối ưu MRRS 512B)
 40HXInstaller.exe -uninstall    # Gỡ bỏ sạch sẽ toàn bộ dịch vụ, tác vụ và EFI
+
+UnlockRiotGame.exe              # Khởi chạy giao diện GUI hỗ trợ Riot Vanguard & Secure Boot
+UnlockRiotGame.exe -status      # Kiểm tra GPU, phiên bản Windows và trạng thái Secure Boot
+UnlockRiotGame.exe -sign        # Ký số tự động cho 40HXUNLK.EFI và xuất CMP40HX_Key.cer
 ```
 
 ---
@@ -236,7 +241,11 @@ Phiên bản v3.0.0 áp dụng kiến trúc **Deep Module** với các tầng tr
 - **`ComputeInspector`**: Kiểm tra an toàn `BOOT_0` (`0x16` cho TU106) chống crash hệ thống và giải mã định kiểu Tensor Core (`SS0 == 0x88888888`, `SS1 == 0x40966C`).
 - **`HardwareBus` (Seam 1)**: Tách biệt hoàn toàn kernel driver (`WinRing0`, `ThrottleStop`) khỏi nghiệp vụ chính, kèm `MockHardwareBus` cho phép kiểm thử đơn vị độc lập.
 - **`StatusContract` (Seam 2)**: Chuẩn hoá hợp đồng trạng thái định kiểu (`STATUS_CODE=GEN2_SUCCESS`, v.v.) giữa Go Engine và các script Batch.
-- **Tương thích Anti-Cheat (Riot Vanguard / EAC)**: Cơ chế nạp driver kernel tạm thời (Dùng-Xong-Rút) dọn sạch dịch vụ và tệp `.sys` ngay sau khi ghi thanh ghi, không cần bật Test Signing, bảo đảm an toàn khi chơi game.
+- **Tương thích Anti-Cheat (Riot Vanguard / EAC / BattlEye) qua `UnlockRiotGame.exe`**:
+  - **CMP 40HX**: Riot Vanguard trên Windows 11 yêu cầu Secure Boot = Enabled và TPM 2.0. `UnlockRiotGame.exe` tự động ký số Authenticode cho `40HXUNLK.EFI`, xuất chứng chỉ `CMP40HX_Key.cer` ra ổ C:, Desktop và ESP, hướng dẫn người dùng nạp key vào BIOS `db` (Custom Mode). Nhờ vậy, Secure Boot vẫn BẬT cho Vanguard trong khi `40HXUNLK.EFI` vẫn chạy được để mở khoá Tensor Core `SS0=0x88888888` và Gen2.
+  - **CMP 30HX**: Hoàn toàn không dùng firmware EFI (mở khoá qua MMIO ring-0), vì vậy Secure Boot có thể giữ nguyên BẬT trong BIOS, tương thích 100% với Riot Vanguard mà không cần nạp key.
+  - **Mô hình Dùng-Xong-Rút (Transient BYOVD)**: Driver kernel chỉ nạp trong mili-giây lúc khởi động rồi giải phóng ngay lập tức, không để lại driver trong danh sách đen khi game kiểm tra.
+- **Bộ kiểm thử tự động toàn diện**: 13 Go unit tests (`40hxcore`), 18 Go unit tests (`unlockriot`), 10 Mock test suites Windows (`Test_Mock_CMP30HX.bat`), và 8 Mock test suites Linux (`Test_Mock_CMP30HX_Linux.sh`).
 
 ---
 

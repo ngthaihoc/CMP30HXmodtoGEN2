@@ -14,6 +14,57 @@ SYSTEMD_SVC_PATH="/etc/systemd/system/${SYSTEMD_SVC_NAME}"
 BIN_INSTALL_PATH="/usr/local/bin/cmp30hx-unlock"
 SUSPEND_HOOK_PATH="/lib/systemd/system-sleep/cmp30hx-unlock"
 
+# Bien danh cho kiem thu va mo phong (Mock Testing)
+IS_MOCK=0
+IS_MOCK_FAIL=0
+IS_MOCK_IDLE=0
+IS_MOCK_NOGPU=0
+MOCK_FAIL=0
+MOCK_IDLE=0
+MOCK_NOGPU=0
+NO_ROOT=0
+CUSTOM_STATUS_FILE=""
+
+# Xac dinh duong dan file Status Contract (Seam 2)
+get_status_file() {
+    if [[ -n "${CUSTOM_STATUS_FILE}" ]]; then
+        echo "${CUSTOM_STATUS_FILE}"
+        return 0
+    fi
+    if [[ -w "/var/run" || "${EUID:-$(id -u)}" -eq 0 ]]; then
+        echo "/var/run/40hxunlock/gen2_status.txt"
+    else
+        echo "/tmp/40hxunlock/gen2_status.txt"
+    fi
+}
+
+# Ghi file trang thai gen2_status.txt theo chuan StatusContract
+write_status_file() {
+    local code="$1"
+    local speed="$2"
+    local width="$3"
+    local tls="$4"
+    local err="${5:-NONE}"
+    local detail="${6:-}"
+    local target_file
+    target_file="$(get_status_file)"
+    local target_dir
+    target_dir="$(dirname "${target_file}")"
+
+    mkdir -p "${target_dir}" 2>/dev/null || true
+    cat <<EOF > "${target_file}" 2>/dev/null || true
+STATUS_CODE=${code}
+SPEED_CURRENT=${speed}
+WIDTH_CURRENT=${width}
+TLS_TARGET=${tls}
+ERROR_CODE=${err}
+TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+[Chi Tiet Trang Thai]
+${detail}
+EOF
+}
+
 # Mau sac hien thi terminal (tu dong tat neu khong phai terminal tuong tac)
 if [[ -t 1 ]]; then
     C_RESET="\033[0m"
@@ -49,6 +100,9 @@ parse_hex() {
 # Kiem tra quyen root / sudo
 # ------------------------------------------------------------------------------
 ensure_root() {
+    if [[ "${NO_ROOT}" -eq 1 ]]; then
+        return 0
+    fi
     if [[ "${EUID}" -ne 0 ]]; then
         echo -e "${C_YELLOW}[!] Yeu cau quyen root / sudo de can thiep PCI va thanh ghi kernel.${C_RESET}"
         if command -v sudo >/dev/null 2>&1; then
@@ -71,6 +125,11 @@ usage() {
     echo "  -s, --status       Kiem tra toc do link PCIe va bang thong hien tai cua CMP 30HX"
     echo "  -u, --uninstall    Go bo systemd service va khoi phuc thiet lap goc"
     echo "  -d, --daemon       Che do chay ngam (danh cho systemd service luc khoi dong)"
+    echo "  -test, --test      Kiem thu mo phong thanh cong (Mock Happy Path: Gen1 -> Gen2)"
+    echo "  -mock-fail         Kiem thu mo phong that bai (Mock Failure: Retrain Timeout)"
+    echo "  -mock-idle         Kiem thu mo phong che do idle (Mock Idle: TLS=Gen2, current=Gen1)"
+    echo "  -mock-nogpu        Kiem thu mo phong khong tim thay GPU (Mock No GPU)"
+    echo "  --no-root          Bo qua kiem tra quyen root (danh cho moi truong test CI/WSL)"
     echo "  -h, --help         Hien thi thong tin huong dan nay"
     echo ""
     exit 0
@@ -80,6 +139,9 @@ usage() {
 # Kiem tra phan mem can thiet (pciutils, python3)
 # ------------------------------------------------------------------------------
 check_dependencies() {
+    if [[ "${IS_MOCK}" -eq 1 ]]; then
+        return 0
+    fi
     local missing=()
     if ! command -v lspci >/dev/null 2>&1; then missing+=("pciutils (lspci)"); fi
     if ! command -v setpci >/dev/null 2>&1; then missing+=("pciutils (setpci)"); fi
@@ -99,6 +161,10 @@ check_dependencies() {
 # ------------------------------------------------------------------------------
 get_pcie_cap_offset() {
     local bdf="$1"
+    if [[ "${IS_MOCK}" -eq 1 ]]; then
+        echo "CAP_EXP"
+        return 0
+    fi
     # Truong hop 1: setpci ho tro truc tiep alias CAP_EXP va doc dung Cap ID 0x10 (16)
     local test_exp
     test_exp=$(setpci -s "${bdf}" CAP_EXP+0x00.b 2>/dev/null || true)
@@ -136,6 +202,10 @@ get_pcie_cap_offset() {
 # ------------------------------------------------------------------------------
 find_upstream_root_port() {
     local gpu_bdf="$1" # e.g. 0000:01:00.0 or 01:00.0
+    if [[ "${IS_MOCK}" -eq 1 ]]; then
+        echo "0000:00:01.0"
+        return 0
+    fi
     local sys_dev="/sys/bus/pci/devices/${gpu_bdf}"
     if [[ ! -d "${sys_dev}" ]]; then
         sys_dev="/sys/bus/pci/devices/0000:${gpu_bdf}"
@@ -174,6 +244,11 @@ find_upstream_root_port() {
 # ------------------------------------------------------------------------------
 disable_aspm() {
     echo -e "${C_BOLD}[1/6] Dang tat PCIe ASPM va Runtime Power Management tren Linux...${C_RESET}"
+    if [[ "${IS_MOCK}" -eq 1 ]]; then
+        echo -e "      ${C_GREEN}[OK]${C_RESET} [MOCK] Da chuyen /sys/module/pcie_aspm/parameters/policy -> performance"
+        echo -e "      ${C_GREEN}[OK]${C_RESET} [MOCK] Da dat power/control=on cho cac thiet bi PCI (chong ha link khi idle)"
+        return 0
+    fi
 
     # 1. Chinh sach PCIe ASPM cua Kernel
     if [[ -w /sys/module/pcie_aspm/parameters/policy ]]; then
@@ -312,6 +387,31 @@ unlock_gpu_pcie() {
     local gpu_bdf="$1"
     echo -e "${C_BOLD}----------------------------------------------------------------${C_RESET}"
     echo -e "${C_BLUE}[*] Dang xu ly GPU CMP 30HX: ${gpu_bdf}${C_RESET}"
+
+    if [[ "${IS_MOCK}" -eq 1 ]]; then
+        echo -e "    [*] [MOCK] Tim thay Upstream Root Port: 0000:00:01.0 (Cap: CAP_EXP)"
+        inject_bar0_mmio "${gpu_bdf}"
+        echo -e "    [OK] GPU LNKCTL2 TLS -> Gen2 (0x0001 -> 0x0002)"
+        echo -e "    [OK] Root Port LNKCTL2 TLS -> Gen2 (0x0001 -> 0x0002)"
+        echo -e "    [OK] Tối ưu MRRS GPU: 128B -> 512B (DEVCTL: 0x0000 -> 0x2000)"
+        echo -e "    [*] Bat dau chu trinh huan luyen lai link PCIe (toi da 6 luot)..."
+
+        if [[ "${MOCK_FAIL}" -eq 1 ]]; then
+            echo -e "    [-] Luot #1 (ROOT): Dang o Gen1 x16, dang thu lai..."
+            echo -e "    [-] Luot #2 (GPU): Dang o Gen1 x16, dang thu lai..."
+            echo -e "    ${C_YELLOW}[!] Retrain lan 1 chua dat Gen2. Dang thuc thi Stage 2: Soft Reset PCI bus (cmpunlocker2 method)...${C_RESET}"
+            echo -e "    ${C_RED}[X] Stage 2 Soft Reset that bai! Link giu nguyen Gen1 x16.${C_RESET}"
+            return 1
+        elif [[ "${MOCK_IDLE}" -eq 1 ]]; then
+            echo -e "    [-] Luot #1 (ROOT): Dang o Gen1 x16, dang thu lai..."
+            echo -e "    [-] Luot #2 (GPU): Dang o Gen1 x16, dang thu lai..."
+            echo -e "    ${C_YELLOW}[!] TLS da thiet lap Gen2 nhung Link o Gen1 do tiet kiem nang luong khi idle.${C_RESET}"
+            return 2
+        else
+            echo -e "    ${C_GREEN}[V] Luot #1 (ROOT): DA DAT GEN2 x16!${C_RESET}"
+            return 0
+        fi
+    fi
 
     local gpu_cap
     gpu_cap=$(get_pcie_cap_offset "${gpu_bdf}")
@@ -517,6 +617,11 @@ unlock_gpu_pcie() {
 # ------------------------------------------------------------------------------
 install_systemd_service() {
     echo -e "${C_BOLD}[5/6] Dang tao va kich hoat Systemd Service khoi dong tu dong...${C_RESET}"
+    if [[ "${IS_MOCK}" -eq 1 ]]; then
+        echo -e "      ${C_GREEN}[OK]${C_RESET} [MOCK] Da tao Systemd Service: ${SYSTEMD_SVC_NAME}"
+        echo -e "      ${C_GREEN}[OK]${C_RESET} [MOCK] Da tao Sleep/Resume Hook: ${SUSPEND_HOOK_PATH}"
+        return 0
+    fi
 
     # Chep script hien tai vao duong dan he thong de service chay on dinh
     local current_script
@@ -578,6 +683,13 @@ uninstall_service() {
     echo -e "${C_BOLD}    GO BO TU DONG KHOI DONG CMP 30HX GEN2 UNLOCK TREN LINUX    ${C_RESET}"
     echo -e "${C_BOLD}================================================================${C_RESET}"
 
+    if [[ "${IS_MOCK}" -eq 1 ]]; then
+        echo -e "${C_GREEN}[V] [MOCK] Da go bo hoan toan Systemd Service va Sleep Hook.${C_RESET}"
+        echo "    He thong da duoc khoi phuc trang thai ban dau."
+        write_status_file "UNINSTALLED" "1" "16" "1" "NONE" "Da go bo thanh cong service tren Linux."
+        exit 0
+    fi
+
     if command -v systemctl >/dev/null 2>&1; then
         systemctl stop "${SYSTEMD_SVC_NAME}" >/dev/null 2>&1 || true
         systemctl disable "${SYSTEMD_SVC_NAME}" >/dev/null 2>&1 || true
@@ -590,6 +702,7 @@ uninstall_service() {
 
     echo -e "${C_GREEN}[V] Da go bo hoan toan Systemd Service va Sleep Hook.${C_RESET}"
     echo "    He thong da duoc khoi phuc trang thai ban dau."
+    write_status_file "UNINSTALLED" "1" "16" "1" "NONE" "Da go bo thanh cong service tren Linux."
     exit 0
 }
 
@@ -602,18 +715,26 @@ show_status() {
     echo -e "${C_BOLD}================================================================${C_RESET}"
 
     local gpus=()
-    while IFS= read -r line; do
-        if [[ -n "${line}" ]]; then
-            gpus+=("${line}")
+    if [[ "${IS_MOCK}" -eq 1 ]]; then
+        if [[ "${MOCK_NOGPU}" -eq 1 ]]; then
+            gpus=()
+        else
+            gpus=("0000:01:00.0")
         fi
-    done < <(lspci -d 10de:2189 2>/dev/null | awk '{print $1}')
-
-    if [[ ${#gpus[@]} -eq 0 ]]; then
+    else
         while IFS= read -r line; do
             if [[ -n "${line}" ]]; then
                 gpus+=("${line}")
             fi
-        done < <(lspci -d 10de:1f0b 2>/dev/null | awk '{print $1}')
+        done < <(lspci -d 10de:2189 2>/dev/null | awk '{print $1}')
+
+        if [[ ${#gpus[@]} -eq 0 ]]; then
+            while IFS= read -r line; do
+                if [[ -n "${line}" ]]; then
+                    gpus+=("${line}")
+                fi
+            done < <(lspci -d 10de:1f0b 2>/dev/null | awk '{print $1}')
+        fi
     fi
 
     if [[ ${#gpus[@]} -eq 0 ]]; then
@@ -623,6 +744,33 @@ show_status() {
 
     for gpu in "${gpus[@]}"; do
         echo -e "\n${C_BLUE}--- GPU BDF: ${gpu} ---${C_RESET}"
+        if [[ "${IS_MOCK}" -eq 1 ]]; then
+            echo "01:00.0 VGA compatible controller: NVIDIA Corporation TU116 [GeForce GTX 1660 SUPER / CMP 30HX] (rev a1)"
+            echo ""
+            local mock_spd=2
+            local mock_tls=2
+            if [[ "${MOCK_FAIL}" -eq 1 ]]; then
+                mock_spd=1
+                mock_tls=1
+            elif [[ "${MOCK_IDLE}" -eq 1 ]]; then
+                mock_spd=1
+                mock_tls=2
+            fi
+            echo -e "  - Link Speed hien tai    : Gen${mock_spd} (${mock_spd}.0 GT/s)"
+            echo -e "  - Link Width hien tai    : x16"
+            echo -e "  - Target Link Speed (TLS): Gen${mock_tls}"
+            echo -e "  - Max Read Request Size  : 512 Bytes (DEVCTL: 0x2000)"
+            echo -e "  - PCIe ASPM trang thai   : Tat (Disabled)"
+            echo ""
+            echo "  Chi tiet thanh ghi PCIe (lspci):"
+            echo "    LnkCap: Port #0, Speed 8GT/s, Width x16, ASPM L0s L1, Exit Latency L0s <512ns, L1 <16us"
+            echo "    LnkCtl: ASPM Disabled; Disabled- CommClk+ ExtSynch- ClockPM- AutWidDis- BWInt- AutBWInt-"
+            echo "    LnkSta: Speed ${mock_spd}.0GT/s, Width x16, TrErr- Train- SlotClk+ DLActive- BWMgmt- ABWMgmt-"
+            echo "    DevCtl: CorrErr- NonFatalErr- FatalErr- UnsupReq- MaxPayload 256 bytes, MaxReadReq 512 bytes"
+            echo "    LnkCtl2: Target Link Speed: ${mock_tls}.0GT/s, EnterCompliance- SpeedDis-"
+            continue
+        fi
+
         lspci -s "${gpu}"
         echo ""
 
@@ -670,11 +818,36 @@ show_status() {
 # HAM CHINH (MAIN)
 # ------------------------------------------------------------------------------
 main() {
-    # Xu ly huong dan truoc khi kiem tra root
+    # Quet qua cac tham so dac biet truoc khi kiem tra quyen root
     for arg in "$@"; do
         case "${arg}" in
             -h|--help|-help)
                 usage
+                ;;
+            --no-root)
+                NO_ROOT=1
+                ;;
+            -test|--test)
+                IS_MOCK=1
+                NO_ROOT=1
+                ;;
+            -mock-fail|--mock-fail)
+                IS_MOCK=1
+                MOCK_FAIL=1
+                NO_ROOT=1
+                ;;
+            -mock-idle|--mock-idle)
+                IS_MOCK=1
+                MOCK_IDLE=1
+                NO_ROOT=1
+                ;;
+            -mock-nogpu|--mock-nogpu)
+                IS_MOCK=1
+                MOCK_NOGPU=1
+                NO_ROOT=1
+                ;;
+            --status-file=*)
+                CUSTOM_STATUS_FILE="${arg#*=}"
                 ;;
         esac
     done
@@ -694,6 +867,41 @@ main() {
                 ;;
             -d|--daemon|-daemon|--silent|-silent)
                 is_daemon=1
+                shift
+                ;;
+            -test|--test)
+                IS_MOCK=1
+                NO_ROOT=1
+                shift
+                ;;
+            -mock-fail|--mock-fail)
+                IS_MOCK=1
+                MOCK_FAIL=1
+                NO_ROOT=1
+                shift
+                ;;
+            -mock-idle|--mock-idle)
+                IS_MOCK=1
+                MOCK_IDLE=1
+                NO_ROOT=1
+                shift
+                ;;
+            -mock-nogpu|--mock-nogpu)
+                IS_MOCK=1
+                MOCK_NOGPU=1
+                NO_ROOT=1
+                shift
+                ;;
+            --no-root)
+                NO_ROOT=1
+                shift
+                ;;
+            --status-file)
+                CUSTOM_STATUS_FILE="$2"
+                shift 2
+                ;;
+            --status-file=*)
+                CUSTOM_STATUS_FILE="${1#*=}"
                 shift
                 ;;
             -h|--help|-help)
@@ -722,24 +930,33 @@ main() {
     # 2. Quet tat ca card CMP 30HX (10de:2189)
     echo -e "\n${C_BOLD}[2/6] Dang tim kiem card do hoa NVIDIA CMP 30HX tren he thong...${C_RESET}"
     local gpus=()
-    while IFS= read -r line; do
-        if [[ -n "${line}" ]]; then
-            gpus+=("${line}")
+    if [[ "${IS_MOCK}" -eq 1 ]]; then
+        if [[ "${MOCK_NOGPU}" -eq 1 ]]; then
+            gpus=()
+        else
+            gpus=("0000:01:00.0")
         fi
-    done < <(lspci -d 10de:2189 2>/dev/null | awk '{print $1}')
-
-    # Neu khong co 30HX, kiem tra them 40HX (10de:1f0b)
-    if [[ ${#gpus[@]} -eq 0 ]]; then
+    else
         while IFS= read -r line; do
             if [[ -n "${line}" ]]; then
                 gpus+=("${line}")
             fi
-        done < <(lspci -d 10de:1f0b 2>/dev/null | awk '{print $1}')
+        done < <(lspci -d 10de:2189 2>/dev/null | awk '{print $1}')
+
+        # Neu khong co 30HX, kiem tra them 40HX (10de:1f0b)
+        if [[ ${#gpus[@]} -eq 0 ]]; then
+            while IFS= read -r line; do
+                if [[ -n "${line}" ]]; then
+                    gpus+=("${line}")
+                fi
+            done < <(lspci -d 10de:1f0b 2>/dev/null | awk '{print $1}')
+        fi
     fi
 
     if [[ ${#gpus[@]} -eq 0 ]]; then
         echo -e "${C_RED}[X] LOI: Khong tim thay card NVIDIA CMP 30HX (ID: 10de:2189)!${C_RESET}"
         echo "    Vui long kiem tra khe cam PCIe, tiep xuc chan hoac nguon phu cua card."
+        write_status_file "NO_GPU_FOUND" "0" "0" "0" "ERR_NO_GPU" "Khong tim thay card CMP 30HX tren he thong."
         exit 1
     fi
 
@@ -773,29 +990,83 @@ main() {
     echo ""
     echo -e "${C_BOLD}================================================================${C_RESET}"
     echo -e "${C_BOLD}[6/6] KET QUA XAC NHAN BANG THONG PCIE:${C_RESET}"
-    for gpu_bdf in "${gpus[@]}"; do
-        local cap
-        cap=$(get_pcie_cap_offset "${gpu_bdf}")
-        if [[ -n "${cap}" ]]; then
-            local sta_raw
-            sta_raw=$(setpci -s "${gpu_bdf}" "${cap}"+0x12.w 2>/dev/null || true)
-            local speed=$(( $(parse_hex "${sta_raw}") & 0xF ))
-            local width=$(( ($(parse_hex "${sta_raw}") >> 4) & 0x3F ))
+    local final_status_code="UNKNOWN"
+    local final_speed="1"
+    local final_width="16"
+    local final_tls="2"
+    local final_err="NONE"
+    local final_detail=""
 
-            local ctl2_raw
-            ctl2_raw=$(setpci -s "${gpu_bdf}" "${cap}"+0x30.w 2>/dev/null || true)
-            local tls=$(( $(parse_hex "${ctl2_raw}") & 0xF ))
-
-            if [[ ${speed} -ge 2 ]]; then
-                echo -e "  [${gpu_bdf}] ${C_GREEN}${C_BOLD}[V] HOAN TAT:${C_RESET} PCIe Gen${speed} x${width} (~6.4 GB/s)"
-            elif [[ ${tls} -ge 2 ]]; then
-                echo -e "  [${gpu_bdf}] ${C_YELLOW}[!] DA CAU HINH GEN2 (TLS=${tls}):${C_RESET} Hien dang Gen${speed} x${width} (che do tiet kiem dien khi idle)"
+    if [[ "${IS_MOCK}" -eq 1 ]]; then
+        for gpu_bdf in "${gpus[@]}"; do
+            if [[ "${MOCK_FAIL}" -eq 1 ]]; then
+                echo -e "  [${gpu_bdf}] ${C_RED}[X] CHUA DAT GEN2:${C_RESET} Hien tai Gen1 x16 (TLS=1)"
+                final_status_code="GEN2_FAILED"
+                final_speed="1"
+                final_width="16"
+                final_tls="1"
+                final_err="ERR_RETRAIN_TIMEOUT"
+                final_detail="Huan luyen lai PCIe link that bai sau 6 luot retrain va Stage 2 soft reset."
+            elif [[ "${MOCK_IDLE}" -eq 1 ]]; then
+                echo -e "  [${gpu_bdf}] ${C_YELLOW}[!] DA CAU HINH GEN2 (TLS=2):${C_RESET} Hien dang Gen1 x16 (che do tiet kiem dien khi idle)"
                 echo "      -> Card se tu dong nhay len Gen2 x16 khi co tai CUDA/3D/Mining!"
+                final_status_code="GEN2_IDLE"
+                final_speed="1"
+                final_width="16"
+                final_tls="2"
+                final_err="NONE"
+                final_detail="Da thiet lap TLS=2 thanh cong. Link o Gen1 do che do tiet kiem dien khi ranh (ASPM/idle)."
             else
-                echo -e "  [${gpu_bdf}] ${C_RED}[X] CHUA DAT GEN2:${C_RESET} Hien tai Gen${speed} x${width} (TLS=${tls})"
+                echo -e "  [${gpu_bdf}] ${C_GREEN}${C_BOLD}[V] HOAN TAT:${C_RESET} PCIe Gen2 x16 (~6.4 GB/s)"
+                final_status_code="GEN2_SUCCESS"
+                final_speed="2"
+                final_width="16"
+                final_tls="2"
+                final_err="NONE"
+                final_detail="Mo khoa PCIe Gen2 x16 thanh cong. Bang thong dat khoang 6.4 GB/s voi MRRS 512B."
             fi
-        fi
-    done
+        done
+    else
+        for gpu_bdf in "${gpus[@]}"; do
+            local cap
+            cap=$(get_pcie_cap_offset "${gpu_bdf}")
+            if [[ -n "${cap}" ]]; then
+                local sta_raw
+                sta_raw=$(setpci -s "${gpu_bdf}" "${cap}"+0x12.w 2>/dev/null || true)
+                local speed=$(( $(parse_hex "${sta_raw}") & 0xF ))
+                local width=$(( ($(parse_hex "${sta_raw}") >> 4) & 0x3F ))
+
+                local ctl2_raw
+                ctl2_raw=$(setpci -s "${gpu_bdf}" "${cap}"+0x30.w 2>/dev/null || true)
+                local tls=$(( $(parse_hex "${ctl2_raw}") & 0xF ))
+
+                final_speed="${speed}"
+                final_width="${width}"
+                final_tls="${tls}"
+
+                if [[ ${speed} -ge 2 ]]; then
+                    echo -e "  [${gpu_bdf}] ${C_GREEN}${C_BOLD}[V] HOAN TAT:${C_RESET} PCIe Gen${speed} x${width} (~6.4 GB/s)"
+                    final_status_code="GEN2_SUCCESS"
+                    final_err="NONE"
+                    final_detail="Mo khoa PCIe Gen${speed} x${width} thanh cong."
+                elif [[ ${tls} -ge 2 ]]; then
+                    echo -e "  [${gpu_bdf}] ${C_YELLOW}[!] DA CAU HINH GEN2 (TLS=${tls}):${C_RESET} Hien dang Gen${speed} x${width} (che do tiet kiem dien khi idle)"
+                    echo "      -> Card se tu dong nhay len Gen2 x16 khi co tai CUDA/3D/Mining!"
+                    final_status_code="GEN2_IDLE"
+                    final_err="NONE"
+                    final_detail="TLS da dat Gen${tls}, link dang Gen${speed} do tiet kiem dien."
+                else
+                    echo -e "  [${gpu_bdf}] ${C_RED}[X] CHUA DAT GEN2:${C_RESET} Hien tai Gen${speed} x${width} (TLS=${tls})"
+                    final_status_code="GEN2_FAILED"
+                    final_err="ERR_RETRAIN_FAILED"
+                    final_detail="Chua dat Gen2 sau khi cau hinh."
+                fi
+            fi
+        done
+    fi
+
+    # Ghi file Seam 2 Status Contract
+    write_status_file "${final_status_code}" "${final_speed}" "${final_width}" "${final_tls}" "${final_err}" "${final_detail}"
 
     echo -e "${C_BOLD}================================================================${C_RESET}"
     if [[ ${is_daemon} -eq 0 ]]; then

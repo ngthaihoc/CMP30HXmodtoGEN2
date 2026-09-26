@@ -160,6 +160,21 @@ sudo ./Setup_CMP30HX_LinuxAIO.sh
   ```bash
   sudo ./Setup_CMP30HX_LinuxAIO.sh --uninstall
   ```
+- 在 WSL / Linux / CI 上运行自动化 Mock 单元测试（无需物理 GPU）：
+  ```bash
+  chmod +x Test_Mock_CMP30HX_Linux.sh && ./Test_Mock_CMP30HX_Linux.sh
+  ```
+
+**StatusContract (Seam 2) 状态格式：**
+脚本会将机器可读的结构化状态头写入 `/var/run/cmp30hx_gen2_status.txt`（或通过 `--status-file` 指定路径）：
+```text
+STATUS_CODE=GEN2_SUCCESS
+SPEED_CURRENT=2
+WIDTH_CURRENT=16
+TLS_TARGET=2
+ERROR_CODE=NONE
+TIMESTAMP=2026-09-26T05:30:00Z
+```
 
 ---
 
@@ -206,7 +221,78 @@ sudo ./Setup_CMP30HX_LinuxAIO.sh
 
 ---
 
-## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 6. 核心技术说明
+## <img src="https://api.iconify.design/lucide/cpu.svg?color=%2310b981" width="22" height="22" align="center" /> 6. 深度模块架构与硬件可靠性 (v3.0.0)
+
+v3.0.0 版本按照 **Deep Module** 理念重构了代码库，设立了清晰的工程接缝：
+1. **`LinkNegotiator`**：
+   - 完整封装 PCIe 链路协商状态机，严格硬件锁死 TU116 eFuse Gen2 边界，将 DEVCTL MRRS 优化至 512B (`0x2000`)，规范 MMIO 影子寄存器写入时序（`PRIV_MISC_1`、`XVE_OVR`、`LINK_CONFIG_0`、`PL_LINK_RATE`、`CYA_0`）。
+   - 内置 75ms 快速轮询机制，可在完成协商瞬间捕捉并锁定链路速率，彻底消除闲置降频造成的虚假 Gen1 误报。
+2. **`ComputeInspector`（用于 CMP 40HX）**：
+   - 实施 Fail-Closed 硬件保护：在访问 BAR0 物理内存前必须读取并校验 `BOOT_0` 寄存器（`0x00`），确认芯片属于 TU106 家族（`0x16xxxxxx`）。
+   - 提供类型安全的双寄存器解码：`SS0`（`0x409664`，主解锁标志 `0x88888888`，~50 TFLOPS FP16）与 `SS1`（`0x40966C`，镜像验证）。
+3. **`HardwareBus` (Seam 1)**：
+   - 将内核驱动句柄（`WinRing0`、`ThrottleStop`）与核心业务逻辑完全解耦。
+   - 提供 `MockHardwareBus` 模拟 PCI 配置空间和 MMIO 内存，无需真实显卡即可进行 100% 单元测试。
+4. **`StatusContract` (Seam 2)**：
+   - 规范化 Go 引擎与 Batch / Shell 脚本之间的状态数据契约（`STATUS_CODE=GEN2_SUCCESS`、`SPEED_CURRENT`、`WIDTH_CURRENT`、`TLS_TARGET`、`ERROR_CODE`）。
+   - 杜绝因脚本异常中断或状态文件丢失引发的虚假成功报告。
+
+---
+
+## <img src="https://api.iconify.design/lucide/shield-check.svg?color=%2306b6d4" width="22" height="22" align="center" /> 7. 完美兼容反作弊系统 (Riot Vanguard, EAC, BattlEye)
+
+CMP 40HX 与 CMP 30HX 用户可畅玩具有高强度反作弊机制的游戏，如 **Valorant（无畏契约）、英雄联盟（Riot Vanguard）、Apex 英雄、堡垒之夜（EAC / BattlEye）**：
+
+- **通过 `UnlockRiotGame.exe` 解决 Windows 11 下 Riot Vanguard 限制**：
+  - **针对 CMP 40HX (TU106)**：Windows 11 下的 Riot Vanguard 强制要求 Secure Boot = Enabled 与 TPM 2.0。然而预引导固件 `40HXUNLK.EFI` 属于第三方未经微软认证的 EFI 程序。自动化工具 `windows-v3.0/release/UnlockRiotGame.exe` 可全自动：
+    1. 生成自签名 X.509 安全证书（`CMP40HX_Key.cer`，SHA256 签名）。
+    2. 使用 Authenticode 技术为 `40HXUNLK.EFI` 进行数字签名（同时签署发布目录与活动 ESP 分区中的文件）。
+    3. 将证书文件 `CMP40HX_Key.cer` 导出到 C 盘根目录、桌面以及 ESP 分区（`\EFI\40HX\`）。
+    4. 弹出图文说明界面，提示用户拍照保存步骤，重启电脑进入主板 BIOS，将安全启动切换为 **Custom Mode（自定义模式）**，并将 `CMP40HX_Key.cer` 导入可信签名数据库 **`db`**（Key Management -> Authorized Signatures -> Append Key）。
+    5. 达成效果：系统既保持 **Secure Boot 开启状态** 以满足 Riot Vanguard (`vgk.sys`) 的检测，主板又能执行 `40HXUNLK.EFI` 固件以解锁全部 Tensor Core 算力（`SS0=0x88888888`，~50 TFLOPS）与 PCIe Gen2。
+  - **针对 CMP 30HX (TU116)**：由于 TU116 核心在物理层面上没有 Tensor Core，且 Gen2 完全通过 Windows ring-0 MMIO 寄存器解锁（无需加载任何 EFI 引导程序），用户**在 BIOS 中正常保持 Secure Boot 开启**即可，无需导入任何密钥，天然 100% 兼容 Riot Vanguard。
+- **用完即释放机制 (Transient BYOVD on-demand)**：
+  - 内核驱动（`WinRing0x64.sys`、`ThrottleStop.sys`）仅在系统开机或用户登录时加载几毫秒以配置 PCIe 寄存器。
+  - 一旦链路协商完成，工具立即停止驱动服务（`sc stop`）、删除服务（`sc delete`）并将 `.sys` 驱动文件从系统目录中移除。
+  - 当游戏或 Vanguard 扫描内核空间时，操作系统处于完全干净状态，不存在任何被列入黑名单的驱动程序或常驻钩子。
+- **无需开启 Windows 测试模式 (Test Signing)**：
+  - 不需要执行危险的 `bcdedit /set testsigning on`（该命令会被 Vanguard 100% 拦截封堵）。
+  - 完整保留微软 Windows 原生代码完整性认证。
+- **CMP 40HX Pre-boot EFI 引导**：
+  - Tensor Core 在 Windows 内核加载之前的 UEFI 阶段就已完成解锁。当 Windows 和反作弊驱动启动时，显卡在硬件底层已处于自然解锁状态。
+
+---
+
+## <img src="https://api.iconify.design/lucide/check-square.svg?color=%23f59e0b" width="22" height="22" align="center" /> 8. 自动化测试套件 (Automated Test Suite)
+
+本项目配备完整的全自动回归测试套件，确保发布前消除隐患并保障硬件安全：
+- **13 个 Go 单元测试 (`40hxcore`)**：覆盖 TU116 eFuse 锁死保护、DEVCTL MRRS 512B 优化、MMIO 影子寄存器写入时序、PnP 软复位恢复、`StatusContract` 解析及 Tensor Core 解码。
+- **18 个 Go 单元测试 (`unlockriot`)**：完整覆盖 Riot Games 策略矩阵（TU106/TU116、Windows 10/11、Secure Boot 开启/关闭状态）、Authenticode 证书管理及 Mock 接口测试。
+- **10 个 Windows Mock 测试套件 (`Test_Mock_CMP30HX.bat`)**：
+  - Test Suite 1: 极速成功路径（Gen1 $\rightarrow$ Soft Reset $\rightarrow$ Gen2）。
+  - Test Suite 2: 安全失败路径处理机制。
+  - Test Suite 3: WinRing0 驱动被 HVCI / 驱动黑名单拦截的处理。
+  - Test Suite 4: PCI 总线上未找到显卡的处理。
+  - Test Suite 5: 完整卸载与系统清理机制。
+  - Test Suite 6: Resizable BAR 一键解锁（Happy Path）。
+  - Test Suite 7: 笔记本安全保护机制（防止笔记本误刷）。
+  - Test Suite 8: Resizable BAR 卸载与恢复默认配置。
+  - Test Suite 9: 状态丢失防御机制（防止虚假成功汇报）。
+  - Test Suite 10: 独立系统预检诊断模式。
+- **8 个 Linux Mock 测试套件 (`Test_Mock_CMP30HX_Linux.sh`)**：
+  - 在 WSL、Debian、Linux 或 CI 环境中运行 42 项断言测试（无需物理显卡）：
+    + Suite 1: Happy Path（成功解锁 Gen 2 x16，退出代码 0）。
+    + Suite 2: Idle Mode（TLS=Gen2，空闲节能时临时处于 Gen1）。
+    + Suite 3: Retrain Failure（处理 6 次重训超时失败，退出代码 1）。
+    + Suite 4: No GPU（无显卡场景处理，错误代码 ERR_NO_GPU）。
+    + Suite 5: Status Inspection（验证 BDF 识别、MRRS 512B 及 ASPM 状态）。
+    + Suite 6: Uninstall Service（彻底卸载 systemd 服务与睡眠钩子）。
+    + Suite 7: Schema Validation（验证 Seam 2 StatusContract 状态头完整性）。
+    + Suite 8: Non-root execution safety（确认 `--no-root` 运行安全性）。
+
+---
+
+## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 9. 核心技术说明
 
 > [!NOTE]
 > - **为什么上限只能到 Gen2 x16，无法开启 Gen3？**  

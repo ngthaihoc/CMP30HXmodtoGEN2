@@ -152,7 +152,7 @@ sudo ./Setup_CMP30HX_LinuxAIO.sh
 5. **Install Systemd Service & Sleep Hook**: Automatically enables `cmp30hx-gen2-unlock.service` and sleep hook `/lib/systemd/system-sleep/cmp30hx-unlock` to maintain Gen2 speed across reboots and suspend/resume cycles.
 
 **Linux Utility Commands:**
-- Check current link status & MRRS:
+- Check current link status and MRRS:
   ```bash
   sudo ./Setup_CMP30HX_LinuxAIO.sh --status
   ```
@@ -160,6 +160,21 @@ sudo ./Setup_CMP30HX_LinuxAIO.sh
   ```bash
   sudo ./Setup_CMP30HX_LinuxAIO.sh --uninstall
   ```
+- Automated Mock Testing on WSL, Linux, or CI (No physical GPU needed):
+  ```bash
+  chmod +x Test_Mock_CMP30HX_Linux.sh && ./Test_Mock_CMP30HX_Linux.sh
+  ```
+
+**StatusContract (Seam 2) Output Format:**
+The script writes a structured header to `/var/run/cmp30hx_gen2_status.txt` (or a custom path via `--status-file`):
+```text
+STATUS_CODE=GEN2_SUCCESS
+SPEED_CURRENT=2
+WIDTH_CURRENT=16
+TLS_TARGET=2
+ERROR_CODE=NONE
+TIMESTAMP=2026-09-26T05:30:00Z
+```
 
 ---
 
@@ -228,13 +243,21 @@ Version v3.0.0 refactors the codebase following **Deep Module** principles aroun
 
 Users of CMP 40HX and CMP 30HX can play protected games like **Valorant, League of Legends (Riot Vanguard), Apex Legends, and Fortnite (Easy Anti-Cheat / BattlEye)** without interference:
 
+- **Riot Vanguard Solution on Windows 11 via `UnlockRiotGame.exe`**:
+  - **For CMP 40HX (TU106)**: Riot Vanguard on Windows 11 strictly requires Secure Boot = Enabled and TPM 2.0. However, `40HXUNLK.EFI` is an unsigned third-party pre-boot firmware. The automated utility `windows-v3.0/release/UnlockRiotGame.exe`:
+    1. Generates a self-signed X.509 certificate (`CMP40HX_Key.cer`) with SHA256.
+    2. Digitally signs `40HXUNLK.EFI` via Authenticode (both in the release folder and in the active ESP partition).
+    3. Exports `CMP40HX_Key.cer` to C:\, Desktop, and the ESP partition (`\EFI\40HX\`).
+    4. Displays visual instructions requiring the user to take a photo of the screen, reboot into BIOS, switch Secure Boot Mode to **Custom Mode**, and enroll `CMP40HX_Key.cer` into the authorized signatures database **`db`** (Key Management -> Authorized Signatures -> Append Key).
+    5. Result: The system keeps **Secure Boot ENABLED** to satisfy Riot Vanguard (`vgk.sys`), while the UEFI firmware executes `40HXUNLK.EFI` to unlock full Tensor Core compute (`SS0=0x88888888`, ~50 TFLOPS) and PCIe Gen2.
+  - **For CMP 30HX (TU116)**: Because the TU116 die physically lacks Tensor Cores and is unlocked entirely through BAR0 MMIO in Windows ring-0 without an EFI loader, users **keep Secure Boot ENABLED normally in BIOS** without enrolling any custom keys, providing 100% native compatibility with Riot Games.
 - **Transient BYOVD On-Demand Driver Model**:
   - Kernel drivers (`WinRing0x64.sys`, `ThrottleStop.sys`) are loaded only for milliseconds during system boot or user logon to configure PCIe registers.
   - As soon as link negotiation finishes, the tool stops the service (`sc stop`), removes it (`sc delete`), and deletes the `.sys` file from system directories.
   - When anti-cheat software like Vanguard (`vgk.sys`) inspects the kernel, the system is 100% clean with zero blacklisted drivers or persistent background hooks.
 - **No Windows Test Signing Required**:
   - Does not require `bcdedit /set testsigning on` (which Vanguard strictly blocks).
-  - Maintains native Windows Code Integrity and Secure Boot compatibility (on CMP 30HX).
+  - Maintains native Windows Code Integrity and Secure Boot compatibility.
 - **Pre-boot EFI for CMP 40HX**:
   - Tensor Cores are unlocked at the UEFI phase prior to Windows kernel initialization. When Windows and anti-cheat drivers start, the GPU is already operating in its unlocked native hardware state.
 
@@ -244,7 +267,8 @@ Users of CMP 40HX and CMP 30HX can play protected games like **Valorant, League 
 
 The project includes automated regression testing to guarantee hardware safety:
 - **13 Go Unit Tests (`40hxcore`)**: Tests TU116 eFuse clamping, DEVCTL MRRS 512B optimization, MMIO shadow register sequencing, soft PnP recovery, `StatusContract` parsing, and Tensor Core decoding.
-- **10 Mock Test Suites (`Test_Mock_CMP30HX.bat`)**:
+- **18 Go Unit Tests (`unlockriot`)**: Comprehensive coverage of the Riot Games policy matrix (TU106/TU116, Windows 10/11, Secure Boot Enabled/Disabled), Authenticode certificate management, and mock interfaces.
+- **10 Mock Test Suites on Windows (`Test_Mock_CMP30HX.bat`)**:
   - Test Suite 1: Fast success path (Gen1 $\rightarrow$ Soft Reset $\rightarrow$ Gen2).
   - Test Suite 2: Safe failure path handling.
   - Test Suite 3: WinRing0 driver blocked by HVCI / Blocklist.
@@ -255,6 +279,16 @@ The project includes automated regression testing to guarantee hardware safety:
   - Test Suite 8: Resizable BAR removal and baseline restoration.
   - Test Suite 9: Missing status defense guard preventing false positive reports.
   - Test Suite 10: Standalone preflight diagnostic mode.
+- **8 Mock Test Suites on Linux (`Test_Mock_CMP30HX_Linux.sh`)**:
+  - 42 automated assertions running on WSL, Linux, or CI without physical hardware:
+    + Suite 1: Happy Path (Gen2 x16 successful unlock, exit code 0).
+    + Suite 2: Idle Mode (TLS=Gen2, link temporarily downclocked to Gen1 due to ASPM).
+    + Suite 3: Retrain Failure (Handles timeout after 6 retrain cycles, exit code 1).
+    + Suite 4: No GPU (Handles missing GPU condition, error code ERR_NO_GPU).
+    + Suite 5: Status Inspection (Verifies BDF detection, MRRS 512B, and ASPM display).
+    + Suite 6: Uninstall Service (Clean removal of systemd service and sleep hooks).
+    + Suite 7: Schema Validation (Verifies Seam 2 StatusContract header integrity).
+    + Suite 8: Non-root execution safety (Confirms safe execution under `--no-root`).
 
 ---
 
