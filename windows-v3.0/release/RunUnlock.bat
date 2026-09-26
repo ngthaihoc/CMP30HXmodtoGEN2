@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 setlocal
 cd /d "%~dp0"
 where nvidia-smi >nul 2>&1 && nvidia-smi -pm 1 >nul 2>&1
