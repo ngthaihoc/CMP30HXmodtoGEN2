@@ -263,36 +263,7 @@ CMP 40HX 与 CMP 30HX 用户可畅玩具有高强度反作弊机制的游戏，�
 
 ---
 
-## <img src="https://api.iconify.design/lucide/check-square.svg?color=%23f59e0b" width="22" height="22" align="center" /> 8. 自动化测试套件 (Automated Test Suite)
-
-本项目配备完整的全自动回归测试套件，确保发布前消除隐患并保障硬件安全：
-- **13 个 Go 单元测试 (`40hxcore`)**：覆盖 TU116 eFuse 锁死保护、DEVCTL MRRS 512B 优化、MMIO 影子寄存器写入时序、PnP 软复位恢复、`StatusContract` 解析及 Tensor Core 解码。
-- **18 个 Go 单元测试 (`unlockriot`)**：完整覆盖 Riot Games 策略矩阵（TU106/TU116、Windows 10/11、Secure Boot 开启/关闭状态）、Authenticode 证书管理及 Mock 接口测试。
-- **10 个 Windows Mock 测试套件 (`Test_Mock_CMP30HX.bat`)**：
-  - Test Suite 1: 极速成功路径（Gen1 $\rightarrow$ Soft Reset $\rightarrow$ Gen2）。
-  - Test Suite 2: 安全失败路径处理机制。
-  - Test Suite 3: WinRing0 驱动被 HVCI / 驱动黑名单拦截的处理。
-  - Test Suite 4: PCI 总线上未找到显卡的处理。
-  - Test Suite 5: 完整卸载与系统清理机制。
-  - Test Suite 6: Resizable BAR 一键解锁（Happy Path）。
-  - Test Suite 7: 笔记本安全保护机制（防止笔记本误刷）。
-  - Test Suite 8: Resizable BAR 卸载与恢复默认配置。
-  - Test Suite 9: 状态丢失防御机制（防止虚假成功汇报）。
-  - Test Suite 10: 独立系统预检诊断模式。
-- **8 个 Linux Mock 测试套件 (`Test_Mock_CMP30HX_Linux.sh`)**：
-  - 在 WSL、Debian、Linux 或 CI 环境中运行 42 项断言测试（无需物理显卡）：
-    + Suite 1: Happy Path（成功解锁 Gen 2 x16，退出代码 0）。
-    + Suite 2: Idle Mode（TLS=Gen2，空闲节能时临时处于 Gen1）。
-    + Suite 3: Retrain Failure（处理 6 次重训超时失败，退出代码 1）。
-    + Suite 4: No GPU（无显卡场景处理，错误代码 ERR_NO_GPU）。
-    + Suite 5: Status Inspection（验证 BDF 识别、MRRS 512B 及 ASPM 状态）。
-    + Suite 6: Uninstall Service（彻底卸载 systemd 服务与睡眠钩子）。
-    + Suite 7: Schema Validation（验证 Seam 2 StatusContract 状态头完整性）。
-    + Suite 8: Non-root execution safety（确认 `--no-root` 运行安全性）。
-
----
-
-## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 9. 核心技术说明
+## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 8. 核心技术说明
 
 > [!NOTE]
 > - **为什么上限只能到 Gen2 x16，无法开启 Gen3？**  

@@ -265,36 +265,7 @@ Người dùng CMP 40HX và CMP 30HX hoàn toàn có thể chơi các tựa game
 
 ---
 
-## <img src="https://api.iconify.design/lucide/check-square.svg?color=%23f59e0b" width="22" height="22" align="center" /> 8. Bộ Kiểm Thử Tự Động Toàn Diện (Automated Test Suite)
-
-Dự án đi kèm bộ kiểm thử tự động 100% giúp phát hiện hồi quy và bảo đảm an toàn trước khi triển khai:
-- **13 Go Unit Tests (`40hxcore`)**: Kiểm tra kẹp eFuse TU116, tối ưu DEVCTL MRRS 512B, chuỗi shadow register MMIO, phục hồi Soft PnP, phân tích trạng thái `StatusContract` và giải mã Tensor Core.
-- **18 Go Unit Tests (`unlockriot`)**: Kiểm tra toàn diện ma trận chính sách tương thích Riot Games (GPU TU106/TU116, Windows 10/11, Secure Boot Enabled/Disabled), quản lý chứng chỉ ký số Authenticode và mock interface.
-- **10 Mock Test Suites trên Windows (`Test_Mock_CMP30HX.bat`)**:
-  - Test Suite 1: Kịch bản thành công nhanh (Gen1 $\rightarrow$ Soft Reset $\rightarrow$ Gen2).
-  - Test Suite 2: Kịch bản xử lý thất bại an toàn.
-  - Test Suite 3: Xử lý tình huống driver WinRing0 bị chặn bởi HVCI / Blocklist.
-  - Test Suite 4: Xử lý tình huống không tìm thấy GPU trên bus PCI.
-  - Test Suite 5: Kiểm tra quy trình gỡ bỏ và dọn dẹp sạch sẽ hệ thống.
-  - Test Suite 6: Kích hoạt Resizable BAR 1-Click AIO (Happy Path).
-  - Test Suite 7: Khóa an toàn ReBAR chặn máy tính xách tay (Laptop Safety Guard).
-  - Test Suite 8: Gỡ bỏ và khôi phục mặc định Resizable BAR.
-  - Test Suite 9: Cơ chế phòng vệ chống báo thành công ảo khi mất tệp trạng thái.
-  - Test Suite 10: Chế độ chạy độc lập chẩn đoán hệ thống (Preflight Only).
-- **8 Mock Test Suites trên Linux (`Test_Mock_CMP30HX_Linux.sh`)**:
-  - Chạy kiểm thử tự động 42 assertions trên WSL / Linux / CI không cần GPU vật lý:
-    + Suite 1: Happy Path (Mở khóa Gen 2 x16 thành công, exit code 0).
-    + Suite 2: Idle Mode (TLS=Gen2, link tạm hạ Gen1 do tiết kiệm điện).
-    + Suite 3: Retrain Failure (Xử lý lỗi timeout sau 6 lượt retrain, exit code 1).
-    + Suite 4: No GPU (Xử lý tình huống không có card, mã lỗi ERR_NO_GPU).
-    + Suite 5: Status Inspection (Kiểm tra hiển thị BDF, MRRS 512B, ASPM).
-    + Suite 6: Uninstall Service (Gỡ bỏ sạch sẽ service và sleep hook).
-    + Suite 7: Schema Validation (Kiểm tra toàn vẹn định dạng Seam 2 StatusContract).
-    + Suite 8: Non-root execution safety (Xác nhận cờ `--no-root` chạy an toàn).
-
----
-
-## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 9. Ghi Chú Kỹ Thuật Tóm Tắt
+## <img src="https://api.iconify.design/lucide/info.svg?color=%238b5cf6" width="22" height="22" align="center" /> 8. Ghi Chú Kỹ Thuật Tóm Tắt
 
 > [!NOTE]
 > - **Tại sao trần là Gen2 x16 mà không thể lên Gen3?**  
