@@ -178,19 +178,29 @@ TIMESTAMP=2026-09-26T05:30:00Z
 
 ---
 
-## <img src="https://api.iconify.design/lucide/check-circle.svg?color=%2306b6d4" width="22" height="22" align="center" /> 3. Verification & Bandwidth Testing
+---
 
-After activation (or after logging back into Windows), verify using these two methods:
+## <img src="https://api.iconify.design/lucide/shield-check.svg?color=%2306b6d4" width="22" height="22" align="center" /> 3. Full Anti-Cheat Compatibility (Riot Vanguard, EAC, BattlEye)
 
-1. **Verify PCIe Link Speed**:
-   - Run **`40HXCheck.exe`** (or open **GPU-Z**):
-   - Under **Bus Interface / PCIe**: Verify it reports **`PCIe x16 2.0 @ x16 2.0`** (or `Gen2 x16`).
-2. **Verify Real-World Transfer Bandwidth (Confirm MRRS 512B)**:
-   - Open **AIDA64** $\rightarrow$ Navigate to **Tools** menu $\rightarrow$ Select **GPGPU Benchmark**.
-   - Select the CMP 30HX card and click **Run Benchmarks**:
-   - Check the **Memory Read** and **Memory Copy** values:
-     - **Success**: Achieves approximately **6.3 – 6.4 GB/s** (reaching the theoretical limit of Gen2 x16).
-     - **Suboptimal**: If it only reaches ~2.5 GB/s, MRRS is still at the default 128B (re-run `40HXInstaller.exe -gen2-30hx` to activate 512B optimization).
+Users of CMP 40HX and CMP 30HX can play protected games like **Valorant, League of Legends (Riot Vanguard), Apex Legends, and Fortnite (Easy Anti-Cheat / BattlEye)** without interference:
+
+- **Riot Vanguard Solution on Windows 11 via `UnlockRiotGame.exe`**:
+  - **For CMP 40HX (TU106)**: Riot Vanguard on Windows 11 strictly requires Secure Boot = Enabled and TPM 2.0. However, `40HXUNLK.EFI` is an unsigned third-party pre-boot firmware. The automated utility `windows-v3.0/release/UnlockRiotGame.exe`:
+    1. Generates a self-signed X.509 certificate (`CMP40HX_Key.cer`) with SHA256.
+    2. Digitally signs `40HXUNLK.EFI` via Authenticode (both in the release folder and in the active ESP partition).
+    3. Exports `CMP40HX_Key.cer` to C:\, Desktop, and the ESP partition (`\EFI\40HX\`).
+    4. Displays visual instructions requiring the user to take a photo of the screen, reboot into BIOS, switch Secure Boot Mode to **Custom Mode**, and enroll `CMP40HX_Key.cer` into the authorized signatures database **`db`** (Key Management -> Authorized Signatures -> Append Key).
+    5. Result: The system keeps **Secure Boot ENABLED** to satisfy Riot Vanguard (`vgk.sys`), while the UEFI firmware executes `40HXUNLK.EFI` to unlock full Tensor Core compute (`SS0=0x88888888`, ~50 TFLOPS) and PCIe Gen2.
+  - **For CMP 30HX (TU116)**: Because the TU116 die physically lacks Tensor Cores and is unlocked entirely through BAR0 MMIO in Windows ring-0 without an EFI loader, users **keep Secure Boot ENABLED normally in BIOS** without enrolling any custom keys, providing 100% native compatibility with Riot Games.
+- **Transient BYOVD On-Demand Driver Model**:
+  - Kernel drivers (`WinRing0x64.sys`, `ThrottleStop.sys`) are loaded only for milliseconds during system boot or user logon to configure PCIe registers.
+  - As soon as link negotiation finishes, the tool stops the service (`sc stop`), removes it (`sc delete`), and deletes the `.sys` file from system directories.
+  - When anti-cheat software like Vanguard (`vgk.sys`) inspects the kernel, the system is 100% clean with zero blacklisted drivers or persistent background hooks.
+- **No Windows Test Signing Required**:
+  - Does not require `bcdedit /set testsigning on` (which Vanguard strictly blocks).
+  - Maintains native Windows Code Integrity and Secure Boot compatibility.
+- **Pre-boot EFI for CMP 40HX**:
+  - Tensor Cores are unlocked at the UEFI phase prior to Windows kernel initialization. When Windows and anti-cheat drivers start, the GPU is already operating in its unlocked native hardware state.
 
 ---
 
@@ -221,27 +231,19 @@ The uninstaller cleanly removes:
 
 ---
 
-## <img src="https://api.iconify.design/lucide/shield-check.svg?color=%2306b6d4" width="22" height="22" align="center" /> 6. Full Anti-Cheat Compatibility (Riot Vanguard, EAC, BattlEye)
+## <img src="https://api.iconify.design/lucide/check-circle.svg?color=%2306b6d4" width="22" height="22" align="center" /> 6. Verification & Bandwidth Testing
 
-Users of CMP 40HX and CMP 30HX can play protected games like **Valorant, League of Legends (Riot Vanguard), Apex Legends, and Fortnite (Easy Anti-Cheat / BattlEye)** without interference:
+After activation (or after logging back into Windows), verify using these two methods:
 
-- **Riot Vanguard Solution on Windows 11 via `UnlockRiotGame.exe`**:
-  - **For CMP 40HX (TU106)**: Riot Vanguard on Windows 11 strictly requires Secure Boot = Enabled and TPM 2.0. However, `40HXUNLK.EFI` is an unsigned third-party pre-boot firmware. The automated utility `windows-v3.0/release/UnlockRiotGame.exe`:
-    1. Generates a self-signed X.509 certificate (`CMP40HX_Key.cer`) with SHA256.
-    2. Digitally signs `40HXUNLK.EFI` via Authenticode (both in the release folder and in the active ESP partition).
-    3. Exports `CMP40HX_Key.cer` to C:\, Desktop, and the ESP partition (`\EFI\40HX\`).
-    4. Displays visual instructions requiring the user to take a photo of the screen, reboot into BIOS, switch Secure Boot Mode to **Custom Mode**, and enroll `CMP40HX_Key.cer` into the authorized signatures database **`db`** (Key Management -> Authorized Signatures -> Append Key).
-    5. Result: The system keeps **Secure Boot ENABLED** to satisfy Riot Vanguard (`vgk.sys`), while the UEFI firmware executes `40HXUNLK.EFI` to unlock full Tensor Core compute (`SS0=0x88888888`, ~50 TFLOPS) and PCIe Gen2.
-  - **For CMP 30HX (TU116)**: Because the TU116 die physically lacks Tensor Cores and is unlocked entirely through BAR0 MMIO in Windows ring-0 without an EFI loader, users **keep Secure Boot ENABLED normally in BIOS** without enrolling any custom keys, providing 100% native compatibility with Riot Games.
-- **Transient BYOVD On-Demand Driver Model**:
-  - Kernel drivers (`WinRing0x64.sys`, `ThrottleStop.sys`) are loaded only for milliseconds during system boot or user logon to configure PCIe registers.
-  - As soon as link negotiation finishes, the tool stops the service (`sc stop`), removes it (`sc delete`), and deletes the `.sys` file from system directories.
-  - When anti-cheat software like Vanguard (`vgk.sys`) inspects the kernel, the system is 100% clean with zero blacklisted drivers or persistent background hooks.
-- **No Windows Test Signing Required**:
-  - Does not require `bcdedit /set testsigning on` (which Vanguard strictly blocks).
-  - Maintains native Windows Code Integrity and Secure Boot compatibility.
-- **Pre-boot EFI for CMP 40HX**:
-  - Tensor Cores are unlocked at the UEFI phase prior to Windows kernel initialization. When Windows and anti-cheat drivers start, the GPU is already operating in its unlocked native hardware state.
+1. **Verify PCIe Link Speed**:
+   - Run **`40HXCheck.exe`** (or open **GPU-Z**):
+   - Under **Bus Interface / PCIe**: Verify it reports **`PCIe x16 2.0 @ x16 2.0`** (or `Gen2 x16`).
+2. **Verify Real-World Transfer Bandwidth (Confirm MRRS 512B)**:
+   - Open **AIDA64** $\rightarrow$ Navigate to **Tools** menu $\rightarrow$ Select **GPGPU Benchmark**.
+   - Select the CMP 30HX card and click **Run Benchmarks**:
+   - Check the **Memory Read** and **Memory Copy** values:
+     - **Success**: Achieves approximately **6.3 – 6.4 GB/s** (reaching the theoretical limit of Gen2 x16).
+     - **Suboptimal**: If it only reaches ~2.5 GB/s, MRRS is still at the default 128B (re-run `40HXInstaller.exe -gen2-30hx` to activate 512B optimization).
 
 ---
 
