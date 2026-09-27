@@ -76,8 +76,10 @@ func withTaskScheduler(fn func(folder *ole.IDispatch) error) error {
 	}
 	sched, err := unknown.QueryInterface(ole.IID_IDispatch)
 	if err != nil {
+		unknown.Release()
 		return err
 	}
+	defer unknown.Release()
 	defer sched.Release()
 
 	if _, err = oleutil.CallMethod(sched, "Connect"); err != nil {

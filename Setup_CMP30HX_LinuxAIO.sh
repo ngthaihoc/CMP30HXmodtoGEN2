@@ -288,10 +288,10 @@ import sys, re
 path, param = sys.argv[1], sys.argv[2]
 text = open(path).read()
 def inject(m):
-    q1, val, q2 = m.group(3), m.group(4), m.group(5)
+    q1, val, q2 = m.group(2), m.group(3), m.group(4)
     parts = [p for p in val.split() if p != param]
     parts.append(param)
-    return m.group(1) + m.group(2) + q1 + ' '.join(parts) + q2
+    return m.group(1) + q1 + ' '.join(parts) + q2
 pat = re.compile(
     r"^([ \t]*GRUB_CMDLINE_LINUX_DEFAULT[ \t]*=[ \t]*)(['\"])(.*?)(\2)",
     re.MULTILINE | re.DOTALL
