@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows/registry"
+	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/mgr"
 )
 
 // SS0 算力解锁寄存器偏移 (BAR0)
@@ -247,12 +249,24 @@ func ReadUnlockStateV2(retries int, delayMs int) *UnlockState {
 	return st
 }
 
-// ScServiceRunning: 查询服务是否 RUNNING (sc.exe query)
+// ScServiceRunning: 查询服务是否 RUNNING
 // 返回 false 表示查询失败或未运行。
 func ScServiceRunning(name string) bool {
-	out, err := RunOut("sc.exe", "query", name)
+	m, err := mgr.Connect()
 	if err != nil {
 		return false
 	}
-	return strings.Contains(out, "RUNNING") || strings.Contains(strings.ToLower(out), "running")
+	defer m.Disconnect()
+
+	s, err := m.OpenService(name)
+	if err != nil {
+		return false
+	}
+	defer s.Close()
+
+	st, err := s.Query()
+	if err != nil {
+		return false
+	}
+	return st.State == svc.Running
 }

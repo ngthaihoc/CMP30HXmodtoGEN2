@@ -267,6 +267,25 @@ disable_aspm() {
         fi
     done
     echo -e "      ${C_GREEN}[OK]${C_RESET} Da dat power/control=on cho ${count} thiet bi PCI (chong ha link khi idle)"
+
+    # 3. Them pcie_aspm=force vao GRUB neu chua co
+    if [[ -f "/etc/default/grub" ]]; then
+        if ! grep -q "pcie_aspm=force" /etc/default/grub; then
+            echo -e "      [*] Dang them pcie_aspm=force vao /etc/default/grub..."
+            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="/GRUB_CMDLINE_LINUX_DEFAULT="pcie_aspm=force /g' /etc/default/grub
+            if command -v update-grub >/dev/null 2>&1; then
+                update-grub >/dev/null 2>&1
+                echo -e "      ${C_GREEN}[OK]${C_RESET} Da cap nhat GRUB (update-grub)"
+            elif command -v grub2-mkconfig >/dev/null 2>&1; then
+                grub2-mkconfig -o /boot/grub2/grub.cfg >/dev/null 2>&1
+                echo -e "      ${C_GREEN}[OK]${C_RESET} Da cap nhat GRUB (grub2-mkconfig)"
+            else
+                echo -e "      ${C_YELLOW}[!]${C_RESET} Da them vao /etc/default/grub nhung khong tim thay cong cu cap nhat GRUB."
+            fi
+        else
+            echo -e "      ${C_GREEN}[OK]${C_RESET} GRUB da co san pcie_aspm=force"
+        fi
+    fi
 }
 
 # ------------------------------------------------------------------------------
@@ -286,98 +305,25 @@ inject_bar0_mmio() {
         return 0
     fi
 
-    if ! command -v python3 >/dev/null 2>&1; then
-        echo -e "      ${C_YELLOW}[!] Khong co python3 de ghi struct mmap BAR0, chuyen sang cau hinh setpci.${C_RESET}"
+    if ! command -v gcc >/dev/null 2>&1; then
+        echo -e "      ${C_YELLOW}[!] Khong co gcc de bien dich mmio_injector, chuyen sang cau hinh setpci.${C_RESET}"
         return 0
     fi
 
+    local injector_dir="$(dirname "$0")/linux-mmio"
+    local injector_src="${injector_dir}/mmio_injector.c"
+    local injector_bin="${injector_dir}/mmio_injector"
+
+    if [[ ! -x "${injector_bin}" ]]; then
+        echo -e "      [*] Dang bien dich mmio_injector.c..."
+        if ! gcc -O2 -o "${injector_bin}" "${injector_src}"; then
+            echo -e "      ${C_YELLOW}[!] Bien dich that bai, chuyen sang cau hinh setpci.${C_RESET}"
+            return 0
+        fi
+    fi
+
     echo -e "      [*] Dang kiem tra va ghi de thanh ghi BAR0 MMIO (TU116 XVE)..."
-    python3 - <<EOF
-import sys, os, struct, mmap
-
-res_path = "${res0}"
-fd = -1
-mm = None
-try:
-    fd = os.open(res_path, os.O_RDWR | os.O_SYNC)
-    # Thu dung mmap de ghi dung memory-mapped IO (atomic 32-bit Dword)
-    try:
-        mm = mmap.mmap(fd, 0x100000, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE)
-    except Exception:
-        mm = None
-
-    def read_u32(off):
-        if mm is not None:
-            return struct.unpack_from('<I', mm, off)[0]
-        os.lseek(fd, off, os.SEEK_SET)
-        raw = os.read(fd, 4)
-        if len(raw) < 4:
-            raise IOError("EOF reading offset 0x%X" % off)
-        return struct.unpack('<I', raw)[0]
-
-    def write_u32(off, val):
-        if mm is not None:
-            struct.pack_into('<I', mm, off, val)
-            return
-        os.lseek(fd, off, os.SEEK_SET)
-        os.write(fd, struct.pack('<I', val))
-
-    boot0 = read_u32(0x0)
-    if (boot0 & 0xFF000000) != 0x16000000:
-        print(f"      [!] BOOT_0=0x{boot0:08X} khong phai TU116/TU10x (ky vong 0x16xxxxxx), bo qua inject MMIO.")
-        sys.exit(0)
-
-    method = "mmap" if mm is not None else "lseek"
-    print(f"      [OK] BAR0 hop le (BOOT_0=0x{boot0:08X}, Nhan TU116, che do {method}).")
-
-    # 1. Ghi XVE hardware override va cau hinh (tuong dong Windows 40hxcore)
-    # 0x0008841C: PRIV_MISC_1 (tat write protection shadow registers)
-    write_u32(0x0008841C, 0xE0B42D00)
-    # 0x0008872C: XVE_OVR = 6 (Gen2 override)
-    write_u32(0x0008872C, 0x00000006)
-    # 0x0008C040: LINK_CONFIG_0
-    write_u32(0x0008C040, 0x80085800)
-    # 0x0008C1C0: PL_LINK_RATE (bit 20 = 0, Power Limit Gen2 link rate)
-    write_u32(0x0008C1C0, 0x00240036)
-    # 0x0008C2C0: CYA_0
-    write_u32(0x0008C2C0, 0x068731B3)
-    # 0x0008872C: XVE_OVR confirm
-    write_u32(0x0008872C, 0x00000006)
-
-    # 2. Ghi thanh ghi PCIe Capability shadow
-    # LNKCAP @ 0x088084 (dat Max Link Speed = Gen2)
-    orig_cap = read_u32(0x00088084)
-    write_u32(0x00088084, (orig_cap & 0xFFFFFFF0) | 2)
-
-    # LNKCAP2 @ 0x0880A4
-    write_u32(0x000880A4, 0x00000006)
-
-    # XVE_F0 @ 0x0880F0
-    write_u32(0x000880F0, 0x00000006)
-
-    # LNKCTL2 @ 0x0880A8 (TLS = Gen2)
-    orig_ctl2 = read_u32(0x000880A8)
-    write_u32(0x000880A8, (orig_ctl2 & 0xFFFFFFF0) | 2)
-
-    # 3. Kiem tra PHY Lane 0 status (0x08C4B0)
-    try:
-        phy_l0 = read_u32(0x0008C4B0)
-        phy_desc = "Gen2 (5.0 GT/s)" if (phy_l0 & 0xFF000000) == 0x50000000 else ("Gen1 (2.5 GT/s)" if (phy_l0 & 0xFF000000) == 0x25000000 else "Khac")
-        print(f"      [OK] Da inject MMIO BAR0. PHY Lane 0: 0x{phy_l0:08X} ({phy_desc}).")
-    except Exception:
-        print("      [OK] Da inject thanh ghi BAR0 MMIO (XVE_OVR, LNKCAP/CTL2).")
-
-except Exception as e:
-    print(f"      [!] Khong the can thiep BAR0 MMIO: {e}")
-    print("          (Driver nvidia co the dang khoa resource0; se tiep tuc dieu khien qua Root Port & setpci).")
-finally:
-    if mm is not None:
-        try: mm.close()
-        except Exception: pass
-    if fd >= 0:
-        try: os.close(fd)
-        except Exception: pass
-EOF
+    "${injector_bin}" "${res0}"
 }
 
 # ------------------------------------------------------------------------------

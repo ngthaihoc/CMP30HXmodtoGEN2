@@ -313,7 +313,7 @@ if not exist "%FINAL_RUNNER%" (
         echo where nvidia-smi ^>nul 2^>^&1 ^&^& nvidia-smi -pm 1 ^>nul 2^>^&1
         echo "40HXInstaller.exe" -gen2-30hx -silent
         echo where nvidia-smi ^>nul 2^>^&1 ^&^& nvidia-smi -pm 1 ^>nul 2^>^&1
-        echo powershell -noProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 15; $statusFile = [System.IO.Path]::Combine($env:ProgramData, '40HXUnlock\gen2_status.txt'); if (Test-Path $statusFile) { $c = Get-Content $statusFile -Raw; if ($c -match 'GPU TLS=Gen1|chua dat|chưa đạt') { $devs = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -match 'VEN_10DE&(DEV_2189|DEV_1F0B)' }; foreach ($d in $devs) { try { & pnputil /restart-device $d.InstanceId >$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {}; try { $st = (Get-PnpDevice -InstanceId $d.InstanceId -ErrorAction SilentlyContinue).Status; if ($st -ne 'OK') { Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } } catch {} }; Start-Sleep -Seconds 2; try { Restart-Service NVDisplay.ContainerLocalSystem -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 } catch {}; Start-Process -FilePath (Join-Path $pwd.Path '40HXInstaller.exe') -ArgumentList '-gen2-30hx -silent' -Wait; try { & 'nvidia-smi' -pm 1 } catch {} } }" ^>nul 2^>^&1
+        echo powershell -NoProfile -ExecutionPolicy Bypass -File "%%~dp0scripts\Wait-And-Reset.ps1" ^>nul 2^>^&1
         echo sc stop WinRing0_1_2_0 ^>nul 2^>^&1
         echo sc delete WinRing0_1_2_0 ^>nul 2^>^&1
         echo sc stop ThrottleStop ^>nul 2^>^&1
@@ -346,9 +346,9 @@ echo [1/6] Dang tat Fast Startup, Hybrid Sleep va PCIe ASPM toan he thong...
 powercfg -h off >nul 2>&1
 reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" /v "HiberbootEnabled" /t REG_DWORD /d 0 /f >nul 2>&1
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$schemes = powercfg -list | ForEach-Object { if ($_ -match '([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})') { $matches[1] } }; foreach ($s in $schemes) { powercfg -setacvalueindex $s SUB_PCIEXPRESS ASPM 0 2>$null; powercfg -setdcvalueindex $s SUB_PCIEXPRESS ASPM 0 2>$null; powercfg -setacvalueindex $s SUB_SLEEP HYBRIDSLEEP 0 2>$null; powercfg -setdcvalueindex $s SUB_SLEEP HYBRIDSLEEP 0 2>$null }; powercfg -setactive SCHEME_CURRENT 2>$null" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Disable-ASPM.ps1" >nul 2>&1
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$base = 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}'; Get-ChildItem $base -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue; if ($p.ProviderName -match 'NVIDIA' -or $p.DriverDesc -match 'NVIDIA|CMP') { Set-ItemProperty -Path $_.PSPath -Name 'DisableAspm' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue; Set-ItemProperty -Path $_.PSPath -Name 'RMDisableLinkDownshift' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue } }" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Disable-NvidiaASPM.ps1" >nul 2>&1
 
 where nvidia-smi >nul 2>&1 && nvidia-smi -pm 1 >nul 2>&1
 sc config NVDisplay.ContainerLocalSystem start= auto >nul 2>&1
@@ -416,7 +416,7 @@ set "FINAL_EXE=%FINAL_RUNNER%"
 if not exist "%FINAL_EXE%" set "FINAL_EXE=%FINAL_INSTALLER%"
 set "FINAL_WD=%FINAL_DIR%"
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$exe=$env:FINAL_EXE; $dir=$env:FINAL_WD; if (-not [IO.Path]::IsPathRooted($exe)) { throw 'Duong dan installer khong hop le' }; $q=[char]34; $action = if ($exe -match '\.bat$') { New-ScheduledTaskAction -Execute $env:ComSpec -Argument ('/c ' + $q + $exe + $q) -WorkingDirectory $dir } else { New-ScheduledTaskAction -Execute $exe -Argument '-gen2-30hx -silent' -WorkingDirectory $dir }; $t1 = New-ScheduledTaskTrigger -AtStartup; $t1.Delay = 'PT15S'; $t2 = New-ScheduledTaskTrigger -AtLogOn; $t2.Delay = 'PT5S'; $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Minutes 5); $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest; Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action $action -Trigger @($t1, $t2) -Settings $settings -Principal $principal -Force; try { $srv = New-Object -ComObject 'Schedule.Service'; $srv.Connect(); $task = $srv.GetFolder('\').GetTask('CMP30HX_Gen2_Unlock'); $def = $task.Definition; $tEvent = $def.Triggers.Create(0); $tEvent.Subscription = '<QueryList><Query Id=''0'' Path=''System''><Select Path=''System''>*[System[Provider[@Name=''Microsoft-Windows-Power-Troubleshooter''] and EventID=1]]</Select></Query></QueryList>'; $tEvent.Delay = 'PT3S'; $tEvent.Enabled = $true; $srv.GetFolder('\').RegisterTaskDefinition('CMP30HX_Gen2_Unlock', $def, 4, $null, $null, 5, $null) } catch {}" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Register-UnlockTask.ps1" -ExePath "%FINAL_EXE%" -WorkingDirectory "%FINAL_WD%" >nul 2>&1
 
 if not errorlevel 1 set "TASK_OK=1"
 if "%TASK_OK%"=="1" schtasks /query /tn "CMP30HX_Gen2_Unlock" >nul 2>&1 || set "TASK_OK=0"
@@ -449,7 +449,7 @@ if "%HAS_VANGUARD%"=="1" (
     echo       [*] Phat hien Riot Vanguard tren he thong. Che do tuong thich Anti-Cheat da san sang.
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$reg = 'HKCU:\Software\Microsoft\DirectX\UserGpuPreferences'; if (-not (Test-Path $reg)) { New-Item -Path $reg -Force | Out-Null }; $found = 0; $drives = (Get-PSDrive -PSProvider FileSystem).Root; foreach ($d in $drives) { foreach ($sub in @('Riot Games\VALORANT\live\ShooterGame\Binaries\Win64\VALORANT-Win64-Shipping.exe', 'Riot Games\League of Legends\Game\League of Legends.exe')) { $p = Join-Path $d $sub; if (Test-Path $p) { Set-ItemProperty -Path $reg -Name $p -Value 'GpuPreference=2;' -ErrorAction SilentlyContinue; $found++ } } }; if ($found -eq 0) { Set-ItemProperty -Path $reg -Name (Join-Path $env:SystemDrive 'Riot Games\VALORANT\live\ShooterGame\Binaries\Win64\VALORANT-Win64-Shipping.exe') -Value 'GpuPreference=2;' -ErrorAction SilentlyContinue; Set-ItemProperty -Path $reg -Name (Join-Path $env:SystemDrive 'Riot Games\League of Legends\Game\League of Legends.exe') -Value 'GpuPreference=2;' -ErrorAction SilentlyContinue }" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Set-GpuPreference.ps1" >nul 2>&1
 exit /b 0
 
 
@@ -632,7 +632,7 @@ exit /b 0
 
 :PnpSoftReset
 echo       [*] Dang tu dong thuc hien chu trinh Soft Reset [Disable - Enable qua PnP]...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$devs = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -match 'VEN_10DE&(DEV_2189|DEV_1F0B)' }; if ($devs) { foreach ($d in $devs) { try { & pnputil /restart-device $d.InstanceId >$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {}; try { $st = (Get-PnpDevice -InstanceId $d.InstanceId -ErrorAction SilentlyContinue).Status; if ($st -ne 'OK') { Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } } catch {} }; Start-Sleep -Seconds 2; try { sc.exe config NVDisplay.ContainerLocalSystem start= auto | Out-Null; Restart-Service NVDisplay.ContainerLocalSystem -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; $s = Get-Service -Name NVDisplay.ContainerLocalSystem -ErrorAction SilentlyContinue; if ($s -and $s.Status -ne 'Running') { Start-Service NVDisplay.ContainerLocalSystem -ErrorAction SilentlyContinue } } catch {} } else { Write-Host 'Khong tim thay Instance ID qua PnP' }" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Restart-NvidiaGPU.ps1" >nul 2>&1
 call :EnsureNvidiaControlPanelHealthy
 exit /b 0
 
@@ -984,7 +984,7 @@ echo ================================================================
 echo.
 echo [*] Dang kiem tra va khoi phuc service NVDisplay.ContainerLocalSystem...
 sc config NVDisplay.ContainerLocalSystem start= auto >nul 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Restart-Service -Name 'NVDisplay.ContainerLocalSystem' -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; $s = Get-Service -Name 'NVDisplay.ContainerLocalSystem' -ErrorAction SilentlyContinue; if ($s -and $s.Status -ne 'Running') { Start-Service -Name 'NVDisplay.ContainerLocalSystem' -ErrorAction SilentlyContinue }" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Restart-NVDisplay.ps1" >nul 2>&1
 echo       [OK] Service NVDisplay.ContainerLocalSystem da duoc dat ve tu dong [Auto] va khoi chay.
 echo.
 echo [*] Dang dang ky lai Desktop Context Menu Handler cho NVIDIA Control Panel...

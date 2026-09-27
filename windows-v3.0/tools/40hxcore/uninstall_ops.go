@@ -13,7 +13,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-ole/go-ole"
+	"github.com/go-ole/go-ole/oleutil"
 	"golang.org/x/sys/windows/registry"
+	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/mgr"
 )
 
 const bootDesc40 = "40HX Unlock"
@@ -28,14 +32,31 @@ var UninstallTaskNames = []string{
 	"40HXGspEnsure",
 }
 
-// UninstallTasks: 删除计划任务, 返回实际删掉的名字
+// UninstallTasks: 删除计划任务, 返回实际删掉的名字 (使用 COM go-ole)
 func UninstallTasks() []string {
 	var removed []string
-	for _, tn := range UninstallTaskNames {
-		out, err := RunOut("schtasks.exe", "/delete", "/tn", tn, "/f")
-		if err == nil || strings.Contains(out, "成功") || strings.Contains(strings.ToLower(out), "success") {
-			fmt.Printf("  Đã xoá tác vụ lịch trình %s\n", tn)
-			removed = append(removed, tn)
+	
+	ole.CoInitialize(0)
+	defer ole.CoUninitialize()
+
+	unknown, err := oleutil.CreateObject("Schedule.Service")
+	if err == nil {
+		sched, err := unknown.QueryInterface(ole.IID_IDispatch)
+		if err == nil {
+			defer sched.Release()
+			if _, err := oleutil.CallMethod(sched, "Connect"); err == nil {
+				if folderRes, err := oleutil.CallMethod(sched, "GetFolder", "\\"); err == nil {
+					folder := folderRes.ToIDispatch()
+					defer folder.Release()
+					
+					for _, tn := range UninstallTaskNames {
+						if _, err := oleutil.CallMethod(folder, "DeleteTask", tn, 0); err == nil {
+							fmt.Printf("  Đã xoá tác vụ lịch trình %s\n", tn)
+							removed = append(removed, tn)
+						}
+					}
+				}
+			}
 		}
 	}
 	return removed
@@ -119,17 +140,24 @@ func UninstallEspEfi() bool {
 
 // UninstallDriverServices: 停止并删除历史驱动服务(v2.5 BYOVD + 旧版 bridge/early)
 func UninstallDriverServices() {
-	for _, name := range []string{"ThrottleStop", "40hx_bridge", "40hx_early", "40hx_early-d", "WinRing0_1_2_0", "WinRing0x64", "WinRing0"} {
-		RunOut("sc.exe", "stop", name)
-		time.Sleep(300 * time.Millisecond)
-		out, err := RunOut("sc.exe", "delete", name)
-		switch {
-		case err == nil || strings.Contains(strings.ToLower(out), "success") || strings.Contains(out, "成功"):
-			fmt.Printf("  Dịch vụ %s đã được xoá\n", name)
-		case strings.Contains(out, "不存在") || strings.Contains(strings.ToLower(out), "not") || strings.Contains(out, "1060"):
-			fmt.Printf("  Dịch vụ %s không tồn tại (bỏ qua)\n", name)
-		default:
-			fmt.Printf("  Xoá dịch vụ %s thất bại: %s\n", name, strings.TrimSpace(out))
+	m, err := mgr.Connect()
+	if err == nil {
+		defer m.Disconnect()
+		for _, name := range []string{"ThrottleStop", "40hx_bridge", "40hx_early", "40hx_early-d", "WinRing0_1_2_0", "WinRing0x64", "WinRing0"} {
+			s, err := m.OpenService(name)
+			if err != nil {
+				fmt.Printf("  Dịch vụ %s không tồn tại (bỏ qua)\n", name)
+				continue
+			}
+			s.Control(svc.Stop)
+			time.Sleep(300 * time.Millisecond)
+			err = s.Delete()
+			s.Close()
+			if err == nil {
+				fmt.Printf("  Dịch vụ %s đã được xoá\n", name)
+			} else {
+				fmt.Printf("  Xoá dịch vụ %s thất bại: %v\n", name, err)
+			}
 		}
 	}
 	_ = EnsureNvidiaControlPanelHealthy()
@@ -208,7 +236,8 @@ func CheckLeftover() []string {
 	}
 	taskLeft := false
 	for _, tn := range UninstallTaskNames {
-		if _, err := RunOut("schtasks.exe", "/query", "/tn", tn); err == nil {
+		exist, _, _ := TaskInfo(tn)
+		if exist {
 			rem = append(rem, "- Tác vụ lịch trình "+tn)
 			fmt.Println("  [!] Tác vụ lịch trình " + tn + " vẫn còn tàn dư")
 			taskLeft = true
@@ -221,12 +250,16 @@ func CheckLeftover() []string {
 	// 卸载可能只删了服务注册、文件要重启后才能删, 不能假装干净。
 	svcNames := []string{"ThrottleStop", "40hx_bridge", "40hx_early", "40hx_early-d", "WinRing0_1_2_0", "WinRing0x64", "WinRing0"}
 	svcLeft := false
-	for _, sn := range svcNames {
-		if _, err := RunOut("sc.exe", "query", sn); err == nil {
-			rem = append(rem, "- Dịch vụ driver "+sn)
-			fmt.Println("  [!] Dịch vụ driver " + sn + " vẫn còn tàn dư (có thể vẫn đang chạy, hãy chạy lại gỡ cài đặt sau khi khởi động lại)")
-			svcLeft = true
+	if m, err := mgr.Connect(); err == nil {
+		for _, sn := range svcNames {
+			if s, err := m.OpenService(sn); err == nil {
+				rem = append(rem, "- Dịch vụ driver "+sn)
+				fmt.Println("  [!] Dịch vụ driver " + sn + " vẫn còn tàn dư (có thể vẫn đang chạy, hãy chạy lại gỡ cài đặt sau khi khởi động lại)")
+				svcLeft = true
+				s.Close()
+			}
 		}
+		m.Disconnect()
 	}
 	if !svcLeft {
 		fmt.Println("  Dịch vụ driver: Đã dọn sạch")

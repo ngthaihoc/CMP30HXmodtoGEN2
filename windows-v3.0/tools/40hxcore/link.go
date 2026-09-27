@@ -6,6 +6,11 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/mgr"
 )
 
 var (
@@ -490,48 +495,112 @@ func (p *ProductionBus) WriteMMIO(physAddr uint64, val uint32) error {
 }
 
 func (p *ProductionBus) PnpResetDevice(devID uint16) bool {
-	cmd := fmt.Sprintf("$devs = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -match 'DEV_%04X' }; foreach ($d in $devs) { try { & pnputil /restart-device $d.InstanceId >$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {}; try { $st = (Get-PnpDevice -InstanceId $d.InstanceId -ErrorAction SilentlyContinue).Status; if ($st -ne 'OK') { Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } } catch {} }", devID)
-	_, err := RunOut("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cmd)
-	return err == nil
+	devInfo, err := windows.SetupDiGetClassDevsEx(nil, "", 0, windows.DIGCF_ALLCLASSES|windows.DIGCF_PRESENT, 0, "")
+	if err != nil {
+		return false
+	}
+	defer windows.SetupDiDestroyDeviceInfoList(devInfo)
+
+	targetDev := fmt.Sprintf("DEV_%04X", devID)
+	success := false
+
+	for i := 0; ; i++ {
+		devInfoData, err := windows.SetupDiEnumDeviceInfo(devInfo, i)
+		if err != nil {
+			break
+		}
+
+		id, err := windows.SetupDiGetDeviceInstanceId(devInfo, devInfoData)
+		if err != nil {
+			continue
+		}
+
+		if strings.Contains(strings.ToUpper(id), targetDev) {
+			propChange := windows.PropChangeParams{
+				ClassInstallHeader: *windows.MakeClassInstallHeader(windows.DIF_PROPERTYCHANGE),
+				StateChange:        windows.DICS_PROPCHANGE,
+				Scope:              windows.DICS_FLAG_GLOBAL,
+				HwProfile:          0,
+			}
+
+			err = windows.SetupDiSetClassInstallParams(devInfo, devInfoData, &propChange.ClassInstallHeader, uint32(unsafe.Sizeof(propChange)))
+			if err == nil {
+				err = windows.SetupDiCallClassInstaller(windows.DIF_PROPERTYCHANGE, devInfo, devInfoData)
+				if err == nil {
+					success = true
+				} else {
+					// Fallback to Disable then Enable
+					propChange.StateChange = windows.DICS_DISABLE
+					windows.SetupDiSetClassInstallParams(devInfo, devInfoData, &propChange.ClassInstallHeader, uint32(unsafe.Sizeof(propChange)))
+					windows.SetupDiCallClassInstaller(windows.DIF_PROPERTYCHANGE, devInfo, devInfoData)
+
+					time.Sleep(800 * time.Millisecond)
+
+					propChange.StateChange = windows.DICS_ENABLE
+					windows.SetupDiSetClassInstallParams(devInfo, devInfoData, &propChange.ClassInstallHeader, uint32(unsafe.Sizeof(propChange)))
+					if err := windows.SetupDiCallClassInstaller(windows.DIF_PROPERTYCHANGE, devInfo, devInfoData); err == nil {
+						success = true
+					}
+				}
+			}
+		}
+	}
+	return success
 }
 
 func (p *ProductionBus) RestartNVDisplay() error {
-	// 1. Đảm bảo cấu hình service là auto để không bị vô hiệu hoá
-	_, _ = RunOut("sc.exe", "config", "NVDisplay.ContainerLocalSystem", "start=", "auto")
+	m, err := mgr.Connect()
+	if err != nil {
+		return err
+	}
+	defer m.Disconnect()
 
-	// 2. Yêu cầu dừng service
-	out, _ := RunOut("sc.exe", "stop", "NVDisplay.ContainerLocalSystem")
-	if strings.Contains(string(out), "1060") {
-		// Service không tồn tại trên hệ thống (không có driver NVIDIA)
+	s, err := m.OpenService("NVDisplay.ContainerLocalSystem")
+	if err != nil {
+		// Service không tồn tại trên hệ thống
 		return nil
 	}
+	defer s.Close()
 
-	// 3. Đợi service dừng hoàn toàn (chuyển sang trạng thái 1 STOPPED) thay vì sleep mù 500ms
+	// 1. Đảm bảo cấu hình service là auto để không bị vô hiệu hoá
+	conf, err := s.Config()
+	if err == nil && conf.StartType != mgr.StartAutomatic {
+		conf.StartType = mgr.StartAutomatic
+		s.UpdateConfig(conf)
+	}
+
+	// 2. Yêu cầu dừng service
+	st, _ := s.Query()
+	if st.State != svc.Stopped {
+		s.Control(svc.Stop)
+	}
+
+	// 3. Đợi service dừng hoàn toàn
 	for i := 0; i < 25; i++ { // tối đa 5 giây
 		time.Sleep(200 * time.Millisecond)
-		qOut, err := RunOut("sc.exe", "query", "NVDisplay.ContainerLocalSystem")
-		if err != nil || strings.Contains(string(qOut), "STOPPED") {
+		st, err := s.Query()
+		if err != nil || st.State == svc.Stopped {
 			break
 		}
 	}
 
 	// 4. Khởi động lại service
-	_, err := RunOut("sc.exe", "start", "NVDisplay.ContainerLocalSystem")
+	s.Start()
 
-	// 5. Xác nhận service đã ở trạng thái 4 RUNNING; nếu gặp lỗi 1056 (đang chuyển trạng thái) thì thử lại
+	// 5. Xác nhận service đã ở trạng thái 4 RUNNING
 	for i := 0; i < 25; i++ { // tối đa 5 giây
 		time.Sleep(200 * time.Millisecond)
-		qOut, qErr := RunOut("sc.exe", "query", "NVDisplay.ContainerLocalSystem")
-		if qErr == nil && strings.Contains(string(qOut), "RUNNING") {
+		st, err := s.Query()
+		if err == nil && st.State == svc.Running {
 			_, _ = RunOut("reg.exe", "add", `HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext`, "/ve", "/t", "REG_SZ", "/d", "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}", "/f")
 			return nil
 		}
-		if strings.Contains(string(qOut), "STOPPED") {
-			_, err = RunOut("sc.exe", "start", "NVDisplay.ContainerLocalSystem")
+		if st.State == svc.Stopped {
+			s.Start()
 		}
 	}
 	_, _ = RunOut("reg.exe", "add", `HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext`, "/ve", "/t", "REG_SZ", "/d", "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}", "/f")
-	return err
+	return nil
 }
 
 func (p *ProductionBus) Sleep(d time.Duration) {

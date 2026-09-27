@@ -162,11 +162,9 @@ set "MB_PROD=Unknown"
 set "MB_BIOS=Unknown"
 set "IS_LAPTOP=0"
 
-for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Get-CimInstance Win32_ComputerSystem).Manufacturer"`) do set "SYS_MANU=%%A"
-for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Get-CimInstance Win32_ComputerSystem).Model"`) do set "SYS_MODEL=%%A"
-for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Get-CimInstance Win32_BaseBoard).Manufacturer"`) do set "MB_MANU=%%A"
-for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Get-CimInstance Win32_BaseBoard).Product"`) do set "MB_PROD=%%A"
-for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Get-CimInstance Win32_BIOS).SMBIOSBIOSVersion"`) do set "MB_BIOS=%%A"
+for /f "usebackq tokens=1* delims==" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Get-SysInfo.ps1"`) do (
+    set "%%A=%%B"
+)
 
 echo    - He thong   : !SYS_MANU! - Model: !SYS_MODEL!
 echo    - Bo mach chu: !MB_MANU! - Model: !MB_PROD! [BIOS: !MB_BIOS!]
@@ -194,8 +192,7 @@ if "!MOCK_LAPTOP!"=="1" (
     set "DETECTED_GPUS= [NVIDIA CMP 30HX]"
 ) else (
     rem Kiem tra 4 lop nhan dien Laptop thuc te
-    for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Get-CimInstance Win32_ComputerSystem).PCSystemType"`) do if "%%A"=="2" set "IS_LAPTOP=1"
-    for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "[bool](Get-CimInstance Win32_Battery)"`) do if /i "%%A"=="True" set "IS_LAPTOP=1"
+    rem IS_LAPTOP da duoc lay tu Get-SysInfo.ps1
     echo "!SYS_MODEL! !MB_PROD!" | findstr /i "FA506 G513 G533 GL553 Nitro Legion Victus Laptop Notebook Book Portable TUF ROG Zephyrus Strix Thin Stealth Blade Omen Pavilion Inspiron Latitude Precision XPS Yoga ThinkPad IdeaPad" >nul 2>&1 && set "IS_LAPTOP=1"
 )
 
@@ -418,7 +415,7 @@ copy /y "%TOOL_DIR%\Enable_ReBAR_Turing.nip" "%REBAR_APP_DIR%\" >nul 2>&1
     echo exit /b 0
 ) > "%REBAR_RUNNER%"
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$taskName='NVIDIA_ReBAR_Global_Profile'; $dir=$env:REBAR_APP_DIR; $bat=$env:REBAR_RUNNER; $action = New-ScheduledTaskAction -Execute $env:ComSpec -Argument ('/c `\"' + $bat + '`\"') -WorkingDirectory $dir; $t1 = New-ScheduledTaskTrigger -AtStartup; $t1.Delay = 'PT15S'; $t2 = New-ScheduledTaskTrigger -AtLogOn; $t2.Delay = 'PT5S'; $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5); $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest; Register-ScheduledTask -TaskName $taskName -Action $action -Trigger @($t1, $t2) -Settings $settings -Principal $principal -Force | Out-Null; try { $srv = New-Object -ComObject 'Schedule.Service'; $srv.Connect(); $task = $srv.GetFolder('\').GetTask($taskName); $def = $task.Definition; $tEvent = $def.Triggers.Create(0); $tEvent.Subscription = '<QueryList><Query Id=''0'' Path=''System''><Select Path=''System''>*[System[Provider[@Name=''Microsoft-Windows-Power-Troubleshooter''] and EventID=1]]</Select></Query></QueryList>'; $tEvent.Delay = 'PT3S'; $tEvent.Enabled = $true; $srv.GetFolder('\').RegisterTaskDefinition($taskName, $def, 4, $null, $null, 5, $null) | Out-Null } catch {}" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Register-ReBarTask.ps1" -TaskName "NVIDIA_ReBAR_Global_Profile" -BatPath "%REBAR_RUNNER%" -WorkingDirectory "%REBAR_APP_DIR%" >nul 2>&1
 
 reg add "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "NVIDIA_ReBAR_Profile" /t REG_SZ /d "\"%REBAR_RUNNER%\"" /f >nul 2>&1
 reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "NVIDIA_ReBAR_Profile" /t REG_SZ /d "\"%REBAR_RUNNER%\"" /f >nul 2>&1
