@@ -549,57 +549,51 @@ func (p *ProductionBus) PnpResetDevice(devID uint16) bool {
 }
 
 func (p *ProductionBus) RestartNVDisplay() error {
-	m, err := mgr.Connect()
-	if err != nil {
-		return err
-	}
-	defer m.Disconnect()
+	err := withService("NVDisplay.ContainerLocalSystem", func(s *mgr.Service) error {
+		// 1. Đảm bảo cấu hình service là auto để không bị vô hiệu hoá
+		conf, err := s.Config()
+		if err == nil && conf.StartType != mgr.StartAutomatic {
+			conf.StartType = mgr.StartAutomatic
+			s.UpdateConfig(conf)
+		}
 
-	s, err := m.OpenService("NVDisplay.ContainerLocalSystem")
+		// 2. Yêu cầu dừng service
+		st, _ := s.Query()
+		if st.State != svc.Stopped {
+			s.Control(svc.Stop)
+		}
+
+		// 3. Đợi service dừng hoàn toàn
+		for i := 0; i < 25; i++ { // tối đa 5 giây
+			time.Sleep(200 * time.Millisecond)
+			st, err := s.Query()
+			if err != nil || st.State == svc.Stopped {
+				break
+			}
+		}
+
+		// 4. Khởi động lại service
+		s.Start()
+
+		// 5. Xác nhận service đã ở trạng thái 4 RUNNING
+		for i := 0; i < 25; i++ { // tối đa 5 giây
+			time.Sleep(200 * time.Millisecond)
+			st, err := s.Query()
+			if err == nil && st.State == svc.Running {
+				_, _ = RunOut("reg.exe", "add", `HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext`, "/ve", "/t", "REG_SZ", "/d", "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}", "/f")
+				return nil
+			}
+			if st.State == svc.Stopped {
+				s.Start()
+			}
+		}
+		_, _ = RunOut("reg.exe", "add", `HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext`, "/ve", "/t", "REG_SZ", "/d", "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}", "/f")
+		return nil
+	})
 	if err != nil {
 		// Service không tồn tại trên hệ thống
 		return nil
 	}
-	defer s.Close()
-
-	// 1. Đảm bảo cấu hình service là auto để không bị vô hiệu hoá
-	conf, err := s.Config()
-	if err == nil && conf.StartType != mgr.StartAutomatic {
-		conf.StartType = mgr.StartAutomatic
-		s.UpdateConfig(conf)
-	}
-
-	// 2. Yêu cầu dừng service
-	st, _ := s.Query()
-	if st.State != svc.Stopped {
-		s.Control(svc.Stop)
-	}
-
-	// 3. Đợi service dừng hoàn toàn
-	for i := 0; i < 25; i++ { // tối đa 5 giây
-		time.Sleep(200 * time.Millisecond)
-		st, err := s.Query()
-		if err != nil || st.State == svc.Stopped {
-			break
-		}
-	}
-
-	// 4. Khởi động lại service
-	s.Start()
-
-	// 5. Xác nhận service đã ở trạng thái 4 RUNNING
-	for i := 0; i < 25; i++ { // tối đa 5 giây
-		time.Sleep(200 * time.Millisecond)
-		st, err := s.Query()
-		if err == nil && st.State == svc.Running {
-			_, _ = RunOut("reg.exe", "add", `HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext`, "/ve", "/t", "REG_SZ", "/d", "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}", "/f")
-			return nil
-		}
-		if st.State == svc.Stopped {
-			s.Start()
-		}
-	}
-	_, _ = RunOut("reg.exe", "add", `HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext`, "/ve", "/t", "REG_SZ", "/d", "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}", "/f")
 	return nil
 }
 

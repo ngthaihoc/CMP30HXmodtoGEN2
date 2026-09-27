@@ -41,33 +41,27 @@ func ReadGen2Status() string {
 
 // EnsureNvidiaControlPanelHealthy: Đảm bảo service NVDisplay.ContainerLocalSystem chạy (Auto)
 func EnsureNvidiaControlPanelHealthy() error {
-	m, err := mgr.Connect()
-	if err != nil {
-		return err
-	}
-	defer m.Disconnect()
+	err := withService("NVDisplay.ContainerLocalSystem", func(s *mgr.Service) error {
+		conf, err := s.Config()
+		if err == nil && conf.StartType != mgr.StartAutomatic {
+			conf.StartType = mgr.StartAutomatic
+			s.UpdateConfig(conf)
+		}
 
-	s, err := m.OpenService("NVDisplay.ContainerLocalSystem")
-	if err != nil {
-		return err
-	}
-	defer s.Close()
-
-	conf, err := s.Config()
-	if err == nil && conf.StartType != mgr.StartAutomatic {
-		conf.StartType = mgr.StartAutomatic
-		s.UpdateConfig(conf)
-	}
-
-	st, err := s.Query()
-	if err == nil && st.State != svc.Running {
-		s.Start()
-		for i := 0; i < 20; i++ {
-			time.Sleep(150 * time.Millisecond)
-			if st, err := s.Query(); err == nil && st.State == svc.Running {
-				break
+		st, err := s.Query()
+		if err == nil && st.State != svc.Running {
+			s.Start()
+			for i := 0; i < 20; i++ {
+				time.Sleep(150 * time.Millisecond)
+				if st, err := s.Query(); err == nil && st.State == svc.Running {
+					break
+				}
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	_, err = RunOut("reg.exe", "add", `HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext`, "/ve", "/t", "REG_SZ", "/d", "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}", "/f")
 	return err
@@ -75,55 +69,50 @@ func EnsureNvidiaControlPanelHealthy() error {
 
 // ServiceInfo: 查询内核驱动服务。
 func ServiceInfo(name string) (bool, string, string) {
-	m, err := mgr.Connect()
+	var stateStr SvcStateString = SvcStateUnknown
+	var stype SvcStartString = SvcStartUnknown
+
+	err := withService(name, func(s *mgr.Service) error {
+		st, err := s.Query()
+		if err == nil {
+			switch st.State {
+			case svc.Running:
+				stateStr = SvcStateRunning
+			case svc.Stopped:
+				stateStr = SvcStateStopped
+			case svc.StartPending:
+				stateStr = SvcStateStartPending
+			case svc.StopPending:
+				stateStr = SvcStateStopPending
+			case svc.Paused:
+				stateStr = SvcStatePaused
+			case svc.PausePending:
+				stateStr = SvcStatePausePending
+			case svc.ContinuePending:
+				stateStr = SvcStateContinuePending
+			}
+		}
+
+		if conf, err := s.Config(); err == nil {
+			switch conf.StartType {
+			case mgr.StartManual:
+				stype = SvcStartDemand
+			case mgr.StartAutomatic:
+				stype = SvcStartAuto
+			case mgr.StartDisabled:
+				stype = SvcStartDisabled
+			case windows.SERVICE_BOOT_START:
+				stype = SvcStartBoot
+			case windows.SERVICE_SYSTEM_START:
+				stype = SvcStartSystem
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return false, "", ""
 	}
-	defer m.Disconnect()
-
-	s, err := m.OpenService(name)
-	if err != nil {
-		return false, "", ""
-	}
-	defer s.Close()
-
-	st, err := s.Query()
-	stateStr := "UNKNOWN"
-	if err == nil {
-		switch st.State {
-		case svc.Running:
-			stateStr = "RUNNING"
-		case svc.Stopped:
-			stateStr = "STOPPED"
-		case svc.StartPending:
-			stateStr = "START_PENDING"
-		case svc.StopPending:
-			stateStr = "STOP_PENDING"
-		case svc.Paused:
-			stateStr = "PAUSED"
-		case svc.PausePending:
-			stateStr = "PAUSE_PENDING"
-		case svc.ContinuePending:
-			stateStr = "CONTINUE_PENDING"
-		}
-	}
-
-	stype := "UNKNOWN"
-	if conf, err := s.Config(); err == nil {
-		switch conf.StartType {
-		case mgr.StartManual:
-			stype = "DEMAND"
-		case mgr.StartAutomatic:
-			stype = "AUTO"
-		case mgr.StartDisabled:
-			stype = "DISABLED"
-		case windows.SERVICE_BOOT_START:
-			stype = "BOOT"
-		case windows.SERVICE_SYSTEM_START:
-			stype = "SYSTEM"
-		}
-	}
-	return true, stype, stateStr
+	return true, string(stype), string(stateStr)
 }
 
 // TaskInfo: 查询计划任务 (COM go-ole)。
@@ -132,57 +121,40 @@ func TaskInfo(name string) (bool, string, string) {
 		return false, "", ""
 	}
 
-	ole.CoInitialize(0)
-	defer ole.CoUninitialize()
-
-	unknown, err := oleutil.CreateObject("Schedule.Service")
-	if err != nil {
-		return true, "已注册", ""
-	}
-	sched, err := unknown.QueryInterface(ole.IID_IDispatch)
-	if err != nil {
-		return true, "已注册", ""
-	}
-	defer sched.Release()
-
-	_, err = oleutil.CallMethod(sched, "Connect")
-	if err != nil {
-		return true, "已注册", ""
-	}
-
-	folderRes, err := oleutil.CallMethod(sched, "GetFolder", "\\")
-	if err != nil {
-		return true, "已注册", ""
-	}
-	folder := folderRes.ToIDispatch()
-	defer folder.Release()
-
-	taskRes, err := oleutil.CallMethod(folder, "GetTask", name)
-	if err != nil {
-		return true, "已注册", ""
-	}
-	task := taskRes.ToIDispatch()
-	defer task.Release()
-
-	status := "已注册"
-	if stateRes, err := oleutil.GetProperty(task, "State"); err == nil {
-		switch int(stateRes.Val) {
-		case 1:
-			status = "Disabled"
-		case 2:
-			status = "Queued"
-		case 3:
-			status = "Ready"
-		case 4:
-			status = "Running"
-		}
-	}
-
+	status := string(TaskStateUnknown)
 	lastResult := ""
-	if resultRes, err := oleutil.GetProperty(task, "LastTaskResult"); err == nil {
-		lastResult = fmt.Sprintf("%v", resultRes.Value())
-	}
 
+	err := withTaskScheduler(func(folder *ole.IDispatch) error {
+		taskRes, err := oleutil.CallMethod(folder, "GetTask", name)
+		if err != nil {
+			// Task registered (XML exists) but COM can't enumerate it
+			return nil
+		}
+		task := taskRes.ToIDispatch()
+		defer task.Release()
+
+		if stateRes, err := oleutil.GetProperty(task, "State"); err == nil {
+			switch int(stateRes.Val) {
+			case 1:
+				status = string(TaskStateDisabled)
+			case 2:
+				status = string(TaskStateQueued)
+			case 3:
+				status = string(TaskStateReady)
+			case 4:
+				status = string(TaskStateRunning)
+			}
+		}
+
+		if resultRes, err := oleutil.GetProperty(task, "LastTaskResult"); err == nil {
+			lastResult = fmt.Sprintf("%v", resultRes.Value())
+		}
+		return nil
+	})
+	if err != nil {
+		// COM init or connection failed — task XML exists so report registered
+		return true, string(TaskStateUnknown), ""
+	}
 	return true, status, lastResult
 }
 

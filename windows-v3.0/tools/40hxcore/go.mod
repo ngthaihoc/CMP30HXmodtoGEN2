@@ -4,4 +4,4 @@ go 1.26.5
 
 require golang.org/x/sys v0.47.0
 
-require github.com/go-ole/go-ole v1.3.0 // indirect
+require github.com/go-ole/go-ole v1.3.0

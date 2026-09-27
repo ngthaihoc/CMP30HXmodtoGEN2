@@ -252,21 +252,14 @@ func ReadUnlockStateV2(retries int, delayMs int) *UnlockState {
 // ScServiceRunning: 查询服务是否 RUNNING
 // 返回 false 表示查询失败或未运行。
 func ScServiceRunning(name string) bool {
-	m, err := mgr.Connect()
-	if err != nil {
-		return false
-	}
-	defer m.Disconnect()
-
-	s, err := m.OpenService(name)
-	if err != nil {
-		return false
-	}
-	defer s.Close()
-
-	st, err := s.Query()
-	if err != nil {
-		return false
-	}
-	return st.State == svc.Running
+	running := false
+	err := withService(name, func(s *mgr.Service) error {
+		st, err := s.Query()
+		if err != nil {
+			return err
+		}
+		running = st.State == svc.Running
+		return nil
+	})
+	return err == nil && running
 }

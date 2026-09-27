@@ -270,20 +270,63 @@ disable_aspm() {
 
     # 3. Them pcie_aspm=force vao GRUB neu chua co
     if [[ -f "/etc/default/grub" ]]; then
-        if ! grep -q "pcie_aspm=force" /etc/default/grub; then
-            echo -e "      [*] Dang them pcie_aspm=force vao /etc/default/grub..."
-            sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="/GRUB_CMDLINE_LINUX_DEFAULT="pcie_aspm=force /g' /etc/default/grub
-            if command -v update-grub >/dev/null 2>&1; then
-                update-grub >/dev/null 2>&1
-                echo -e "      ${C_GREEN}[OK]${C_RESET} Da cap nhat GRUB (update-grub)"
-            elif command -v grub2-mkconfig >/dev/null 2>&1; then
-                grub2-mkconfig -o /boot/grub2/grub.cfg >/dev/null 2>&1
-                echo -e "      ${C_GREEN}[OK]${C_RESET} Da cap nhat GRUB (grub2-mkconfig)"
-            else
-                echo -e "      ${C_YELLOW}[!]${C_RESET} Da them vao /etc/default/grub nhung khong tim thay cong cu cap nhat GRUB."
-            fi
-        else
+        if grep -q "pcie_aspm=force" /etc/default/grub; then
             echo -e "      ${C_GREEN}[OK]${C_RESET} GRUB da co san pcie_aspm=force"
+        else
+            echo -e "      [*] Dang them pcie_aspm=force vao /etc/default/grub..."
+            local grub_file="/etc/default/grub"
+            local param="pcie_aspm=force"
+            local injected=0
+
+            # Case 1: variable present — try Python (handles single/double quotes, spaces)
+            if grep -qE '^[[:space:]]*GRUB_CMDLINE_LINUX_DEFAULT[[:space:]]*=' "${grub_file}"; then
+                if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
+                    local _py
+                    _py=$(command -v python3 2>/dev/null || command -v python 2>/dev/null)
+                    "${_py}" - "${grub_file}" "${param}" 2>/dev/null <<'_PYEOF'
+import sys, re
+path, param = sys.argv[1], sys.argv[2]
+text = open(path).read()
+def inject(m):
+    q1, val, q2 = m.group(3), m.group(4), m.group(5)
+    parts = [p for p in val.split() if p != param]
+    parts.append(param)
+    return m.group(1) + m.group(2) + q1 + ' '.join(parts) + q2
+pat = re.compile(
+    r"^([ \t]*GRUB_CMDLINE_LINUX_DEFAULT[ \t]*=[ \t]*)(['\"])(.*?)(\2)",
+    re.MULTILINE | re.DOTALL
+)
+open(path, 'w').write(pat.sub(inject, text))
+_PYEOF
+                    grep -q "${param}" "${grub_file}" && injected=1
+                fi
+
+                # Fallback: sed — handles the common GRUB_CMDLINE_LINUX_DEFAULT="..." form
+                if [[ "${injected}" -eq 0 ]]; then
+                    sed -i -E \
+                        "s|^([[:space:]]*GRUB_CMDLINE_LINUX_DEFAULT[[:space:]]*=[[:space:]]*\")(.*)(\")|\1\2 ${param}\3|" \
+                        "${grub_file}"
+                    grep -q "${param}" "${grub_file}" && injected=1
+                fi
+            else
+                # Case 2: variable absent — add it
+                printf '\nGRUB_CMDLINE_LINUX_DEFAULT="%s"\n' "${param}" >> "${grub_file}"
+                grep -q "${param}" "${grub_file}" && injected=1
+            fi
+
+            if [[ "${injected}" -eq 1 ]]; then
+                if command -v update-grub >/dev/null 2>&1; then
+                    update-grub >/dev/null 2>&1
+                    echo -e "      ${C_GREEN}[OK]${C_RESET} Da cap nhat GRUB (update-grub)"
+                elif command -v grub2-mkconfig >/dev/null 2>&1; then
+                    grub2-mkconfig -o /boot/grub2/grub.cfg >/dev/null 2>&1
+                    echo -e "      ${C_GREEN}[OK]${C_RESET} Da cap nhat GRUB (grub2-mkconfig)"
+                else
+                    echo -e "      ${C_YELLOW}[!]${C_RESET} Da them vao /etc/default/grub nhung khong tim thay cong cu cap nhat GRUB."
+                fi
+            else
+                echo -e "      ${C_YELLOW}[!]${C_RESET} Khong the them ${param} vao /etc/default/grub tu dong. Vui long them thu cong."
+            fi
         fi
     fi
 }
@@ -305,21 +348,12 @@ inject_bar0_mmio() {
         return 0
     fi
 
-    if ! command -v gcc >/dev/null 2>&1; then
-        echo -e "      ${C_YELLOW}[!] Khong co gcc de bien dich mmio_injector, chuyen sang cau hinh setpci.${C_RESET}"
-        return 0
-    fi
-
     local injector_dir="$(dirname "$0")/linux-mmio"
-    local injector_src="${injector_dir}/mmio_injector.c"
     local injector_bin="${injector_dir}/mmio_injector"
 
     if [[ ! -x "${injector_bin}" ]]; then
-        echo -e "      [*] Dang bien dich mmio_injector.c..."
-        if ! gcc -O2 -o "${injector_bin}" "${injector_src}"; then
-            echo -e "      ${C_YELLOW}[!] Bien dich that bai, chuyen sang cau hinh setpci.${C_RESET}"
-            return 0
-        fi
+        echo -e "      ${C_YELLOW}[!] Khong tim thay executable mmio_injector tai ${injector_bin}, chuyen sang cau hinh setpci.${C_RESET}"
+        return 0
     fi
 
     echo -e "      [*] Dang kiem tra va ghi de thanh ghi BAR0 MMIO (TU116 XVE)..."
@@ -577,6 +611,14 @@ install_systemd_service() {
         cp -f "${current_script}" "${BIN_INSTALL_PATH}"
         chmod +x "${BIN_INSTALL_PATH}"
         echo -e "      [OK] Da sao chep script den: ${BIN_INSTALL_PATH}"
+        
+        # Also copy mmio_injector
+        local injector_dir="$(dirname "${current_script}")/linux-mmio"
+        if [[ -d "${injector_dir}" ]]; then
+            mkdir -p "/usr/local/bin/linux-mmio"
+            cp -f "${injector_dir}/mmio_injector" "/usr/local/bin/linux-mmio/"
+            chmod +x "/usr/local/bin/linux-mmio/mmio_injector"
+        fi
     fi
 
     # Tao file systemd service (chay truoc display-manager de tranh xung dot driver)
@@ -645,6 +687,7 @@ uninstall_service() {
     rm -f "${SYSTEMD_SVC_PATH}"
     rm -f "${SUSPEND_HOOK_PATH}"
     rm -f "${BIN_INSTALL_PATH}"
+    rm -rf "/usr/local/bin/linux-mmio"
 
     echo -e "${C_GREEN}[V] Da go bo hoan toan Systemd Service va Sleep Hook.${C_RESET}"
     echo "    He thong da duoc khoi phuc trang thai ban dau."

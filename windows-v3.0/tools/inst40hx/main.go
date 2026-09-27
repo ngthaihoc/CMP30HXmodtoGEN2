@@ -137,6 +137,9 @@ func main() {
 		case "-gspensure":
 			gspEnsureMain()
 			return
+		case "-reset":
+			resetPnpMain()
+			return
 		case "-uninstall":
 			uninstall()
 			return
@@ -413,6 +416,15 @@ func gspEnsureMain() {
 		}
 		fmt.Println("[GSP] gspensure: EnableGpuFirmware=1 已设置")
 	}
+}
+
+func resetPnpMain() {
+	if !isAdmin() {
+		return
+	}
+	bus := &hxcore.ProductionBus{}
+	bus.PnpResetDevice(0x2189)
+	bus.PnpResetDevice(0x1F0B)
 }
 
 func copyEmbedTo(target string, src string) error {

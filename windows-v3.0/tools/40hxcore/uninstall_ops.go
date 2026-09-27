@@ -35,30 +35,16 @@ var UninstallTaskNames = []string{
 // UninstallTasks: 删除计划任务, 返回实际删掉的名字 (使用 COM go-ole)
 func UninstallTasks() []string {
 	var removed []string
-	
-	ole.CoInitialize(0)
-	defer ole.CoUninitialize()
 
-	unknown, err := oleutil.CreateObject("Schedule.Service")
-	if err == nil {
-		sched, err := unknown.QueryInterface(ole.IID_IDispatch)
-		if err == nil {
-			defer sched.Release()
-			if _, err := oleutil.CallMethod(sched, "Connect"); err == nil {
-				if folderRes, err := oleutil.CallMethod(sched, "GetFolder", "\\"); err == nil {
-					folder := folderRes.ToIDispatch()
-					defer folder.Release()
-					
-					for _, tn := range UninstallTaskNames {
-						if _, err := oleutil.CallMethod(folder, "DeleteTask", tn, 0); err == nil {
-							fmt.Printf("  Đã xoá tác vụ lịch trình %s\n", tn)
-							removed = append(removed, tn)
-						}
-					}
-				}
+	_ = withTaskScheduler(func(folder *ole.IDispatch) error {
+		for _, tn := range UninstallTaskNames {
+			if _, err := oleutil.CallMethod(folder, "DeleteTask", tn, 0); err == nil {
+				fmt.Printf("  Đã xoá tác vụ lịch trình %s\n", tn)
+				removed = append(removed, tn)
 			}
 		}
-	}
+		return nil
+	})
 	return removed
 }
 
@@ -140,24 +126,16 @@ func UninstallEspEfi() bool {
 
 // UninstallDriverServices: 停止并删除历史驱动服务(v2.5 BYOVD + 旧版 bridge/early)
 func UninstallDriverServices() {
-	m, err := mgr.Connect()
-	if err == nil {
-		defer m.Disconnect()
-		for _, name := range []string{"ThrottleStop", "40hx_bridge", "40hx_early", "40hx_early-d", "WinRing0_1_2_0", "WinRing0x64", "WinRing0"} {
-			s, err := m.OpenService(name)
-			if err != nil {
-				fmt.Printf("  Dịch vụ %s không tồn tại (bỏ qua)\n", name)
-				continue
-			}
+	for _, name := range []string{"ThrottleStop", "40hx_bridge", "40hx_early", "40hx_early-d", "WinRing0_1_2_0", "WinRing0x64", "WinRing0"} {
+		err := withService(name, func(s *mgr.Service) error {
 			s.Control(svc.Stop)
 			time.Sleep(300 * time.Millisecond)
-			err = s.Delete()
-			s.Close()
-			if err == nil {
-				fmt.Printf("  Dịch vụ %s đã được xoá\n", name)
-			} else {
-				fmt.Printf("  Xoá dịch vụ %s thất bại: %v\n", name, err)
-			}
+			return s.Delete()
+		})
+		if err != nil {
+			fmt.Printf("  Dịch vụ %s không tồn tại hoặc xoá thất bại: %v\n", name, err)
+		} else {
+			fmt.Printf("  Dịch vụ %s đã được xoá\n", name)
 		}
 	}
 	_ = EnsureNvidiaControlPanelHealthy()
@@ -250,16 +228,12 @@ func CheckLeftover() []string {
 	// 卸载可能只删了服务注册、文件要重启后才能删, 不能假装干净。
 	svcNames := []string{"ThrottleStop", "40hx_bridge", "40hx_early", "40hx_early-d", "WinRing0_1_2_0", "WinRing0x64", "WinRing0"}
 	svcLeft := false
-	if m, err := mgr.Connect(); err == nil {
-		for _, sn := range svcNames {
-			if s, err := m.OpenService(sn); err == nil {
-				rem = append(rem, "- Dịch vụ driver "+sn)
-				fmt.Println("  [!] Dịch vụ driver " + sn + " vẫn còn tàn dư (có thể vẫn đang chạy, hãy chạy lại gỡ cài đặt sau khi khởi động lại)")
-				svcLeft = true
-				s.Close()
-			}
+	for _, sn := range svcNames {
+		if err := withService(sn, func(_ *mgr.Service) error { return nil }); err == nil {
+			rem = append(rem, "- Dịch vụ driver "+sn)
+			fmt.Println("  [!] Dịch vụ driver " + sn + " vẫn còn tàn dư (có thể vẫn đang chạy, hãy chạy lại gỡ cài đặt sau khi khởi động lại)")
+			svcLeft = true
 		}
-		m.Disconnect()
 	}
 	if !svcLeft {
 		fmt.Println("  Dịch vụ driver: Đã dọn sạch")

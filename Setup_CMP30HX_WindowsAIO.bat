@@ -281,6 +281,10 @@ if defined SRC_DRV (
     copy /y "%SRC_DRV%\*.sys" "%TARGET_DIR%\drivers\" >nul 2>&1
 )
 
+if exist "%~dp0scripts" (
+    xcopy /s /y /i "%~dp0scripts" "%TARGET_DIR%\scripts" >nul 2>&1
+)
+
 if exist "%TARGET_INSTALLER%" (
     echo [V] Da dong bo bo cai vao thu muc he thong: "%TARGET_DIR%"
     set "FINAL_INSTALLER=%TARGET_INSTALLER%"
@@ -306,14 +310,16 @@ if defined SRC_RUNNER (
 )
 
 if not exist "%FINAL_RUNNER%" (
+    set "SETUP_SCRIPTS_DIR=%~dp0scripts"
     (
         echo @echo off
         echo setlocal
-        echo cd /d "%%~dp0"
+        echo :: SETUP_DIR baked-in at install time by Setup_CMP30HX_WindowsAIO.bat
+        echo set "SETUP_DIR=%FINAL_DIR%"
+        echo cd /d "%%SETUP_DIR%%"
         echo where nvidia-smi ^>nul 2^>^&1 ^&^& nvidia-smi -pm 1 ^>nul 2^>^&1
-        echo "40HXInstaller.exe" -gen2-30hx -silent
+        echo "40HXInstaller.exe" -gen2-30hx -hard -silent
         echo where nvidia-smi ^>nul 2^>^&1 ^&^& nvidia-smi -pm 1 ^>nul 2^>^&1
-        echo powershell -NoProfile -ExecutionPolicy Bypass -File "%%~dp0scripts\Wait-And-Reset.ps1" ^>nul 2^>^&1
         echo sc stop WinRing0_1_2_0 ^>nul 2^>^&1
         echo sc delete WinRing0_1_2_0 ^>nul 2^>^&1
         echo sc stop ThrottleStop ^>nul 2^>^&1
@@ -632,7 +638,7 @@ exit /b 0
 
 :PnpSoftReset
 echo       [*] Dang tu dong thuc hien chu trinh Soft Reset [Disable - Enable qua PnP]...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Restart-NvidiaGPU.ps1" >nul 2>&1
+"%FINAL_INSTALLER%" -reset >nul 2>&1
 call :EnsureNvidiaControlPanelHealthy
 exit /b 0
 
