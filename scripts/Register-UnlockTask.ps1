@@ -39,7 +39,7 @@ try {
     $tEvent.Delay = 'PT3S'
     $tEvent.Enabled = $true
     
-    $srv.GetFolder('\').RegisterTaskDefinition('CMP30HX_Gen2_Unlock', $def, 4, $null, $null, 5, $null)
+    $srv.GetFolder('\').RegisterTaskDefinition('CMP30HX_Gen2_Unlock', $def, 4, $null, $null, 5, $null) | Out-Null
 } catch {
     Write-Warning "Failed to add Event trigger: $_"
 }

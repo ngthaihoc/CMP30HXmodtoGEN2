@@ -1,11 +1,12 @@
 package hxcore
 
-// svchelper.go — Shared helpers for Windows Service Manager and COM Task Scheduler
+// svchelper.go: Shared helpers for Windows Service Manager and COM Task Scheduler
 // Eliminates duplicated boilerplate across link.go, service.go, state.go, uninstall_ops.go.
 
 import (
 	"github.com/go-ole/go-ole"
 	"github.com/go-ole/go-ole/oleutil"
+	"golang.org/x/sys/windows/registry"
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
@@ -90,8 +91,20 @@ func withTaskScheduler(fn func(folder *ole.IDispatch) error) error {
 	if err != nil {
 		return err
 	}
+	defer folderRes.Clear()
 	folder := folderRes.ToIDispatch()
 	defer folder.Release()
 
 	return fn(folder)
+}
+
+// registerNvCplContextMenu registers the NVIDIA Control Panel desktop context menu handler
+// via native Windows Registry API instead of spawning reg.exe.
+func registerNvCplContextMenu() error {
+	k, _, err := registry.CreateKey(registry.CLASSES_ROOT, `Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext`, registry.SET_VALUE)
+	if err != nil {
+		return err
+	}
+	defer k.Close()
+	return k.SetStringValue("", "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}")
 }
