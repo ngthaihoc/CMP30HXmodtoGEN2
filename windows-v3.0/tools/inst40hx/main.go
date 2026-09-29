@@ -180,35 +180,21 @@ func regTaskOnly() {
 
 // selfElevate: Khởi động lại với quyền Admin qua UAC ShellExecute "runas"
 func selfElevate() {
-	exe, _ := os.Executable()
-	verb, _ := syscall.UTF16PtrFromString("runas")
-	file, _ := syscall.UTF16PtrFromString(exe)
-	args := append([]string{}, os.Args[1:]...)
-	args = append(args, "-elevated")
-	params, _ := syscall.UTF16PtrFromString(strings.Join(args, " "))
-	r, _, _ := procShellExecuteW.Call(0,
-		uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(file)),
-		uintptr(unsafe.Pointer(params)), 0, 1)
-	if r <= 32 {
-		msgbox("Trình Cài Đặt 40HX / 30HX", fmt.Sprintf("Nâng quyền thất bại (Mã lỗi %d).\nVui lòng nhấp chuột phải -> Chọn 'Run as administrator'.", r), mbIconError)
-	}
-	os.Exit(0)
+	hxcore.SelfElevate("Trình Cài Đặt 40HX / 30HX")
 }
 
 var (
-	procShellExecuteW = syscall.NewLazyDLL("shell32.dll").NewProc("ShellExecuteW")
-	gen2Succeeded     bool
+	gen2Succeeded bool
 )
 
 const (
-	mbIconInfo  = 0x40
-	mbIconError = 0x10
-	mbIconWarn  = 0x30 // MB_ICONWARNING — v2.6.0: EFI 跳过/部分成功等"可继续但要注意"场景
-	mbYesNo     = 0x04 // MB_YESNO → 返回 IDYES=6 / IDNO=7
+	mbIconInfo  = hxcore.MbIconInfo
+	mbIconError = hxcore.MbIconError
+	mbIconWarn  = hxcore.MbIconWarn // MB_ICONWARNING: v2.6.0: EFI 跳过/部分成功等"可继续但要注意"场景
+	mbYesNo     = hxcore.MbYesNo     // MB_YESNO → 返回 IDYES=6 / IDNO=7
 )
 
 var (
-	procMsgBoxW     = syscall.NewLazyDLL("user32.dll").NewProc("MessageBoxW")
 	procCreateMutex = syscall.NewLazyDLL("kernel32.dll").NewProc("CreateMutexW")
 )
 
@@ -217,9 +203,7 @@ func msgbox(title, text string, icon uint) {
 	if hasArg("-y") || hasArg("-silent") {
 		return
 	}
-	t, _ := syscall.UTF16PtrFromString(title)
-	b, _ := syscall.UTF16PtrFromString(text)
-	procMsgBoxW.Call(0, uintptr(unsafe.Pointer(b)), uintptr(unsafe.Pointer(t)), uintptr(icon))
+	hxcore.MsgBox(title, text, icon)
 }
 
 // msgboxYesNo: 是/否询问。自动模式: -y→true(全自动继续), -silent→false(不打扰)。
@@ -230,10 +214,7 @@ func msgboxYesNo(title, text string) bool {
 	if hasArg("-silent") {
 		return false
 	}
-	t, _ := syscall.UTF16PtrFromString(title)
-	b, _ := syscall.UTF16PtrFromString(text)
-	r, _, _ := procMsgBoxW.Call(0, uintptr(unsafe.Pointer(b)), uintptr(unsafe.Pointer(t)), uintptr(mbYesNo|mbIconInfo))
-	return r == 6 // IDYES
+	return hxcore.MsgBoxYesNo(title, text)
 }
 
 // setupLog: 输出镜像到日志文件(默认 %TEMP%/<name>, 命令行 -log <file> 优先)
@@ -325,24 +306,7 @@ func printHelp() {
 // ===================== 底层 =====================
 
 func isAdmin() bool {
-	var t windows.Token
-	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &t)
-	if err == nil {
-		defer t.Close()
-		var e uint32
-		var n uint32
-		if err = windows.GetTokenInformation(t, windows.TokenElevation,
-			(*byte)(unsafe.Pointer(&e)), uint32(unsafe.Sizeof(e)), &n); err == nil && e != 0 {
-			return true
-		}
-		// TokenElevation 可能因受限环境(沙箱/服务)误报 0, 再试 SCM 全权
-	}
-	scm, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_ALL_ACCESS)
-	if err == nil {
-		windows.CloseServiceHandle(scm)
-		return true
-	}
-	return false
+	return hxcore.IsAdmin()
 }
 
 // enableGsp: 设 EnableGpuFirmware=1 (需管理员)
@@ -423,8 +387,7 @@ func resetPnpMain() {
 		return
 	}
 	bus := &hxcore.ProductionBus{}
-	bus.PnpResetDevice(0x2189)
-	bus.PnpResetDevice(0x1F0B)
+	bus.PnpResetDevice(0x1F0B) // 40HX only; 30HX is protected from PnP resets
 }
 
 func copyEmbedTo(target string, src string) error {

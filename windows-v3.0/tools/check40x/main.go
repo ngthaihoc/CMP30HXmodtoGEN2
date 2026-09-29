@@ -17,12 +17,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
-	"unsafe"
 
 	hxcore "40hxcore"
-	"golang.org/x/sys/windows"
 )
 
 const (
@@ -31,10 +28,6 @@ const (
 	gen2TaskName        = "40HX PCIe Gen2 Bring-up" // 与安装器 setupGen2Task 同名
 	cmp30HXTaskName     = "CMP30HX_Gen2_Unlock"
 	cmp30HXUserTaskName = "CMP30HX_Gen2_Unlock_User"
-)
-
-var (
-	procMsgBoxW = syscall.NewLazyDLL("user32.dll").NewProc("MessageBoxW")
 )
 
 // ---- v2.5: 临时驱动管理 (ThrottleStop + WinRing0, 用完即卸) ----
@@ -178,48 +171,17 @@ func cleanupDrivers() {
 }
 
 func msgbox(text string, icon uint) {
-	t, _ := syscall.UTF16PtrFromString(appTitle)
-	b, _ := syscall.UTF16PtrFromString(text)
-	procMsgBoxW.Call(0, uintptr(unsafe.Pointer(b)), uintptr(unsafe.Pointer(t)), uintptr(icon))
+	hxcore.MsgBox(appTitle, text, icon)
 }
 
-// isAdmin: 与安装器同款实现 (TokenElevation 在受限环境可能误报 0, 再试 SCM 全权)
+// isAdmin: 与安装器同款实现
 func isAdmin() bool {
-	var t windows.Token
-	err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &t)
-	if err == nil {
-		defer t.Close()
-		var e uint32
-		var n uint32
-		if err = windows.GetTokenInformation(t, windows.TokenElevation,
-			(*byte)(unsafe.Pointer(&e)), uint32(unsafe.Sizeof(e)), &n); err == nil && e != 0 {
-			return true
-		}
-	}
-	scm, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_ALL_ACCESS)
-	if err == nil {
-		windows.CloseServiceHandle(scm)
-		return true
-	}
-	return false
+	return hxcore.IsAdmin()
 }
 
 // selfElevate: 非管理员时 ShellExecute runas 提权重启(诊断要挂 ESP 读 40hx_log)
 func selfElevate() {
-	exe, _ := os.Executable()
-	verb, _ := syscall.UTF16PtrFromString("runas")
-	file, _ := syscall.UTF16PtrFromString(exe)
-	args := append([]string{}, os.Args[1:]...)
-	args = append(args, "-elevated")
-	params, _ := syscall.UTF16PtrFromString(strings.Join(args, " "))
-	proc := syscall.NewLazyDLL("shell32.dll").NewProc("ShellExecuteW")
-	r, _, _ := proc.Call(0,
-		uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(file)),
-		uintptr(unsafe.Pointer(params)), 0, 1)
-	if r <= 32 {
-		msgbox("Cần quyền Quản trị viên để đọc nhật ký mở khoá EFI (40hx_log.txt).\nVui lòng nhấp chuột phải vào chương trình -> Chọn Run as administrator.", 0x30)
-	}
-	os.Exit(0)
+	hxcore.SelfElevate(appTitle)
 }
 
 // logsDir: %LOCALAPPDATA%\40HXUnlock\logs (统一日志收集目录, 用户好找)

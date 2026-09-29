@@ -89,6 +89,11 @@ func (n *LinkNegotiator) Negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint3
 	if prof.MaxSupportedGen > 0 && targetGen > prof.MaxSupportedGen {
 		targetGen = prof.MaxSupportedGen
 	}
+	// CMP 30HX (TU116) has laser-cut eFuse and cannot tolerate Link Disable or PnP resets.
+	// Hardware Rule 3: No dangerous resets on 30HX. Force allowStage2 to false.
+	if prof.DeviceID == 0x2189 || prof.Family == "TU116" {
+		allowStage2 = false
+	}
 
 	res := &NegotiationResult{
 		TargetGen: targetGen,
@@ -580,14 +585,14 @@ func (p *ProductionBus) RestartNVDisplay() error {
 			time.Sleep(200 * time.Millisecond)
 			st, err := s.Query()
 			if err == nil && st.State == svc.Running {
-				_, _ = RunOut("reg.exe", "add", `HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext`, "/ve", "/t", "REG_SZ", "/d", "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}", "/f")
+				_ = registerNvCplContextMenu()
 				return nil
 			}
 			if st.State == svc.Stopped {
 				s.Start()
 			}
 		}
-		_, _ = RunOut("reg.exe", "add", `HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext`, "/ve", "/t", "REG_SZ", "/d", "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}", "/f")
+		_ = registerNvCplContextMenu()
 		return nil
 	})
 	if err != nil {

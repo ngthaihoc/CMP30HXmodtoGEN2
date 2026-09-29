@@ -10,3 +10,5 @@ Test_Mock_CMP30HX.bat
 Test_Mock_CMP30HX_Linux.sh
 .vscode/
 *.zip
+commits.txt
+diff.txt

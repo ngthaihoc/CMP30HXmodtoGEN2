@@ -318,7 +318,7 @@ if not exist "%FINAL_RUNNER%" (
         echo set "SETUP_DIR=%FINAL_DIR%"
         echo cd /d "%%SETUP_DIR%%"
         echo where nvidia-smi ^>nul 2^>^&1 ^&^& nvidia-smi -pm 1 ^>nul 2^>^&1
-        echo "40HXInstaller.exe" -gen2-30hx -hard -silent
+        echo "40HXInstaller.exe" -gen2-30hx -silent
         echo where nvidia-smi ^>nul 2^>^&1 ^&^& nvidia-smi -pm 1 ^>nul 2^>^&1
         echo sc stop WinRing0_1_2_0 ^>nul 2^>^&1
         echo sc delete WinRing0_1_2_0 ^>nul 2^>^&1
@@ -637,8 +637,7 @@ if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
 exit /b 0
 
 :PnpSoftReset
-echo       [*] Dang tu dong thuc hien chu trinh Soft Reset [Disable - Enable qua PnP]...
-"%FINAL_INSTALLER%" -reset >nul 2>&1
+echo       [*] Dang khoi phuc dich vu NVDisplay va Context Menu...
 call :EnsureNvidiaControlPanelHealthy
 exit /b 0
 
@@ -990,7 +989,8 @@ echo ================================================================
 echo.
 echo [*] Dang kiem tra va khoi phuc service NVDisplay.ContainerLocalSystem...
 sc config NVDisplay.ContainerLocalSystem start= auto >nul 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Restart-NVDisplay.ps1" >nul 2>&1
+net stop NVDisplay.ContainerLocalSystem >nul 2>&1
+net start NVDisplay.ContainerLocalSystem >nul 2>&1
 echo       [OK] Service NVDisplay.ContainerLocalSystem da duoc dat ve tu dong [Auto] va khoi chay.
 echo.
 echo [*] Dang dang ky lai Desktop Context Menu Handler cho NVIDIA Control Panel...

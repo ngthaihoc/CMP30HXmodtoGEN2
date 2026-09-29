@@ -348,12 +348,11 @@ inject_bar0_mmio() {
         return 0
     fi
 
-    local injector_dir="$(dirname "$0")/linux-mmio"
     local injector_bin="${injector_dir}/mmio_injector"
 
     if [[ ! -x "${injector_bin}" ]]; then
-        echo -e "      ${C_YELLOW}[!] Khong tim thay executable mmio_injector tai ${injector_bin}, chuyen sang cau hinh setpci.${C_RESET}"
-        return 0
+        echo -e "      ${C_RED}[X] Loi: Khong tim thay executable mmio_injector tai ${injector_bin}. Vui long compile binary truoc khi chay script.${C_RESET}"
+        return 1
     fi
 
     echo -e "      [*] Dang kiem tra va ghi de thanh ghi BAR0 MMIO (TU116 XVE)..."

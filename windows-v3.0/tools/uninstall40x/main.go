@@ -20,8 +20,6 @@ import (
 	"unsafe"
 
 	"40hxcore"
-
-	"golang.org/x/sys/windows"
 )
 
 var silent bool
@@ -29,14 +27,12 @@ var silent bool
 // ---- GUI helpers (无 console, 消息框 + 日志) ----
 
 const (
-	mbIconInfo  = 0x40
-	mbIconError = 0x10
+	mbIconInfo  = hxcore.MbIconInfo
+	mbIconError = hxcore.MbIconError
 )
 
 var (
-	procMsgBoxW       = syscall.NewLazyDLL("user32.dll").NewProc("MessageBoxW")
-	procCreateMutex   = syscall.NewLazyDLL("kernel32.dll").NewProc("CreateMutexW")
-	procShellExecuteW = syscall.NewLazyDLL("shell32.dll").NewProc("ShellExecuteW")
+	procCreateMutex = syscall.NewLazyDLL("kernel32.dll").NewProc("CreateMutexW")
 )
 
 func msgbox(title, text string, icon uint) {
@@ -44,9 +40,7 @@ func msgbox(title, text string, icon uint) {
 	if silent {
 		return
 	}
-	t, _ := syscall.UTF16PtrFromString(title)
-	b, _ := syscall.UTF16PtrFromString(text)
-	procMsgBoxW.Call(0, uintptr(unsafe.Pointer(b)), uintptr(unsafe.Pointer(t)), uintptr(icon))
+	hxcore.MsgBox(title, text, icon)
 }
 
 func setupLog(defName string) {
@@ -76,19 +70,7 @@ func lockOnce(name string) func() {
 
 // selfElevate: 非管理员时 ShellExecute "runas" 重启自身(触发 UAC), 父进程退出
 func selfElevate() {
-	exe, _ := os.Executable()
-	verb, _ := syscall.UTF16PtrFromString("runas")
-	file, _ := syscall.UTF16PtrFromString(exe)
-	args := append([]string{}, os.Args[1:]...)
-	args = append(args, "-elevated")
-	params, _ := syscall.UTF16PtrFromString(strings.Join(args, " "))
-	r, _, _ := procShellExecuteW.Call(0,
-		uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(file)),
-		uintptr(unsafe.Pointer(params)), 0, 1)
-	if r <= 32 {
-		msgbox("Công cụ gỡ cài đặt 40HX", fmt.Sprintf("Yêu cầu quyền quản trị thất bại (mã lỗi %d).\nVui lòng nhấp chuột phải vào tệp -> Chọn Run as administrator.", r), mbIconError)
-	}
-	os.Exit(0)
+	hxcore.SelfElevate("Công cụ gỡ cài đặt 40HX")
 }
 
 func main() {
@@ -216,24 +198,7 @@ func hasArg(name string) bool {
 }
 
 func isAdmin() bool {
-	t, err := windows.OpenCurrentProcessToken()
-	if err == nil {
-		defer t.Close()
-		var buf [4]byte
-		var need uint32
-		if err = windows.GetTokenInformation(t, windows.TokenElevation,
-			&buf[0], uint32(len(buf)), &need); err == nil && buf[0] != 0 {
-			return true
-		}
-		// TokenElevation 可能因受限环境(沙箱/服务)误报 0, 再试 SCM 全权
-	}
-	// 兜底: 能以 ALL_ACCESS 打开服务控制管理器 = 真管理员
-	scm, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_ALL_ACCESS)
-	if err == nil {
-		windows.CloseServiceHandle(scm)
-		return true
-	}
-	return false
+	return hxcore.IsAdmin()
 }
 
 // ---- v2.6.0: 清理步骤实现已上提 40hxcore/uninstall_ops.go, 以下为编排薄包装 ----

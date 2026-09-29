@@ -63,8 +63,7 @@ func EnsureNvidiaControlPanelHealthy() error {
 	if err != nil {
 		return err
 	}
-	_, err = RunOut("reg.exe", "add", `HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext`, "/ve", "/t", "REG_SZ", "/d", "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}", "/f")
-	return err
+	return registerNvCplContextMenu()
 }
 
 // ServiceInfo: 查询内核驱动服务。

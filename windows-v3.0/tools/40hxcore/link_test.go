@@ -127,20 +127,20 @@ func TestLinkNegotiator_MMIO_ShadowRegisterSequence(t *testing.T) {
 
 func TestLinkNegotiator_Stage2_PnPRecovery(t *testing.T) {
 	// Arrange: Link starts at Gen1 and fails Stage 1 retrains;
-	// When allowStage2=true, PnpResetDevice is called and link recovers to Gen2
+	// On CMP 40HX (TU106), when allowStage2=true, PnpResetDevice is called and link recovers to Gen2
 	bus := NewMockHardwareBus()
 	bdf := uint32(0x0100)
 	prof := GPUProfile{
 		VendorID:        0x10DE,
-		DeviceID:        0x2189,
-		Name:            "CMP 30HX",
-		Family:          "TU116",
+		DeviceID:        0x1F0B,
+		Name:            "CMP 40HX",
+		Family:          "TU106",
 		MaxSupportedGen: 2,
 	}
-	bus.SetPCIConfig(bdf, 0x00, 0x218910DE)
+	bus.SetPCIConfig(bdf, 0x00, 0x1F0B10DE)
 	bus.SetPCICap(bdf, 0x40)
 	bus.SetPCIConfig(bdf, 0x10, 0xF6000000)
-	bus.SetMMIO(0xF6000000+0x00, 0x17000000)
+	bus.SetMMIO(0xF6000000+0x00, 0x16000000) // BOOT_0: TU106 (0x16)
 	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000011) // Stuck at Gen1
 
 	// Hook PnP reset to flip link speed to Gen2
@@ -163,6 +163,40 @@ func TestLinkNegotiator_Stage2_PnPRecovery(t *testing.T) {
 	}
 	if !bus.PnpResetCalled {
 		t.Fatalf("expected PnpResetDevice to be invoked")
+	}
+}
+
+func TestLinkNegotiator_TU116_DisallowsStage2(t *testing.T) {
+	// Arrange: TU116 (CMP 30HX) must never trigger Stage 2 PnP reset even if allowStage2 is true
+	bus := NewMockHardwareBus()
+	bdf := uint32(0x0100)
+	prof := GPUProfile{
+		VendorID:        0x10DE,
+		DeviceID:        0x2189,
+		Name:            "CMP 30HX",
+		Family:          "TU116",
+		MaxSupportedGen: 2,
+	}
+	bus.SetPCIConfig(bdf, 0x00, 0x218910DE)
+	bus.SetPCICap(bdf, 0x40)
+	bus.SetPCIConfig(bdf, 0x10, 0xF6000000)
+	bus.SetMMIO(0xF6000000+0x00, 0x17000000)
+	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000011) // Stuck at Gen1
+
+	negotiator := NewLinkNegotiator(bus)
+
+	// Act: pass allowStage2 = true
+	res, err := negotiator.Negotiate(bdf, prof, 0xFFFFFFFF, 2, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Assert: Stage 2 must NOT be triggered, PnpResetDevice must NOT be called
+	if res.Stage2Triggered {
+		t.Fatalf("expected Stage2Triggered to be false on TU116, got true")
+	}
+	if bus.PnpResetCalled {
+		t.Fatalf("PnpResetDevice was called on TU116, violates Hardware Rule 3")
 	}
 }
 

@@ -8,71 +8,30 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
-	"unsafe"
 
 	hxcore "40hxcore"
 
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
-	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
-var (
-	procMsgBoxW       = syscall.NewLazyDLL("user32.dll").NewProc("MessageBoxW")
-	procShellExecuteW = syscall.NewLazyDLL("shell32.dll").NewProc("ShellExecuteW")
-)
-
 const (
-	mbIconError = 0x00000010
-
 	DeviceIDCMP40HX = 0x1F0B // NVIDIA TU106 (CMP 40HX)
 	DeviceIDCMP30HX = 0x2189 // NVIDIA TU116 (CMP 30HX)
 )
 
 func isAdmin() bool {
-	var sid *windows.SID
-	err := windows.AllocateAndInitializeSid(
-		&windows.SECURITY_NT_AUTHORITY,
-		2,
-		windows.SECURITY_BUILTIN_DOMAIN_RID,
-		windows.DOMAIN_ALIAS_RID_ADMINS,
-		0, 0, 0, 0, 0, 0,
-		&sid)
-	if err != nil {
-		return false
-	}
-	defer windows.FreeSid(sid)
-	token := windows.Token(0)
-	member, err := token.IsMember(sid)
-	if err != nil {
-		return false
-	}
-	return member
+	return hxcore.IsAdmin()
 }
 
 func selfElevate() {
-	exe, _ := os.Executable()
-	verb, _ := syscall.UTF16PtrFromString("runas")
-	file, _ := syscall.UTF16PtrFromString(exe)
-	args := append([]string{}, os.Args[1:]...)
-	args = append(args, "-elevated")
-	params, _ := syscall.UTF16PtrFromString(strings.Join(args, " "))
-	r, _, _ := procShellExecuteW.Call(0,
-		uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(file)),
-		uintptr(unsafe.Pointer(params)), 0, 1)
-	if r <= 32 {
-		msgbox("UnlockRiotGame", fmt.Sprintf("Nâng quyền thất bại (mã lỗi %d).\nVui lòng nhấp chuột phải vào ứng dụng -> Chọn 'Run as administrator'.", r), mbIconError)
-	}
-	os.Exit(0)
+	hxcore.SelfElevate("UnlockRiotGame")
 }
 
 func msgbox(title, msg string, flags uint32) {
-	tPtr, _ := syscall.UTF16PtrFromString(title)
-	mPtr, _ := syscall.UTF16PtrFromString(msg)
-	procMsgBoxW.Call(0, uintptr(unsafe.Pointer(mPtr)), uintptr(unsafe.Pointer(tPtr)), uintptr(flags))
+	hxcore.MsgBox(title, msg, uint(flags))
 }
 
 func isWindows11() bool {
