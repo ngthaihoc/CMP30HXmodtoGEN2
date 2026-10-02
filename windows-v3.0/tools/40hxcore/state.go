@@ -99,10 +99,10 @@ func FindGPUPCI(wh syscall.Handle) (uint32, bool) {
 	return bdf, ok
 }
 
-// FindGPUPCIWithProfile: 全扫 PCI config 定位 GPU BDF 并返回 Profile
-func FindGPUPCIWithProfile(wh syscall.Handle) (uint32, GPUProfile, bool) {
+// FindGPUPCIWithBus: Quét PCI config qua HardwareBus định vị GPU BDF và trả về Profile
+func FindGPUPCIWithBus(bus HardwareBus) (uint32, GPUProfile, bool) {
 	match := func(bdf uint32) (GPUProfile, bool) {
-		id, err := PciRd(wh, bdf, 0x00)
+		id, err := bus.ReadPCIConfig(bdf, 0x00)
 		if err != nil || id == 0xFFFFFFFF {
 			return GPUProfile{}, false
 		}
@@ -112,10 +112,10 @@ func FindGPUPCIWithProfile(wh syscall.Handle) (uint32, GPUProfile, bool) {
 	}
 
 	// 1) 快速路径 bus 0-7
-	for bus := uint32(0); bus < 8; bus++ {
+	for b := uint32(0); b < 8; b++ {
 		for dev := uint32(0); dev < 32; dev++ {
 			for fn := uint32(0); fn < 8; fn++ {
-				bdf := (bus << 8) | (dev << 3) | fn
+				bdf := (b << 8) | (dev << 3) | fn
 				if prof, ok := match(bdf); ok {
 					return bdf, prof, true
 				}
@@ -129,10 +129,10 @@ func FindGPUPCIWithProfile(wh syscall.Handle) (uint32, GPUProfile, bool) {
 		}
 	}
 	// 3) 兜底2: 补扫更高总线 8-255
-	for bus := uint32(8); bus < 256; bus++ {
+	for b := uint32(8); b < 256; b++ {
 		for dev := uint32(0); dev < 32; dev++ {
 			for fn := uint32(0); fn < 8; fn++ {
-				bdf := (bus << 8) | (dev << 3) | fn
+				bdf := (b << 8) | (dev << 3) | fn
 				if prof, ok := match(bdf); ok {
 					return bdf, prof, true
 				}
@@ -140,6 +140,11 @@ func FindGPUPCIWithProfile(wh syscall.Handle) (uint32, GPUProfile, bool) {
 		}
 	}
 	return 0, GPUProfile{}, false
+}
+
+// FindGPUPCIWithProfile: 全扫 PCI config 定位 GPU BDF 并返回 Profile
+func FindGPUPCIWithProfile(wh syscall.Handle) (uint32, GPUProfile, bool) {
+	return FindGPUPCIWithBus(NewProductionBus(wh, 0))
 }
 
 // ReadUnlockState: 打开两驱动并读 SS0/SS1/链路速率。
