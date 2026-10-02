@@ -29,6 +29,11 @@ type HardwareBus interface {
 	PnpResetDevice(devID uint16) bool
 	RestartNVDisplay() error
 	Sleep(d time.Duration)
+	LinkSpeed(bdf uint32) uint32
+	LinkWidth(bdf uint32) uint32
+	PcieCap(bdf uint32) uint32
+	PcieMaxSpeed(bdf uint32) uint32
+	FindRootPort(gpuBus uint32) uint32
 }
 
 // MMIORegWrite: Bản ghi thiết lập thanh ghi MMIO chuẩn hoá
@@ -502,6 +507,85 @@ func (m *MockHardwareBus) Sleep(d time.Duration) {
 	// Fast simulation: No actual sleep during unit tests
 }
 
+func (m *MockHardwareBus) LinkSpeed(bdf uint32) uint32 {
+	cap := m.PcieCap(bdf)
+	if cap == 0 {
+		return 0
+	}
+	v, err := m.ReadPCIConfig(bdf, cap+0x12)
+	if err != nil {
+		return 0
+	}
+	return v & 0xF
+}
+
+func (m *MockHardwareBus) LinkWidth(bdf uint32) uint32 {
+	cap := m.PcieCap(bdf)
+	if cap == 0 {
+		return 0
+	}
+	v, err := m.ReadPCIConfig(bdf, cap+0x12)
+	if err != nil {
+		return 0
+	}
+	return (v >> 4) & 0x3F
+}
+
+func (m *MockHardwareBus) PcieCap(bdf uint32) uint32 {
+	hdr, err := m.ReadPCIConfig(bdf, 0x34)
+	if err != nil {
+		return 0
+	}
+	cur := hdr & 0xFF
+	for i := 0; i < 20; i++ {
+		if cur < 0x40 || cur > 0xFF {
+			return 0
+		}
+		c, err := m.ReadPCIConfig(bdf, cur)
+		if err != nil {
+			return 0
+		}
+		if (c & 0xFF) == 0x10 {
+			return cur
+		}
+		cur = (c >> 8) & 0xFF
+	}
+	return 0
+}
+
+func (m *MockHardwareBus) PcieMaxSpeed(bdf uint32) uint32 {
+	cap := m.PcieCap(bdf)
+	if cap == 0 {
+		return 0
+	}
+	v, err := m.ReadPCIConfig(bdf, cap+0x0C)
+	if err != nil {
+		return 0
+	}
+	return v & 0xF
+}
+
+func (m *MockHardwareBus) FindRootPort(gpuBus uint32) uint32 {
+	for d := uint32(0); d < 32; d++ {
+		for f := uint32(0); f < 8; f++ {
+			bdf := (0 << 8) | (d << 3) | f
+			id, err := m.ReadPCIConfig(bdf, 0x00)
+			if err != nil || id == 0xFFFFFFFF || (id&0xFFFF) == 0 {
+				continue
+			}
+			cls, _ := m.ReadPCIConfig(bdf, 0x08)
+			if ((cls >> 16) & 0xFFFF) != 0x0604 {
+				continue
+			}
+			sec, _ := m.ReadPCIConfig(bdf, 0x18)
+			if ((sec >> 8) & 0xFF) == gpuBus {
+				return bdf
+			}
+		}
+	}
+	return 0xFFFFFFFF
+}
+
 // -------------------------------------------------------------
 // ProductionBus: Adapter thực tế qua WinRing0 và ThrottleStop
 // -------------------------------------------------------------
@@ -642,4 +726,24 @@ func (p *ProductionBus) RestartNVDisplay() error {
 
 func (p *ProductionBus) Sleep(d time.Duration) {
 	time.Sleep(d)
+}
+
+func (p *ProductionBus) LinkSpeed(bdf uint32) uint32 {
+	return LinkSpeed(p.wh, bdf)
+}
+
+func (p *ProductionBus) LinkWidth(bdf uint32) uint32 {
+	return LinkWidth(p.wh, bdf)
+}
+
+func (p *ProductionBus) PcieCap(bdf uint32) uint32 {
+	return PcieCap(p.wh, bdf)
+}
+
+func (p *ProductionBus) PcieMaxSpeed(bdf uint32) uint32 {
+	return PcieMaxSpeed(p.wh, bdf)
+}
+
+func (p *ProductionBus) FindRootPort(gpuBus uint32) uint32 {
+	return FindRootPort(p.wh, gpuBus)
 }
