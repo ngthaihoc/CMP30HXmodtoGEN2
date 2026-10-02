@@ -13,7 +13,9 @@ type StatusCode string
 
 const (
 	StatusGen2Success StatusCode = "GEN2_SUCCESS"
+	StatusGen2Skipped StatusCode = "GEN2_SKIPPED"
 	StatusGen1Stuck   StatusCode = "GEN1_STUCK"
+	StatusHwLimit     StatusCode = "GEN2_HARDWARE_LIMIT"
 	StatusDrvFail     StatusCode = "DRV_FAIL"
 	StatusNoGPU       StatusCode = "NO_GPU"
 	StatusUnknown     StatusCode = "UNKNOWN"

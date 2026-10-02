@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-ole/go-ole"
@@ -22,12 +23,13 @@ func Gen2StatusPath() string {
 	return filepath.Join(base, "40HXUnlock", "gen2_status.txt")
 }
 
-// WriteGen2Status: Gen2 执行结果写入状态文件(供 40HXCheck 展示)。
+// WriteGen2Status ghi kết quả Gen2 ra file trạng thái thông qua StatusContract định kiểu
 func WriteGen2Status(text string) error {
-	p := Gen2StatusPath()
-	os.MkdirAll(filepath.Dir(p), 0o755)
-	head := "==== 40HX Gen2 任务状态 " + time.Now().Format("2006-01-02 15:04:05") + " ====\n"
-	return os.WriteFile(p, []byte(head+text+"\n"), 0o644)
+	c := ParseStatus(text)
+	if c.StatusCode == StatusUnknown {
+		c.Details = strings.Split(text, "\n")
+	}
+	return WriteStructuredGen2Status(c)
 }
 
 // ReadGen2Status: 读状态文件; 不存在/读不到返回 ""

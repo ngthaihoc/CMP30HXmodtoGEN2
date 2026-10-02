@@ -48,7 +48,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -1369,234 +1368,14 @@ func gen2Main() {
 		}
 	}
 
-	if gpuProfile.DeviceID == 0x2189 {
-		gen2MainCMP30HX(&wh, gpuBDF, gpuProfile, root, targetGen)
-		return
-	}
-
-	var bar0Phys uint64
-	if gpuProfile.HasSafePL0 {
-		// 1. PL0 writes (BAR0) — 经 ThrottleStop 物理内存写
-		fmt.Println("[Gen2] 写 XVE/链路寄存器 (ThrottleStop)...")
-		pl0 := []struct {
-			off  uint64
-			val  uint32
-			name string
-		}{
-			{0x8872C, 0x6, "XVE_OVR=6"},
-			{0x8C040, 0x80085800, "LINK_CONFIG_0"},
-			{0x8841C, 0xE0B42D00, "PRIV_MISC_1"},
-			{0x8C1C0, 0x00240036, "PL_LINK_RATE"},
-			{0x8C2C0, 0x068731B3, "CYA_0"},
-		}
-		bar0raw, _ := hxcore.PciRd(wh, gpuBDF, 0x10)
-		if bar0raw == 0 || bar0raw == 0xFFFFFFFF {
-			bar0raw = 0xF6000000
-		}
-		bar0Phys = uint64(bar0raw & 0xFFFFFFF0)
-		fmt.Printf("[Gen2] BAR0 = 0x%08X\n", bar0Phys)
-		// v2.6.0: BAR0 合法性校验 — 写 PL0 前确认 BAR0 真指向 40HX MMIO, 避免把 4 个
-		// 链路寄存器写到错误物理地址(多卡/寨板 BAR 重映射、BAR0 读回异常场景)。
-		// NV_PMC BOOT_0 @ BAR0+0x0: TU106 家族字节 = 0x16 (unlock40x_v70.c:2555 记 40HX=0x166000A1)。
-		// 家族不匹配或读回 0xFFFFFFFF → 中止 PL0 写入(宁可本次不开锁, 不污染他设备 MMIO)。
-		boot0, berr := hxcore.TSRead(th, bar0Phys+0x0)
-		if berr != nil || (boot0&0xFF000000) != 0x16000000 {
-			fmt.Printf("[Gen2][!] BAR0 合法性校验失败: BOOT_0=0x%08X (期望 TU10x 家族 0x16xxxxxx), 中止 PL0 写入\n", boot0)
-			gen2StatusFail(fmt.Sprintf("BAR0 校验失败(BOOT_0=0x%08X), 安全中止 PL0 写入; 请发日志", boot0))
-			if !hasArg("-silent") {
-				gen2Notify("BAR0 校验失败, Gen2 安全中止。\n请发日志。")
-			}
-			return
-		}
-		fmt.Printf("[Gen2] BAR0 校验通过 (BOOT_0=0x%08X, TU106)\n", boot0)
-		for _, p := range pl0 {
-			if werr := hxcore.TSWrite(th, bar0Phys+p.off, p.val); werr != nil {
-				fmt.Printf("  [!] %s 写失败: %v\n", p.name, werr)
-				continue
-			}
-			rb, rerr := hxcore.TSRead(th, bar0Phys+p.off)
-			if rerr != nil || rb != p.val {
-				fmt.Printf("  [warn] %s 读回 0x%08x (期望 0x%08x)\n", p.name, rb, p.val)
-			} else {
-				fmt.Printf("  %s OK (0x%08X)\n", p.name, rb)
-			}
-			if p.off == 0x8C2C0 && (rb&(1<<2)) != 0 {
-				fmt.Printf("  [warn] CYA_0 bit 2 (DIS_G2) vẫn bật (0x%08X), có thể cản trở Gen2!\n", rb)
-			}
-		}
-	}
-
-	// 2. LNKCTL2 TLS=2 (GPU + root)
-	for _, b := range []struct {
-		bdf uint32
-		tag string
-	}{{gpuBDF, "GPU"}, {root, "ROOT"}} {
-		if b.bdf == 0xFFFFFFFF {
-			continue
-		}
-		cap := hxcore.PcieCap(wh, b.bdf)
-		if cap == 0 {
-			continue
-		}
-		// v2.6.0: 读改写 — 只改 TLS(bit3:0), 保留其余位(对齐 python 版)。
-		// 此前直接写 {2,0} 清掉高 12 位, 个别 VBIOS 依赖这些位时链路异常。
-		curRaw, _ := hxcore.PciRd(wh, b.bdf, cap+0x30)
-		nv := uint16(curRaw&0xFFF0) | 2
-		hxcore.PciWr(wh, b.bdf, cap+0x30, []byte{byte(nv), byte(nv >> 8)})
-		rb, _ := hxcore.PciRd(wh, b.bdf, cap+0x30)
-		fmt.Printf("  %s LNKCTL2 TLS=2 (0x%04X -> 0x%04X, 回读 TLS=%d)\n", b.tag, curRaw&0xFFFF, rb&0xFFFF, rb&0xF)
-	}
-
-	// 3. UPGRADE retrain: 清位→置位脉冲 (只置位在 40HX 上不生效)
-	retrain := func(bdf uint32) {
-		cap := hxcore.PcieCap(wh, bdf)
-		if cap == 0 {
-			return
-		}
-		ctl, _ := hxcore.PciRd(wh, bdf, cap+0x10)
-		lo := uint16(ctl & 0xFFFF)
-		buf := []byte{byte(lo & 0xFF), byte((lo >> 8) & 0xFF)}
-		buf[0] &^= 0x20 // clear bit5
-		hxcore.PciWr(wh, bdf, cap+0x10, buf)
-		time.Sleep(300 * time.Millisecond)
-		ctl2, _ := hxcore.PciRd(wh, bdf, cap+0x10)
-		lo2 := uint16(ctl2 & 0xFFFF)
-		buf2 := []byte{byte(lo2 & 0xFF), byte((lo2 >> 8) & 0xFF)}
-		buf2[0] |= 0x20 // set bit5
-		hxcore.PciWr(wh, bdf, cap+0x10, buf2)
-	}
-	// v2.6.0: 单次 root 重训 → 最多 6 轮 root/GPU 交替(对齐 python 版, 比初版 4 轮更稳)。
-	// 寨板/双卡下根端口一次脉冲常训不上(issue #8 "需反复禁用/启用"),
-	// 交替多轮显著提高成功率; 达成 Gen2 即提前退出(上限约 13s, 登录后 30s 才跑)。
-	for attempt := 0; attempt < 6; attempt++ {
-		bdf, tag := gpuBDF, "GPU"
-		if attempt%2 == 0 && root != 0xFFFFFFFF {
-			bdf, tag = root, "ROOT"
-		}
-		fmt.Printf("[Gen2] 链路重训 #%d (%s端)...\n", attempt+1, tag)
-		retrain(bdf)
-		// Fast polling: kiểm tra link speed mỗi 75ms (tối đa 25 lần = 1.875s)
-		// Ngay khi khoá link Gen2 thì nhận diện ngay, tránh bị ASPM hạ tốc về Gen1 khi rảnh
-		for poll := 0; poll < 25; poll++ {
-			time.Sleep(75 * time.Millisecond)
-			cur = hxcore.LinkSpeed(wh, gpuBDF)
-			if cur >= 2 {
-				break
-			}
-		}
-		if cur >= 2 {
-			break
-		}
-	}
-
-	// v2.6.0: 判据修正 — 驱动/ASPM 会在空闲时把链路降到 Gen1 省电, 只看当前
-	// 速率会把成功误报成失败(社区"Gen1"误报来源之一, v2.4.5 时代已实证:
-	// "待机省电时为 Gen1, 负载下自动跑满 Gen2")。以 GPU LNKCTL2 的
-	// TLS(目标速率)区分: TLS>=2 且当前 Gen1 = 配置成功, 空闲降速属正常。
-	tls := uint32(0)
-	if gcap := hxcore.PcieCap(wh, gpuBDF); gcap != 0 {
-		if v, rerr := hxcore.PciRd(wh, gpuBDF, gcap+0x30); rerr == nil {
-			tls = v & 0xF
-		}
-	}
-	// v2.5.2: Stage2 自动化(社区 #11/#20/#8 + 贴吧多平台复现的实证解法) —
-	// 寨板/多卡/X99 平台 retrain-only 开机训不上, 需要 Root Link Disable(+
-	// PnP 恢复)才能上 Gen2, 且每次开机都得重来一次(#20 实证); 手动 -hard
-	// 用户根本不会做, 贴吧/B站大量"每开机手动禁用启用显卡"的变通皆源于此。
-	// 现在登录任务在 Stage1 未达成(cur<2)时自动执行一次 Stage2(静默, 上限约1分钟):
-	//   · 无论 TLS: TLS 已配而链路仍 Gen1 → LD 会立即训上并消除"空闲降速"歧义;
-	//     TLS 没配上 → LD 后重写常能粘住(贴吧 .06 批次用户 LD 后同样成功,
-	//     说明"写保护批次"与"retrain-only 不够"此前被混为一谈)。
-	//   · 退出开关: reg add HKLM\SOFTWARE\40HXUnlock /v Gen2AutoHard /t REG_DWORD /d 0 /f
-	//     (40HX 是唯一显示卡的机器若不想要登录后数秒黑屏, 可关)
-	//   · 手动 -hard 保留: cur<2 即强制走该路径(不再要求 tls>=2)。
-	// Link Disable 期间 nvidia-smi 短暂报 "GPU is lost", 结束后自动 PnP 恢复。
-	if cur < 2 && (hasArg("-hard") || gen2AutoHardEnabled()) {
-		if hasArg("-hard") {
-			fmt.Println("[Gen2] retrain 未成 → -hard 显式触发 Link Disable 回退")
-		} else {
-			fmt.Println("[Gen2] retrain 未成 → 自动执行 Link Disable 回退 (Gen2AutoHard 默认开; 关闭方法见 README §2.5)")
-		}
-		gen2HardFallback(&th, &wh, gpuBDF, bar0Phys, root)
-		return
-	}
-	gen2Verdict := ""
-	unlocked := false
-	switch {
-	case cur >= 2:
-		unlocked = true
-		fmt.Printf("[Gen2] *** GEN2 ACHIEVED (Gen%d) ***\n", cur)
-		gen2Verdict = fmt.Sprintf("✅ Gen2 成功: 当前链路 Gen%d", cur)
-	case tls >= 2:
-		unlocked = true
-		fmt.Printf("[Gen2] TLS=Gen%d 但当前 Gen%d — 空闲省电降速(负载下自动回 Gen2)\n", tls, cur)
-		gen2Verdict = fmt.Sprintf("🟢 Gen2 已配置(TLS=Gen%d): 当前 Gen%d 为空闲省电降速, 负载下自动回 Gen2", tls, cur)
-	default:
-		fmt.Printf("[Gen2] 仍在 Gen%d (TLS=Gen%d), 解锁失败。请发日志。\n", cur, tls)
-		gen2Verdict = fmt.Sprintf("❌ Gen2 失败: 仍在 Gen%d (TLS=Gen%d; PL0 全 OK 而 TLS 未粘住, 多为驱动/GSP 持有链路策略 — 登录任务(已注册)会自动执行 Stage2 回退; 任务未注册则不会自动跑, 先注册再重试; 详见 README §5.2)", cur, tls)
-	}
-	// v2.6.0: 成功清掉遗留重试任务; 失败按策略安排自动重试(次数/间隔见 hxcore config)。
-	// v3.0.1: 常驻守护模式不排一次性重试任务 — 守护进程每分钟自行重试。
-	gen2Succeeded = unlocked
-	if unlocked {
-		deleteGen2Retry()
-	} else if hxcore.DriverStrategy() != hxcore.DriverStrategyResident {
-		scheduleGen2Retry(retryDepth())
-	}
-	st := fmt.Sprintf("结论: %s\n运行身份: %s\n40HX 位置: %02x:%02x.%x\nRoot Port: %02x:%02x.%x\n"+
-		"链路: 当前 Gen%d / 目标 TLS=Gen%d\n驱动: ThrottleStop=✓ WinRing0=✓ (BYOVD, 用完即卸)\n",
-		gen2Verdict,
-		map[bool]string{true: "管理员/SYSTEM", false: "普通用户(受限)"}[isAdmin()],
-		gpuBus, (gpuBDF>>3)&0x1F, gpuBDF&7,
-		(root>>8)&0xFF, (root>>3)&0x1F, root&7,
-		cur, tls)
-	if wErr := hxcore.WriteGen2Status(st); wErr != nil {
-		fmt.Printf("[Gen2] 状态文件写入失败(不影响解锁): %v\n", wErr)
-	}
-	if !hasArg("-silent") && !hasArg("-y") {
-		icon := uint(mbIconInfo)
-		txt := fmt.Sprintf("PCIe 链路: 当前 Gen%d (目标 TLS=Gen%d)\n", cur, tls)
-		if unlocked {
-			txt += "=== GEN2 解锁成功 ==="
-			if cur < 2 {
-				txt += "\n(当前为空闲省电降速, 负载下自动回 Gen2)"
-			}
-		} else {
-			txt += "仍在 Gen1, 解锁失败(详见日志)。"
-			icon = mbIconError
-		}
-		msgbox("40HX Gen2", txt, icon)
-	}
-}
-
-func gen2MainCMP30HX(pWh *syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUProfile, root uint32, targetGen uint32) {
-	wh := *pWh
-	sysDir := os.Getenv("SystemRoot") + "\\System32\\drivers"
-	if _, err := os.Stat(filepath.Join(sysDir, "ThrottleStop.sys")); err != nil {
-		copyEmbedTo(filepath.Join(sysDir, "ThrottleStop.sys"), "ThrottleStop.sys")
-	}
-	ensureSvcLoaded("ThrottleStop", "ThrottleStop.sys")
-
-	var th syscall.Handle
-	if t, err := hxcore.OpenThrottleStop(); err == nil {
-		th = t
-		defer func() {
-			if th != 0 {
-				hxcore.CloseHandle(th)
-			}
-		}()
-	} else {
-		fmt.Printf("[Gen%d-30HX][!] Driver ThrottleStop chưa được mở (%v), tiếp tục thử nghiệm\n", targetGen, err)
-	}
-
 	bus := hxcore.NewProductionBus(wh, th)
 	negotiator := hxcore.NewLinkNegotiator(bus)
-	allowStage2 := hasArg("-hard")
+	allowStage2 := hasArg("-hard") || (gpuProfile.DeviceID != 0x2189 && gen2AutoHardEnabled())
 
-	fmt.Printf("[Gen%d-30HX] Khởi chạy LinkNegotiator cho %s (DEV_%04X)...\n", targetGen, gpuProfile.Name, gpuProfile.DeviceID)
+	fmt.Printf("[Gen%d] Khởi chạy LinkNegotiator cho %s (DEV_%04X)...\n", targetGen, gpuProfile.Name, gpuProfile.DeviceID)
 	res, err := negotiator.Negotiate(gpuBDF, gpuProfile, root, targetGen, allowStage2)
 	if err != nil {
-		fmt.Printf("[Gen%d-30HX][!] Lỗi thương lượng link: %v\n", targetGen, err)
+		fmt.Printf("[Gen%d][!] Lỗi thương lượng link: %v\n", targetGen, err)
 		gen2StatusFail(fmt.Sprintf("Lỗi thương lượng link: %v", err))
 		return
 	}
@@ -1608,21 +1387,21 @@ func gen2MainCMP30HX(pWh *syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUPr
 		scheduleGen2Retry(retryDepth())
 	}
 
-	fmt.Printf("[Gen%d-30HX] %s\n", res.TargetGen, res.Verdict)
+	fmt.Printf("[Gen%d] %s\n", res.TargetGen, res.Verdict)
 
-	// Ghi nhận trạng thái có cấu trúc Seam 2
 	statusCode := hxcore.StatusGen1Stuck
 	if res.Success {
 		statusCode = hxcore.StatusGen2Success
 	}
-	gpuBus := (gpuBDF >> 8) & 0xFF
 	details := []string{
 		fmt.Sprintf("Kết luận: %s", res.Verdict),
 		fmt.Sprintf("Quyền thực thi: %s", map[bool]string{true: "Quản trị viên (Admin)/SYSTEM", false: "Người dùng thường (Bị hạn chế)"}[isAdmin()]),
 		fmt.Sprintf("%s Vị trí: %02x:%02x.%x", gpuProfile.Name, gpuBus, (gpuBDF>>3)&0x1F, gpuBDF&7),
 		fmt.Sprintf("Root Port: %02x:%02x.%x", (root>>8)&0xFF, (root>>3)&0x1F, root&7),
 		fmt.Sprintf("Băng thông: Hiện tại Gen%d x%d / GPU TLS=Gen%d / Root TLS=Gen%d", res.CurrentSpeed, res.CurrentWidth, res.TargetTLS, res.RootTLS),
-		"MRRS: 512B [Đã tối ưu]",
+	}
+	if gpuProfile.DeviceID == 0x2189 {
+		details = append(details, "MRRS: 512B [Đã tối ưu]")
 	}
 	if res.Success {
 		details = append(details, fmt.Sprintf("đã đạt mục tiêu Gen%d thành công", res.TargetGen))
@@ -1639,7 +1418,7 @@ func gen2MainCMP30HX(pWh *syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUPr
 		Details:      details,
 	}
 	if err := hxcore.WriteStructuredGen2Status(stContract); err != nil {
-		fmt.Printf("[Gen%d-30HX] Ghi file trạng thái thất bại: %v\n", res.TargetGen, err)
+		fmt.Printf("[Gen%d] Ghi file trạng thái thất bại: %v\n", res.TargetGen, err)
 	}
 
 	if !hasArg("-silent") && !hasArg("-y") {
@@ -1654,7 +1433,7 @@ func gen2MainCMP30HX(pWh *syscall.Handle, gpuBDF uint32, gpuProfile hxcore.GPUPr
 			txt += fmt.Sprintf("\nVẫn ở Gen%d, chưa đạt Gen%d. Xem %s và kiểm tra HVCI, riser/khe PCIe, BIOS; sau đó thử lại.", res.CurrentSpeed, res.TargetGen, filepath.Join(os.TempDir(), "40HX_installer.log"))
 			icon = mbIconError
 		}
-		msgbox(fmt.Sprintf("CMP 30HX Gen%d", res.TargetGen), txt, icon)
+		msgbox(fmt.Sprintf("%s Gen%d", gpuProfile.Name, res.TargetGen), txt, icon)
 	}
 }
 
@@ -1766,296 +1545,6 @@ func residentGuard() {
 		}
 		fmt.Println("[Giám sát] Phát hiện Speed<2 && TLS<2 — Mất cấu hình mở khoá Gen2, tự động mở khoá lại...")
 		gen2Main()
-	}
-}
-
-// ---------- Gen2 -hard 回退: Root Link Disable + PnP 恢复 (Stage 2) ----------
-// 仅当显式 40HXInstaller.exe -gen2 -hard 时进入。普通/计划任务路径绝不触发,
-// 因为 Root Link Disable 会让 nvidia-smi 短暂报 "GPU is lost"(链路瞬断+驱动重置)。
-// 对齐社区 byovd.py(member573, issue #11, 2026-09-06 多卡实测):
-//   retrain-only 在寨板/多卡不足 → Root Link Disable 循环(PL0+TLS 保持)使
-//   LNKCAP.max=2 训上 Gen2 → PnP 禁用/启用 40HX 恢复 "GPU is lost" →
-//   Retrain-ONLY(不再二次 LD, 保驱动健康) → 重启 NVDisplay.ContainerLocalSystem。
-// 代码层无法判断"当前 Gen1 是空闲降速还是真训不上", 故 -hard 交给用户手动裁决。
-
-func gen2WritePL0(th syscall.Handle, bar0Phys uint64) {
-	pl0 := []struct {
-		off  uint64
-		val  uint32
-		name string
-	}{
-		{0x8872C, 0x6, "XVE_OVR=6"},
-		{0x8C040, 0x80085800, "LINK_CONFIG_0"},
-		{0x8841C, 0xE0B42D00, "PRIV_MISC_1"},
-		{0x8C1C0, 0x00240036, "PL_LINK_RATE"},
-		{0x8C2C0, 0x068731B3, "CYA_0"},
-	}
-	for _, p := range pl0 {
-		if werr := hxcore.TSWrite(th, bar0Phys+p.off, p.val); werr != nil {
-			fmt.Printf("  [!] %s 写失败: %v\n", p.name, werr)
-			continue
-		}
-		rb, rerr := hxcore.TSRead(th, bar0Phys+p.off)
-		if rerr != nil || rb != p.val {
-			fmt.Printf("  [warn] %s 读回 0x%08x (期望 0x%08x)\n", p.name, rb, p.val)
-		} else {
-			fmt.Printf("  %s OK (0x%08X)\n", p.name, rb)
-		}
-		if p.off == 0x8C2C0 && (rb&(1<<2)) != 0 {
-			fmt.Printf("  [warn] CYA_0 bit 2 (DIS_G2) vẫn bật (0x%08X), có thể cản trở Gen2!\n", rb)
-		}
-	}
-}
-
-// Ghi TLS vào 16-bit LNKCTL2 (chỉ đọc và sửa bit 3:0, giữ nguyên các bit khác)
-func gen2SetTLS(wh syscall.Handle, bdf uint32, tls uint16) {
-	if bdf == 0xFFFFFFFF {
-		return
-	}
-	cap := hxcore.PcieCap(wh, bdf)
-	if cap == 0 {
-		return
-	}
-	cur, _ := hxcore.PciRd(wh, bdf, cap+0x30)
-	nv := uint16(cur&0xFFF0) | (tls & 0xF)
-	_ = hxcore.PciWr(wh, bdf, cap+0x30, []byte{byte(nv), byte(nv >> 8)})
-	rb, _ := hxcore.PciRd(wh, bdf, cap+0x30)
-	fmt.Printf("    TLS=%d Ghi LNKCTL2 (0x%04X -> 0x%04X, Đọc lại TLS=%d)\n", tls, cur&0xFFFF, rb&0xFFFF, rb&0xF)
-}
-
-// Xung huấn luyện lại (retrain pulse bit 5) trên 16-bit LNKCTL
-func gen2RetrainPulse(wh syscall.Handle, bdf uint32) {
-	if bdf == 0xFFFFFFFF {
-		return
-	}
-	cap := hxcore.PcieCap(wh, bdf)
-	if cap == 0 {
-		return
-	}
-	ctl, _ := hxcore.PciRd(wh, bdf, cap+0x10)
-	lo := uint16(ctl & 0xFFFF)
-	buf := []byte{byte(lo & 0xFF), byte((lo >> 8) & 0xFF)}
-	buf[0] &^= 0x20 // clear bit5
-	_ = hxcore.PciWr(wh, bdf, cap+0x10, buf)
-	time.Sleep(300 * time.Millisecond)
-	ctl2, _ := hxcore.PciRd(wh, bdf, cap+0x10)
-	lo2 := uint16(ctl2 & 0xFFFF)
-	buf2 := []byte{byte(lo2 & 0xFF), byte((lo2 >> 8) & 0xFF)}
-	buf2[0] |= 0x20 // set bit5
-	_ = hxcore.PciWr(wh, bdf, cap+0x10, buf2)
-}
-
-// Chu kỳ Root Link Disable (duy trì PL0+TLS) — giúp LNKCAP.max=2 huấn luyện lên Gen2
-func gen2RootLinkDisable(th syscall.Handle, wh *syscall.Handle, gpuBDF uint32, bar0Phys uint64, root uint32) {
-	if root == 0xFFFFFFFF {
-		fmt.Println("    [cảnh báo] Không có root port, bỏ qua Link Disable")
-		return
-	}
-	cap := hxcore.PcieCap(*wh, root)
-	if cap == 0 {
-		fmt.Println("    [cảnh báo] Root không có PCIe cap, bỏ qua Link Disable")
-		return
-	}
-	ctl, _ := hxcore.PciRd(*wh, root, cap+0x10)
-	fmt.Printf("    ROOT Link Disable (ctl=0x%04X)\n", ctl&0xFFFF)
-	lo := uint16(ctl & 0xFFFF)
-	set := lo | 0x10 // bit4 = Link Disable
-	_ = hxcore.PciWr(*wh, root, cap+0x10, []byte{byte(set), byte(set >> 8)})
-	time.Sleep(500 * time.Millisecond)
-	// PL0 + TLS duy trì trong thời gian link down
-	gen2WritePL0(th, bar0Phys)
-	gen2SetTLS(*wh, root, 2)
-	gen2SetTLS(*wh, gpuBDF, 2)
-	// clear bit4 → huấn luyện lại
-	ctl2, _ := hxcore.PciRd(*wh, root, cap+0x10)
-	clr := uint16(ctl2&0xFFFF) &^ 0x10
-	_ = hxcore.PciWr(*wh, root, cap+0x10, []byte{byte(clr), byte(clr >> 8)})
-	time.Sleep(2000 * time.Millisecond)
-}
-
-// PnP Vô hiệu hoá/Bật lại GPU — Khôi phục "GPU is lost" sau Link Disable hoặc giải phóng DMA locks
-func gen2PnpRecoverGPU(devID uint16) bool {
-	devPattern := "DEV_1F0B"
-	if devID == 0x2189 {
-		devPattern = "DEV_2189"
-	} else if devID == 0 {
-		devPattern = "(DEV_1F0B|DEV_2189)"
-	} else {
-		devPattern = fmt.Sprintf("DEV_%04X", devID)
-	}
-	ps := fmt.Sprintf(`$devs = Get-PnpDevice -Class Display -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -match '%s' }; `+
-		`if ($devs) { foreach ($d in $devs) { try { pnputil /restart-device $d.InstanceId >$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {} }; Start-Sleep -Seconds 2; Write-Output "PnP-OK" } `+
-		`else { Write-Output 'PnP-NONE' }`, devPattern)
-	out, err := exec.Command("powershell", "-NoProfile", "-Command", ps).CombinedOutput()
-	fmt.Printf("    PnP Khôi phục: %s (err=%v)\n", strings.TrimSpace(string(out)), err)
-	return err == nil && strings.Contains(string(out), "PnP-OK")
-}
-
-func gen2PnpRecover40HX() bool {
-	return gen2PnpRecoverGPU(0x1F0B)
-}
-
-// Khởi động lại NVDisplay Container (phục hồi hiển thị GPU-Z / Task Manager / NVIDIA Control Panel)
-func gen2RestartNVDisplay() {
-	ps := `sc.exe config NVDisplay.ContainerLocalSystem start= auto | Out-Null; Restart-Service NVDisplay.ContainerLocalSystem -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; $s = Get-Service -Name NVDisplay.ContainerLocalSystem -ErrorAction SilentlyContinue; if ($s -and $s.Status -ne 'Running') { Start-Service NVDisplay.ContainerLocalSystem -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }`
-	out, err := exec.Command("powershell", "-NoProfile", "-Command", ps).CombinedOutput()
-	fmt.Printf("    NVDisplay Container khởi động lại: %s (err=%v)\n", strings.TrimSpace(string(out)), err)
-	_, _ = hxcore.RunOut("reg.exe", "add", `HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext`, "/ve", "/t", "REG_SZ", "/d", "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}", "/f")
-}
-
-// Trong lúc -hard fallback, PnP reset GPU khiến handle cũ \\.\ThrottleStop / WinRing0 có thể bị hỏng -> mở lại
-func gen2ReopenDrivers(th, wh *syscall.Handle) bool {
-	if th != nil && *th != 0 {
-		hxcore.CloseHandle(*th)
-		*th = 0
-		if nt, e := hxcore.OpenThrottleStop(); e != nil {
-			fmt.Printf("    [!] Mở lại ThrottleStop thất bại: %v\n", e)
-		} else {
-			*th = nt
-		}
-	}
-	if wh != nil && *wh != 0 {
-		hxcore.CloseHandle(*wh)
-		*wh = 0
-		if nw, e := hxcore.OpenDevice(`\\.\WinRing0_1_2_0`); e != nil {
-			fmt.Printf("    [!] Mở lại WinRing0 thất bại: %v\n", e)
-			return false
-		} else {
-			*wh = nw
-		}
-	}
-	return wh == nil || *wh != 0
-}
-
-// Khôi phục GPU LNKCTL CCC (0x0140, Common Clock + Extended Synch) và vô hiệu hoá ASPM [1:0]
-func gen2RestoreGPULnkctl(wh syscall.Handle, gpuBDF uint32) {
-	cap := hxcore.PcieCap(wh, gpuBDF)
-	if cap == 0 {
-		return
-	}
-	ctl, _ := hxcore.PciRd(wh, gpuBDF, cap+0x10)
-	cur := uint16(ctl & 0xFFFF)
-	if (cur&0x0140) != 0x0140 || (cur&0x3) != 0 {
-		want := (cur &^ 0x3) | 0x0140
-		_ = hxcore.PciWr(wh, gpuBDF, cap+0x10, []byte{byte(want), byte(want >> 8)})
-		rb, _ := hxcore.PciRd(wh, gpuBDF, cap+0x10)
-		fmt.Printf("    GPU LNKCTL Khôi phục/Vô hiệu hoá ASPM 0x%04X -> 0x%04X\n", cur, rb&0xFFFF)
-	}
-}
-
-// Stage2 Điều phối: LD → retrain → PnP khôi phục → retrain-only → NVDisplay khởi động lại
-func gen2HardFallback(th, wh *syscall.Handle, gpuBDF uint32, bar0Phys uint64, root uint32) {
-	fmt.Println("\n[Gen2 -hard] === Quy trình Link Disable Fallback (Stage 2) ===")
-	fmt.Println("[Gen2 -hard] Cảnh báo: Quy trình này khiến nvidia-smi tạm thời báo 'GPU is lost',")
-	fmt.Println("[Gen2 -hard] khoảng vài giây sau sẽ khôi phục qua PnP. Chỉ dùng khi chắc chắn retrain thông thường không đạt.")
-	if bar0raw, _ := hxcore.PciRd(*wh, gpuBDF, 0x10); bar0raw != 0 && bar0raw != 0xFFFFFFFF {
-		bar0Phys = uint64(bar0raw & 0xFFFFFFF0)
-	}
-	fmt.Printf("[Gen2 -hard] BAR0 = 0x%08X\n", bar0Phys)
-	didLD := false
-	gen2WritePL0(*th, bar0Phys)
-	if root != 0xFFFFFFFF {
-		gen2RootLinkDisable(*th, wh, gpuBDF, bar0Phys, root)
-		didLD = true
-	}
-	cur := hxcore.LinkSpeed(*wh, gpuBDF)
-	fmt.Printf("[Gen2 -hard] Sau Link Disable: Gen%d\n", cur)
-	if cur < 2 {
-		for i := 0; i < 6; i++ {
-			if i == 2 && cur < 2 && root != 0xFFFFFFFF {
-				fmt.Println("[Gen2 -hard] Huấn luyện lại vẫn thất bại → Chạy lại chu kỳ Link Disable lần 2")
-				gen2RootLinkDisable(*th, wh, gpuBDF, bar0Phys, root)
-			}
-			gen2WritePL0(*th, bar0Phys)
-			gen2SetTLS(*wh, root, 2)
-			gen2SetTLS(*wh, gpuBDF, 2)
-			bdf := gpuBDF
-			tag := "GPU"
-			if root != 0xFFFFFFFF && i%2 == 0 {
-				bdf, tag = root, "ROOT"
-			}
-			fmt.Printf("[Gen2 -hard] Huấn luyện lại #%d (%s)...\n", i+1, tag)
-			gen2RetrainPulse(*wh, bdf)
-			for poll := 0; poll < 25; poll++ {
-				time.Sleep(75 * time.Millisecond)
-				cur = hxcore.LinkSpeed(*wh, gpuBDF)
-				if cur >= 2 {
-					break
-				}
-			}
-			if cur >= 2 {
-				break
-			}
-		}
-	}
-	if didLD {
-		if cur >= 2 {
-			fmt.Println("[Gen2 -hard] Đã huấn luyện lên Gen2, thực thi khôi phục PnP + khởi động lại NVDisplay")
-		} else {
-			fmt.Println("[Gen2 -hard] Huấn luyện chưa đạt, vẫn thực thi khôi phục PnP để đảm bảo GPU về trạng thái bình thường")
-		}
-		gen2PnpRecover40HX()
-		if !gen2ReopenDrivers(th, wh) {
-			fmt.Println("[Gen2 -hard][!] Mở lại driver thất bại, huỷ bỏ các bước khôi phục tiếp theo")
-			gen2VerdictHard(gpuBDF, cur, false)
-			return
-		}
-		time.Sleep(3000 * time.Millisecond)
-		if bar0raw, _ := hxcore.PciRd(*wh, gpuBDF, 0x10); bar0raw != 0 && bar0raw != 0xFFFFFFFF {
-			bar0Phys = uint64(bar0raw & 0xFFFFFFF0)
-		}
-		gen2WritePL0(*th, bar0Phys)
-		gen2SetTLS(*wh, root, 2)
-		gen2SetTLS(*wh, gpuBDF, 2)
-		for i := 0; i < 6; i++ {
-			bdf := gpuBDF
-			if root != 0xFFFFFFFF && i%2 == 0 {
-				bdf = root
-			}
-			gen2RetrainPulse(*wh, bdf)
-			for poll := 0; poll < 25; poll++ {
-				time.Sleep(75 * time.Millisecond)
-				cur = hxcore.LinkSpeed(*wh, gpuBDF)
-				if cur >= 2 {
-					break
-				}
-			}
-			if cur >= 2 {
-				break
-			}
-		}
-		gen2RestoreGPULnkctl(*wh, gpuBDF)
-		gen2RestartNVDisplay()
-		cur = hxcore.LinkSpeed(*wh, gpuBDF)
-		fmt.Printf("[Gen2 -hard] Sau khôi phục PnP: Gen%d\n", cur)
-	}
-	gen2VerdictHard(gpuBDF, cur, cur >= 2)
-}
-
-func gen2VerdictHard(gpuBDF uint32, cur uint32, success bool) {
-	gen2Succeeded = success
-	if success {
-		deleteGen2Retry()
-	} else {
-		scheduleGen2Retry(retryDepth())
-	}
-	gpuBus := (gpuBDF >> 8) & 0xFF
-	st := fmt.Sprintf("Kết luận (Link Disable Fallback): %s\nVị trí 40HX: %02x:%02x.%x\nBăng thông: Hiện tại Gen%d\nDriver: ThrottleStop=✓ WinRing0=✓ (BYOVD, thu hồi theo chính sách)\n",
-		map[bool]string{true: "✅ Gen2 Thành công", false: "❌ Gen2 Thất bại (xem log/gửi cộng đồng)"}[success],
-		gpuBus, (gpuBDF>>3)&0x1F, gpuBDF&7, cur)
-	if wErr := hxcore.WriteGen2Status(st); wErr != nil {
-		fmt.Printf("[Gen2 -hard] Ghi trạng thái thất bại: %v\n", wErr)
-	}
-	if !hasArg("-silent") && !hasArg("-y") {
-		icon := uint(mbIconInfo)
-		txt := fmt.Sprintf("Gen2 Fallback: Hiện tại Gen%d\n", cur)
-		if success {
-			txt += "=== MỞ KHOÁ GEN2 THÀNH CÔNG ==="
-		} else {
-			txt += "Vẫn ở Gen1, fallback chưa đạt (xem chi tiết trong log)."
-			icon = mbIconError
-		}
-		msgbox("40HX Gen2", txt, icon)
 	}
 }
 

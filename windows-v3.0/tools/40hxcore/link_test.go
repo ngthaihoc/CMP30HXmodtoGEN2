@@ -166,6 +166,57 @@ func TestLinkNegotiator_Stage2_PnPRecovery(t *testing.T) {
 	}
 }
 
+
+func TestLinkNegotiator_Stage2_40HX_RootLinkDisableAndPnP(t *testing.T) {
+	// Arrange: CMP 40HX (TU106) with Root Port present.
+	// When Stage 1 fails and allowStage2=true, rootLinkDisable must be executed on Root Port,
+	// followed by PnpResetDevice and retrain.
+	bus := NewMockHardwareBus()
+	gpuBDF := uint32(0x0100)
+	rootBDF := uint32(0x0008) // Root port at 00:01.0
+	prof := GPUProfile{
+		VendorID:        0x10DE,
+		DeviceID:        0x1F0B,
+		Name:            "CMP 40HX",
+		Family:          "TU106",
+		MaxSupportedGen: 2,
+	}
+	bus.SetPCIConfig(gpuBDF, 0x00, 0x1F0B10DE)
+	bus.SetPCICap(gpuBDF, 0x40)
+	bus.SetPCIConfig(gpuBDF, 0x10, 0xF6000000)
+	bus.SetMMIO(0xF6000000+0x00, 0x16000000) // BOOT_0: TU106
+	bus.SetPCIConfig(gpuBDF, 0x40+0x12, 0x00000011) // Stuck at Gen1
+
+	// Root Port config
+	bus.SetPCICap(rootBDF, 0x50)
+	bus.SetPCIConfig(rootBDF, 0x50+0x10, 0x00000000) // LNKCTL
+
+	// After Root Link Disable and PnP reset, simulate recovery
+	bus.OnPnpReset = func(devID uint16) bool {
+		bus.SetPCIConfig(gpuBDF, 0x40+0x12, 0x00000022) // Gen2 recovered
+		return true
+	}
+
+	negotiator := NewLinkNegotiator(bus)
+
+	// Act
+	res, err := negotiator.Negotiate(gpuBDF, prof, rootBDF, 2, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Assert
+	if !res.Success || res.CurrentSpeed < 2 {
+		t.Fatalf("expected Stage 2 recovery to Gen2, got %+v", res)
+	}
+	if !res.Stage2Triggered {
+		t.Fatalf("expected Stage2Triggered to be true")
+	}
+	if !bus.PnpResetCalled {
+		t.Fatalf("expected PnpResetDevice to be invoked")
+	}
+}
+
 func TestLinkNegotiator_TU116_DisallowsStage2(t *testing.T) {
 	// Arrange: TU116 (CMP 30HX) must never trigger Stage 2 PnP reset even if allowStage2 is true
 	bus := NewMockHardwareBus()

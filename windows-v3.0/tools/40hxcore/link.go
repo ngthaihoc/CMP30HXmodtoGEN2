@@ -157,10 +157,17 @@ func (n *LinkNegotiator) Negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint3
 		}
 	}
 
-	// 7. Stage 2: PnP Soft Reset nếu Stage 1 chưa đạt và được phép
+	// 7. Stage 2: Root Link Disable + PnP Soft Reset nếu Stage 1 chưa đạt và được phép
 	if cur < targetGen && allowStage2 {
 		res.Stage2Triggered = true
-		if n.bus.PnpResetDevice(prof.DeviceID) {
+
+		// Đối với các profile không phải TU116 (như CMP 40HX TU106), thực hiện Root Link Disable trước
+		if prof.DeviceID != 0x2189 && prof.Family != "TU116" && rootBDF != 0xFFFFFFFF {
+			n.rootLinkDisable(rootBDF, gpuBDF, bar0Phys, prof, targetGen)
+			cur = n.linkSpeed(gpuBDF, cap)
+		}
+
+		if cur < targetGen && n.bus.PnpResetDevice(prof.DeviceID) {
 			n.bus.Sleep(2 * time.Second)
 			if bar0Phys != 0 {
 				_ = n.injectMMIOShadowRegisters(bar0Phys, prof, targetGen)
@@ -172,7 +179,7 @@ func (n *LinkNegotiator) Negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint3
 				}
 			}
 			n.restoreLnkctl(gpuBDF, cap)
-			for attempt := 0; attempt < 4; attempt++ {
+			for attempt := 0; attempt < 6; attempt++ {
 				targetBDF := gpuBDF
 				if attempt%2 == 0 && rootBDF != 0xFFFFFFFF {
 					targetBDF = rootBDF
@@ -221,6 +228,37 @@ func (n *LinkNegotiator) Negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint3
 	return res, nil
 }
 
+
+func (n *LinkNegotiator) rootLinkDisable(rootBDF uint32, gpuBDF uint32, bar0Phys uint64, prof GPUProfile, targetGen uint32) {
+	rcap := n.findPcieCap(rootBDF)
+	if rcap == 0 {
+		return
+	}
+	ctl, err := n.bus.ReadPCIConfig(rootBDF, rcap+0x10)
+	if err != nil {
+		return
+	}
+	lo := uint16(ctl & 0xFFFF)
+	set := lo | 0x10 // bit 4 = Link Disable
+	_ = n.bus.WritePCIConfig(rootBDF, rcap+0x10, []byte{byte(set), byte(set >> 8)})
+	n.bus.Sleep(500 * time.Millisecond)
+
+	if bar0Phys != 0 {
+		_ = n.injectMMIOShadowRegisters(bar0Phys, prof, targetGen)
+	}
+	n.setTLS(rootBDF, rcap, uint16(targetGen))
+	if gcap := n.findPcieCap(gpuBDF); gcap != 0 {
+		n.setTLS(gpuBDF, gcap, uint16(targetGen))
+	}
+
+	ctl2, err := n.bus.ReadPCIConfig(rootBDF, rcap+0x10)
+	if err == nil {
+		clr := uint16(ctl2&0xFFFF) &^ 0x10
+		_ = n.bus.WritePCIConfig(rootBDF, rcap+0x10, []byte{byte(clr), byte(clr >> 8)})
+	}
+	n.bus.Sleep(2 * time.Second)
+}
+
 func (n *LinkNegotiator) resolveBAR0(gpuBDF uint32) (uint64, error) {
 	bar0raw, err := n.bus.ReadPCIConfig(gpuBDF, 0x10)
 	if err != nil || bar0raw == 0 || bar0raw == 0xFFFFFFFF {
@@ -240,7 +278,7 @@ func (n *LinkNegotiator) injectMMIOShadowRegisters(bar0Phys uint64, prof GPUProf
 	}
 
 	seq := TU116ShadowSequence
-	if prof.DeviceID == 0x1F0B {
+	if prof.DeviceID == 0x1F0B || prof.Family == "TU106" {
 		seq = TU106PL0Sequence
 	}
 	for _, reg := range seq {

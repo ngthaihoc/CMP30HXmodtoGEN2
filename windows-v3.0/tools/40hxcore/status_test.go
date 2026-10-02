@@ -70,3 +70,29 @@ func TestStatusContract_ParseLegacyFallback(t *testing.T) {
 		t.Fatalf("expected fallback to StatusNoGPU, got %s", parsedNoGpu.StatusCode)
 	}
 }
+
+func TestStatusContract_SkippedAndHwLimitCodes(t *testing.T) {
+	skipped := StatusContract{
+		StatusCode: StatusGen2Skipped,
+		ErrorCode:  "ANOTHER_INSTANCE_RUNNING",
+		Details:    []string{"Skipped instance"},
+	}
+	hwLimit := StatusContract{
+		StatusCode: StatusHwLimit,
+		ErrorCode:  "EFUSE_LOCKED_GEN2",
+		Details:    []string{"Hardware limit reached"},
+	}
+
+	fmtSkipped := FormatStatus(skipped)
+	parsedSkipped := ParseStatus(fmtSkipped)
+
+	fmtHwLimit := FormatStatus(hwLimit)
+	parsedHwLimit := ParseStatus(fmtHwLimit)
+
+	if parsedSkipped.StatusCode != StatusGen2Skipped || parsedSkipped.ErrorCode != "ANOTHER_INSTANCE_RUNNING" {
+		t.Fatalf("unexpected skipped parsing: %+v", parsedSkipped)
+	}
+	if parsedHwLimit.StatusCode != StatusHwLimit || parsedHwLimit.ErrorCode != "EFUSE_LOCKED_GEN2" {
+		t.Fatalf("unexpected hwLimit parsing: %+v", parsedHwLimit)
+	}
+}
