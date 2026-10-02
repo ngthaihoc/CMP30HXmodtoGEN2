@@ -23,7 +23,8 @@ func Gen2StatusPath() string {
 	return filepath.Join(base, "40HXUnlock", "gen2_status.txt")
 }
 
-// WriteGen2Status ghi kết quả Gen2 ra file trạng thái thông qua StatusContract định kiểu
+// WriteGen2Status ghi kết quả Gen2 ra file trạng thái.
+// Deprecated: Sử dụng WriteStructuredGen2Status với StatusContract định kiểu.
 func WriteGen2Status(text string) error {
 	c := ParseStatus(text)
 	if c.StatusCode == StatusUnknown {

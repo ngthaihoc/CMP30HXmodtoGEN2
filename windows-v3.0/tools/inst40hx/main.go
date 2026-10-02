@@ -193,7 +193,7 @@ const (
 	mbIconInfo  = hxcore.MbIconInfo
 	mbIconError = hxcore.MbIconError
 	mbIconWarn  = hxcore.MbIconWarn // MB_ICONWARNING: v2.6.0: EFI 跳过/部分成功等"可继续但要注意"场景
-	mbYesNo     = hxcore.MbYesNo     // MB_YESNO → 返回 IDYES=6 / IDNO=7
+	mbYesNo     = hxcore.MbYesNo    // MB_YESNO → 返回 IDYES=6 / IDNO=7
 )
 
 var (
@@ -1177,37 +1177,35 @@ func setupGen2Task() error {
 
 func gen2Main() {
 	// 幂等; -silent(登录自启动调用)时全程无窗口静默
-	// v2.5: BYOVD (ThrottleStop + WinRing0) — 免测试签名; 用完即卸(自清理)
+	// v2.5: BYOVD (ThrottleStop + WinRing0): Không cần test-signing, tự động dọn dẹp khi hoàn tất
 
-	// v2.6.0: 单实例互斥 — 防止 SYSTEM 任务 / Run 键 / 手动 -gen2 并发触发时,
-	// 两进程同时 sc start 同一驱动、争抢 BAR0 导致链路/驱动状态错乱。
-	// 放在最前: 拿不到锁直接退出, 绝不进入驱动加载临界区。
+	// v2.6.0: Đơn phiên duy nhất: Tránh xung đột khi tác vụ SYSTEM, Run key hoặc -gen2 thủ công chạy đồng thời,
+	// tránh hai tiến trình cùng sc start driver hoặc tranh chấp BAR0 gây lỗi trạng thái.
+	// Đặt ở đầu: Không lấy được mutex thì thoát ngay, tuyệt đối không tải driver.
 	owned, release := gen2AcquireSingleInstance()
 	if !owned {
 		gen2Succeeded = true
-		fmt.Println("[Gen2] 另一 Gen2 实例正在运行, 跳过(单实例保护)")
+		fmt.Println("[Gen2] Một tiến trình Gen2 khác đang chạy, bỏ qua (bảo vệ đơn phiên)")
 		_ = hxcore.WriteStructuredGen2Status(hxcore.StatusContract{
 			StatusCode: hxcore.StatusGen2Skipped,
 			ErrorCode:  "ANOTHER_INSTANCE_RUNNING",
 			Details: []string{
-				"⏭️ 跳过: 另一 Gen2 实例正在运行(单实例保护, 避免并发抢驱动)",
+				"⏭️ Bỏ qua: Một tiến trình Gen2 khác đang chạy (bảo vệ đơn phiên, tránh xung đột driver)",
 			},
 		})
 		return
 	}
 	defer release()
 
-	// v2.6.0: 时序保护 — 等 nvlddmkm 进入 RUNNING 后再动 GPU。抢在 nv 驱动初始化前
-	// retrain 会被 nv 起来后重置 PCIe 链路 / 覆盖 GPU 寄存器, 既冲掉 Gen2, 又可能触发
-	// code19(安装器注释 §785 已实证 "nvlddmkm 正占用 GPU 时 retrain 导致异常")。
-	// 普通机器 nv 登录后几秒即 RUNNING → 此处几乎不等待; 慢速/多卡机器则等到就绪,
-	// 避免与 nv 初始化重叠(固定 30s 延迟的脆弱性由此消除)。
+	// v2.6.0: Bảo vệ thời gian: Đợi nvlddmkm vào trạng thái RUNNING trước khi can thiệp GPU.
+	// Tránh thao tác trước khi driver nv sẵn sàng vì khi driver khởi động có thể reset link PCIe hoặc ghi đè thanh ghi GPU.
+	// Tránh xung đột với quá trình khởi động driver (thay thế delay cố định 30s).
 	waitForNvDriver(60 * time.Second)
 
 	// Chạy toàn bộ chu trình truy cập phần cứng và huấn luyện PCIe trong DriverSession khép kín (RAII)
 	// Tự động giải phóng handle và dọn sạch driver BYOVD khi kết thúc
 	err := hxcore.RunScopedBus(true, func(bus hxcore.HardwareBus) error {
-		// 定位支持的 GPU (40HX/30HX), 不硬编码 BDF
+		// Định vị GPU được hỗ trợ (40HX/30HX), không cố định BDF
 		var gpuBDF uint32
 		var gpuProfile hxcore.GPUProfile
 		gpuFound := false
@@ -1217,14 +1215,14 @@ func gen2Main() {
 				break
 			}
 			if attempt < 3 {
-				fmt.Printf("[Gen2] 暂未定位到支持的 GPU, 2s 后重试 (%d/3)...\n", attempt)
+				fmt.Printf("[Gen2] Chưa định vị được GPU được hỗ trợ, thử lại sau 2s (%d/3)...\n", attempt)
 				time.Sleep(2 * time.Second)
 			}
 		}
 		if !gpuFound {
-			fmt.Println("[Gen2] 未能定位支持的 GPU (40HX/30HX)。请发日志。")
-			gen2StatusFail("未能在 PCI 总线上定位支持的 GPU")
-			gen2Notify("未能在 PCI 总线上找到支持的 GPU。\n请确认显卡已插好且驱动已装。")
+			fmt.Println("[Gen2] Không thể định vị GPU được hỗ trợ (40HX/30HX). Vui lòng gửi file log.")
+			gen2StatusFail("Không tìm thấy GPU được hỗ trợ trên bus PCI")
+			gen2Notify("Không tìm thấy GPU được hỗ trợ trên bus PCI.\nVui lòng kiểm tra lại card và driver.")
 			return nil
 		}
 
@@ -1403,7 +1401,7 @@ func gen2Main() {
 
 	if err != nil {
 		if !isAdmin() {
-			fmt.Println("[Gen2] Lỗi tải driver và hiện tại không có quyền Admin — Chuyển cho SYSTEM task, thoát im lặng:", err)
+			fmt.Println("[Gen2] Lỗi tải driver và hiện tại không có quyền Admin: Chuyển cho SYSTEM task, thoát im lặng:", err)
 			gen2StatusFail("Driver chưa được tải, hiện tại quyền hạn bị giới hạn (do task SYSTEM xử lý)")
 			return
 		}
@@ -1617,26 +1615,6 @@ func waitForNvDriver(timeout time.Duration) bool {
 		}
 		fmt.Println("[Gen2] Đang chờ nvlddmkm sẵn sàng...")
 		time.Sleep(2 * time.Second)
-	}
-}
-
-// cleanupByovd: Dừng và xoá dịch vụ driver ThrottleStop/WinRing0 sau khi dùng xong
-func cleanupByovd() {
-	if hxcore.DriverStrategy() == hxcore.DriverStrategyResident {
-		fmt.Println("[Gen2] Chiến lược thường trú: Giữ lại dịch vụ driver và file (có thể gỡ bằng GUI/Uninstaller)")
-		return
-	}
-	appRunning := throttleStopAppRunning()
-	for _, d := range []struct{ name, file string }{
-		{"ThrottleStop", "ThrottleStop.sys"},
-		{"WinRing0_1_2_0", "WinRing0x64.sys"},
-	} {
-		if appRunning {
-			continue
-		}
-		hxcore.RunOut("sc.exe", "stop", d.name)
-		hxcore.RunOut("sc.exe", "delete", d.name)
-		os.Remove(filepath.Join(os.Getenv("SystemRoot")+"\\System32\\drivers", d.file))
 	}
 }
 

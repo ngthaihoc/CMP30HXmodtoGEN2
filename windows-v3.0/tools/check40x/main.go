@@ -86,41 +86,17 @@ func throttleStopAppRunning() bool {
 // 缺失/0字节自愈重部署; 重部署后补 Defender 排除防再删。
 // 说明: "拉起"本身就是一次驱动加载测试 — 失败大多能归因(见 classifyLoadErr)。
 func ensureDrivers() (deployed bool, ok bool, fail string) {
-	src := driverSrcDir()
 	allRunning := svcState(svcTS) == "RUNNING" && svcState(svcWR) == "RUNNING"
 	if allRunning {
 		return false, true, ""
 	}
-	if src == "" {
-		return false, false, "Trong gói phát hành không tìm thấy thư mục driver tạm thời (gen2\\drivers)"
-	}
+	deployed = true
 	var fails []string
-	for _, d := range []struct{ svc, file string }{
-		{svcTS, fileTS}, {svcWR, fileWR},
-	} {
-		dst := filepath.Join(sysDrvDir(), d.file)
-		if b, e := os.ReadFile(dst); e != nil || len(b) == 0 {
-			if sb, e2 := os.ReadFile(filepath.Join(src, d.file)); e2 == nil {
-				os.WriteFile(dst, sb, 0o644)
-				_ = hxcore.AddDefenderExclusions() // best-effort 防再删
-			}
-		}
-		if svcState(d.svc) == "RUNNING" {
-			continue
-		}
-		deployed = true
-		hxcore.RunOut("sc.exe", "create", d.svc, "type=", "kernel",
-			"start=", "demand", "binPath=", `\SystemRoot\System32\drivers\`+d.file)
-		if _, err := hxcore.RunOut("sc.exe", "start", d.svc); err != nil {
-			// 服务可能被标记为删除(1072)/禁用(1058)→ 清标记后重建+启动一次
-			// (对齐安装器 ensureSvcLoaded; 卸载残留态下诊断也能自愈加载)
-			hxcore.RunOut("sc.exe", "delete", d.svc)
-			hxcore.RunOut("sc.exe", "create", d.svc, "type=", "kernel",
-				"start=", "demand", "binPath=", `\SystemRoot\System32\drivers\`+d.file)
-			if out2, err2 := hxcore.RunOut("sc.exe", "start", d.svc); err2 != nil {
-				fails = append(fails, d.file+": "+strings.TrimSpace(out2))
-			}
-		}
+	if err := hxcore.EnsureDriverLoaded(svcTS, fileTS); err != nil {
+		fails = append(fails, fileTS+": "+err.Error())
+	}
+	if err := hxcore.EnsureDriverLoaded(svcWR, fileWR); err != nil {
+		fails = append(fails, fileWR+": "+err.Error())
 	}
 	time.Sleep(400 * time.Millisecond)
 	ok = svcState(svcTS) == "RUNNING" && svcState(svcWR) == "RUNNING"
@@ -152,22 +128,7 @@ func classifyLoadErr(raw string) string {
 
 // cleanupDrivers: Tự dọn dẹp — Dừng dịch vụ, xoá dịch vụ, xoá tệp driver (giữ sạch sẽ hệ thống).
 func cleanupDrivers() {
-	if throttleStopAppRunning() {
-		return
-	}
-	// Tôn trọng chiến lược driver: "Thường trú" thì không gỡ; còn lại tự động dọn dẹp bình thường.
-	switch hxcore.DriverStrategy() {
-	case hxcore.DriverStrategyResident:
-		fmt.Println("  Chiến lược thường trú: Giữ lại dịch vụ driver và tệp (chẩn đoán không dọn dẹp)")
-		return
-	}
-	for _, d := range []struct{ svc, file string }{
-		{svcTS, fileTS}, {svcWR, fileWR},
-	} {
-		hxcore.RunOut("sc.exe", "stop", d.svc)
-		hxcore.RunOut("sc.exe", "delete", d.svc)
-		os.Remove(filepath.Join(sysDrvDir(), d.file))
-	}
+	hxcore.CleanupByovd()
 }
 
 func msgbox(text string, icon uint) {

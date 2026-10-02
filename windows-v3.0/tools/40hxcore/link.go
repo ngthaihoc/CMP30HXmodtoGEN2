@@ -14,9 +14,9 @@ import (
 )
 
 var (
-	ErrFamilyMismatch   = errors.New("BAR0 BOOT_0 family mismatch")
-	ErrPCIeCapMissing   = errors.New("PCIe capability missing")
-	ErrInvalidBAR0      = errors.New("invalid BAR0 physical address")
+	ErrFamilyMismatch    = errors.New("BAR0 BOOT_0 family mismatch")
+	ErrPCIeCapMissing    = errors.New("PCIe capability missing")
+	ErrInvalidBAR0       = errors.New("invalid BAR0 physical address")
 	ErrRootPortIncapable = errors.New("root port does not support target speed")
 )
 
@@ -143,24 +143,7 @@ func (n *LinkNegotiator) Negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint3
 	}
 
 	// 6. Stage 1: Retrain Pulses với Fast Polling 75ms
-	cur := n.linkSpeed(gpuBDF, cap)
-	for attempt := 0; attempt < 6; attempt++ {
-		targetBDF := gpuBDF
-		if attempt%2 == 0 && rootBDF != 0xFFFFFFFF {
-			targetBDF = rootBDF
-		}
-		_ = n.retrainPulse(targetBDF)
-		for poll := 0; poll < 25; poll++ {
-			n.bus.Sleep(75 * time.Millisecond)
-			cur = n.linkSpeed(gpuBDF, cap)
-			if cur >= targetGen {
-				break
-			}
-		}
-		if cur >= targetGen {
-			break
-		}
-	}
+	cur := n.pollRetrain(gpuBDF, rootBDF, cap, targetGen)
 
 	// 7. Stage 2: Root Link Disable + PnP Soft Reset nếu Stage 1 chưa đạt và được phép
 	if cur < targetGen && allowStage2 {
@@ -184,23 +167,7 @@ func (n *LinkNegotiator) Negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint3
 				}
 			}
 			n.restoreLnkctl(gpuBDF, cap)
-			for attempt := 0; attempt < 6; attempt++ {
-				targetBDF := gpuBDF
-				if attempt%2 == 0 && rootBDF != 0xFFFFFFFF {
-					targetBDF = rootBDF
-				}
-				_ = n.retrainPulse(targetBDF)
-				for poll := 0; poll < 25; poll++ {
-					n.bus.Sleep(75 * time.Millisecond)
-					cur = n.linkSpeed(gpuBDF, cap)
-					if cur >= targetGen {
-						break
-					}
-				}
-				if cur >= targetGen {
-					break
-				}
-			}
+			cur = n.pollRetrain(gpuBDF, rootBDF, cap, targetGen)
 		}
 	}
 
@@ -233,7 +200,6 @@ func (n *LinkNegotiator) Negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint3
 	return res, nil
 }
 
-
 func (n *LinkNegotiator) rootLinkDisable(rootBDF uint32, gpuBDF uint32, bar0Phys uint64, prof GPUProfile, targetGen uint32) {
 	rcap := n.findPcieCap(rootBDF)
 	if rcap == 0 {
@@ -248,20 +214,24 @@ func (n *LinkNegotiator) rootLinkDisable(rootBDF uint32, gpuBDF uint32, bar0Phys
 	_ = n.bus.WritePCIConfig(rootBDF, rcap+0x10, []byte{byte(set), byte(set >> 8)})
 	n.bus.Sleep(500 * time.Millisecond)
 
-	if bar0Phys != 0 {
-		_ = n.injectMMIOShadowRegisters(bar0Phys, prof, targetGen)
-	}
+	// Cấu hình TLS phía Root Port trong khi link đang tạm ngắt
 	n.setTLS(rootBDF, rcap, uint16(targetGen))
-	if gcap := n.findPcieCap(gpuBDF); gcap != 0 {
-		n.setTLS(gpuBDF, gcap, uint16(targetGen))
-	}
 
+	// Bật lại link phía Root Port
 	ctl2, err := n.bus.ReadPCIConfig(rootBDF, rcap+0x10)
 	if err == nil {
 		clr := uint16(ctl2&0xFFFF) &^ 0x10
 		_ = n.bus.WritePCIConfig(rootBDF, rcap+0x10, []byte{byte(clr), byte(clr >> 8)})
 	}
 	n.bus.Sleep(2 * time.Second)
+
+	// Sau khi link đã hoạt động trở lại, tiến hành nạp lại thanh ghi MMIO shadow và TLS cho GPU endpoint
+	if bar0Phys != 0 {
+		_ = n.injectMMIOShadowRegisters(bar0Phys, prof, targetGen)
+	}
+	if gcap := n.findPcieCap(gpuBDF); gcap != 0 {
+		n.setTLS(gpuBDF, gcap, uint16(targetGen))
+	}
 }
 
 func (n *LinkNegotiator) resolveBAR0(gpuBDF uint32) (uint64, error) {
@@ -278,6 +248,12 @@ func (n *LinkNegotiator) injectMMIOShadowRegisters(bar0Phys uint64, prof GPUProf
 		return err
 	}
 	fam := (boot0 >> 24) & 0xFF
+	if prof.Family == "TU106" && fam != 0x16 {
+		return ErrFamilyMismatch
+	}
+	if prof.Family == "TU116" && fam != 0x16 && fam != 0x17 && fam != 0x21 {
+		return ErrFamilyMismatch
+	}
 	if fam != 0x16 && fam != 0x17 && fam != 0x21 {
 		return ErrFamilyMismatch
 	}
@@ -304,6 +280,28 @@ func (n *LinkNegotiator) injectMMIOShadowRegisters(bar0Phys uint64, prof GPUProf
 		}
 	}
 	return nil
+}
+
+func (n *LinkNegotiator) pollRetrain(gpuBDF, rootBDF, cap, targetGen uint32) uint32 {
+	cur := n.linkSpeed(gpuBDF, cap)
+	for attempt := 0; attempt < 6; attempt++ {
+		targetBDF := gpuBDF
+		if attempt%2 == 0 && rootBDF != 0xFFFFFFFF {
+			targetBDF = rootBDF
+		}
+		_ = n.retrainPulse(targetBDF)
+		for poll := 0; poll < 25; poll++ {
+			n.bus.Sleep(75 * time.Millisecond)
+			cur = n.linkSpeed(gpuBDF, cap)
+			if cur >= targetGen {
+				break
+			}
+		}
+		if cur >= targetGen {
+			break
+		}
+	}
+	return cur
 }
 
 func (n *LinkNegotiator) findPcieCap(bdf uint32) uint32 {
@@ -416,6 +414,8 @@ type MockHardwareBus struct {
 	OnPnpReset             func(devID uint16) bool
 	RestartNVDisplayCalled bool
 	OnRestartNVDisplay     func() error
+	OnWriteMMIO            func(physAddr uint64, val uint32)
+	OnWritePCIConfig       func(bdf uint32, reg uint32, data []byte)
 }
 
 func NewMockHardwareBus() *MockHardwareBus {
@@ -471,6 +471,9 @@ func (m *MockHardwareBus) WritePCIConfig(bdf uint32, reg uint32, data []byte) er
 		}
 	}
 	m.pciConfig[key] = (cur &^ mask) | val
+	if m.OnWritePCIConfig != nil {
+		m.OnWritePCIConfig(bdf, reg, data)
+	}
 	return nil
 }
 
@@ -484,6 +487,9 @@ func (m *MockHardwareBus) ReadMMIO(physAddr uint64) (uint32, error) {
 
 func (m *MockHardwareBus) WriteMMIO(physAddr uint64, val uint32) error {
 	m.mmio[physAddr] = val
+	if m.OnWriteMMIO != nil {
+		m.OnWriteMMIO(physAddr, val)
+	}
 	return nil
 }
 

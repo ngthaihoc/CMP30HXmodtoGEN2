@@ -31,8 +31,8 @@ type UnlockState struct {
 	//               // = 空闲省电降速(已配置, 负载自动回升), 不是解锁失败
 	SS0           uint32 // 算力标志寄存器
 	SS1           uint32
-	SS0OK         bool // 成功读到 SS0
-	Unlocked      bool // SS0 == 0x88888888
+	SS0OK         bool           // 成功读到 SS0
+	Unlocked      bool           // SS0 == 0x88888888
 	ComputeReport *ComputeReport // Báo cáo giải mã Tensor Core định kiểu (ComputeInspector)
 }
 
@@ -142,7 +142,7 @@ func FindGPUPCIWithBus(bus HardwareBus) (uint32, GPUProfile, bool) {
 	return 0, GPUProfile{}, false
 }
 
-// FindGPUPCIWithProfile: 全扫 PCI config 定位 GPU BDF 并返回 Profile
+// FindGPUPCIWithProfile: Quét toàn bộ PCI config định vị GPU BDF và trả về Profile
 func FindGPUPCIWithProfile(wh syscall.Handle) (uint32, GPUProfile, bool) {
 	return FindGPUPCIWithBus(NewProductionBus(wh, 0))
 }

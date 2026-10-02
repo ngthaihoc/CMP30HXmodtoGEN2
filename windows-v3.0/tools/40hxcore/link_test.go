@@ -88,7 +88,7 @@ func TestLinkNegotiator_MMIO_ShadowRegisterSequence(t *testing.T) {
 	bus.SetPCICap(bdf, 0x40)
 	bus.SetPCIConfig(bdf, 0x10, 0xF6000000)
 	bar0 := uint64(0xF6000000)
-	bus.SetMMIO(bar0+0x00, 0x17000000) // BOOT_0 TU116
+	bus.SetMMIO(bar0+0x00, 0x17000000)           // BOOT_0 TU116
 	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000021) // Gen2 attained
 
 	negotiator := NewLinkNegotiator(bus)
@@ -140,7 +140,7 @@ func TestLinkNegotiator_Stage2_PnPRecovery(t *testing.T) {
 	bus.SetPCIConfig(bdf, 0x00, 0x1F0B10DE)
 	bus.SetPCICap(bdf, 0x40)
 	bus.SetPCIConfig(bdf, 0x10, 0xF6000000)
-	bus.SetMMIO(0xF6000000+0x00, 0x16000000) // BOOT_0: TU106 (0x16)
+	bus.SetMMIO(0xF6000000+0x00, 0x16000000)     // BOOT_0: TU106 (0x16)
 	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000011) // Stuck at Gen1
 
 	// Hook PnP reset to flip link speed to Gen2
@@ -166,7 +166,6 @@ func TestLinkNegotiator_Stage2_PnPRecovery(t *testing.T) {
 	}
 }
 
-
 func TestLinkNegotiator_Stage2_40HX_RootLinkDisableAndPnP(t *testing.T) {
 	// Arrange: CMP 40HX (TU106) with Root Port present.
 	// When Stage 1 fails and allowStage2=true, rootLinkDisable must be executed on Root Port,
@@ -184,7 +183,7 @@ func TestLinkNegotiator_Stage2_40HX_RootLinkDisableAndPnP(t *testing.T) {
 	bus.SetPCIConfig(gpuBDF, 0x00, 0x1F0B10DE)
 	bus.SetPCICap(gpuBDF, 0x40)
 	bus.SetPCIConfig(gpuBDF, 0x10, 0xF6000000)
-	bus.SetMMIO(0xF6000000+0x00, 0x16000000) // BOOT_0: TU106
+	bus.SetMMIO(0xF6000000+0x00, 0x16000000)        // BOOT_0: TU106
 	bus.SetPCIConfig(gpuBDF, 0x40+0x12, 0x00000011) // Stuck at Gen1
 
 	// Root Port config
@@ -281,6 +280,37 @@ func TestLinkNegotiator_BOOT0_FamilyMismatch_Guarded(t *testing.T) {
 	}
 }
 
+func TestLinkNegotiator_BOOT0_TU106_Mismatch_Guarded(t *testing.T) {
+	// Arrange: TU106 (CMP 40HX) must strictly match family 0x16.
+	// If BAR0 remaps to a TU116 (0x21), it must safely abort MMIO writes.
+	bus := NewMockHardwareBus()
+	bdf := uint32(0x0100)
+	prof := GPUProfile{
+		VendorID:        0x10DE,
+		DeviceID:        0x1F0B,
+		Name:            "CMP 40HX",
+		Family:          "TU106",
+		MaxSupportedGen: 2,
+	}
+	bus.SetPCIConfig(bdf, 0x00, 0x1F0B10DE)
+	bus.SetPCICap(bdf, 0x40)
+	bus.SetPCIConfig(bdf, 0x10, 0xF6000000)
+	bus.SetMMIO(0xF6000000+0x00, 0x21000000) // TU116 family byte 0x21, mismatch for TU106
+
+	negotiator := NewLinkNegotiator(bus)
+
+	// Act
+	_, err := negotiator.Negotiate(bdf, prof, 0xFFFFFFFF, 2, false)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("expected error on BOOT_0 TU106 mismatch, got nil")
+	}
+	if !errors.Is(err, ErrFamilyMismatch) {
+		t.Fatalf("expected ErrFamilyMismatch, got %v", err)
+	}
+}
+
 func TestLinkNegotiator_RestartNVDisplay_InvokedOnSuccess(t *testing.T) {
 	// Arrange: When targetGen is achieved, RestartNVDisplay must be invoked to refresh driver container
 	bus := NewMockHardwareBus()
@@ -312,5 +342,63 @@ func TestLinkNegotiator_RestartNVDisplay_InvokedOnSuccess(t *testing.T) {
 	}
 	if !bus.RestartNVDisplayCalled {
 		t.Fatalf("expected RestartNVDisplay to be called on Gen2 success")
+	}
+}
+
+func TestLinkNegotiator_RootLinkDisable_Sequencing(t *testing.T) {
+	// Arrange
+	bus := NewMockHardwareBus()
+	gpuBDF := uint32(0x0100)
+	rootBDF := uint32(0x0008)
+	prof := GPUProfile{
+		VendorID:        0x10DE,
+		DeviceID:        0x1F0B,
+		Name:            "CMP 40HX",
+		Family:          "TU106",
+		MaxSupportedGen: 2,
+		RequiresMMIO:    true,
+	}
+	bus.SetPCIConfig(gpuBDF, 0x00, 0x1F0B10DE)
+	bus.SetPCICap(gpuBDF, 0x40)
+	bus.SetPCIConfig(gpuBDF, 0x10, 0xF6000000)
+	bus.SetMMIO(0xF6000000+0x00, 0x16000000)        // BOOT_0
+	bus.SetPCIConfig(gpuBDF, 0x40+0x12, 0x00000011) // Gen1
+
+	bus.SetPCICap(rootBDF, 0x50)
+	bus.SetPCIConfig(rootBDF, 0x50+0x10, 0x00000000)
+
+	rootLinkDisabled := false
+	mmioWrittenWhileDisabled := false
+	mmioWrittenAfterEnabled := false
+
+	bus.OnWritePCIConfig = func(bdf uint32, reg uint32, data []byte) {
+		if bdf == rootBDF && reg == 0x50+0x10 && len(data) >= 1 {
+			if data[0]&0x10 != 0 {
+				rootLinkDisabled = true
+			} else {
+				rootLinkDisabled = false
+			}
+		}
+	}
+
+	bus.OnWriteMMIO = func(physAddr uint64, val uint32) {
+		if rootLinkDisabled {
+			mmioWrittenWhileDisabled = true
+		} else {
+			mmioWrittenAfterEnabled = true
+		}
+	}
+
+	negotiator := NewLinkNegotiator(bus)
+
+	// Act
+	negotiator.rootLinkDisable(rootBDF, gpuBDF, 0xF6000000, prof, 2)
+
+	// Assert
+	if mmioWrittenWhileDisabled {
+		t.Fatalf("violation: MMIO shadow registers written while root link was disabled (bit 4=1)")
+	}
+	if !mmioWrittenAfterEnabled {
+		t.Fatalf("violation: MMIO shadow registers NOT re-injected after root link was re-enabled (bit 4=0)")
 	}
 }

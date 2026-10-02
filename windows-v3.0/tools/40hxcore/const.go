@@ -32,6 +32,7 @@ type GPUProfile struct {
 	MaxSupportedGen uint32
 	FirmwareUnlock  bool
 	HasSafePL0      bool
+	RequiresMMIO    bool
 }
 
 var SupportedGPUProfiles = []GPUProfile{
@@ -44,6 +45,7 @@ var SupportedGPUProfiles = []GPUProfile{
 		MaxSupportedGen: 2,
 		FirmwareUnlock:  true,
 		HasSafePL0:      true,
+		RequiresMMIO:    true,
 	},
 	{
 		VendorID:        0x10DE,
@@ -54,6 +56,7 @@ var SupportedGPUProfiles = []GPUProfile{
 		MaxSupportedGen: 2, // ponytail: CMP 30HX (TU116) bi dut eFuse bit 3 (8.0 GT/s), gioi han phan cung la Gen2 (5.0 GT/s)
 		FirmwareUnlock:  false,
 		HasSafePL0:      false,
+		RequiresMMIO:    true,
 	},
 }
 

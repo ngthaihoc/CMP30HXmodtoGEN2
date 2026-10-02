@@ -11,6 +11,15 @@ import (
 // DriverFileProvider: Hàm hook tuỳ chọn cho phép ứng dụng cấp dữ liệu file driver nhúng (embed)
 var DriverFileProvider func(filename string) ([]byte, error)
 
+// Test seams for driver execution and lifecycle mocking
+var (
+	driverCmdRunner          = RunOut
+	openWinRing0             = func() (syscall.Handle, error) { return OpenDevice(`\\.\WinRing0_1_2_0`) }
+	openThrottleStop         = func() (syscall.Handle, error) { return OpenThrottleStop() }
+	driverCloseHandle        = CloseHandle
+	isThrottleStopAppRunning = ThrottleStopAppRunning
+)
+
 // ThrottleStopAppRunning kiểm tra xem phần mềm ThrottleStop.exe của người dùng có đang chạy không
 func ThrottleStopAppRunning() bool {
 	out, _ := RunOut("tasklist.exe", "/FI", "IMAGENAME eq ThrottleStop.exe")
@@ -19,7 +28,7 @@ func ThrottleStopAppRunning() bool {
 
 // EnsureDriverLoaded triển khai file và khởi động service cho driver kernel BYOVD
 func EnsureDriverLoaded(svcName, fileName string) error {
-	out, _ := RunOut("sc.exe", "query", svcName)
+	out, _ := driverCmdRunner("sc.exe", "query", svcName)
 	if strings.Contains(out, "RUNNING") {
 		return nil
 	}
@@ -56,12 +65,12 @@ func EnsureDriverLoaded(svcName, fileName string) error {
 	}
 
 	bin := `\SystemRoot\System32\drivers\` + fileName
-	RunOut("sc.exe", "create", svcName, "type=", "kernel", "start=", "demand", "binPath=", bin)
-	if _, err := RunOut("sc.exe", "start", svcName); err != nil {
+	driverCmdRunner("sc.exe", "create", svcName, "type=", "kernel", "start=", "demand", "binPath=", bin)
+	if _, err := driverCmdRunner("sc.exe", "start", svcName); err != nil {
 		// Thử xoá và tạo lại (phòng trường hợp service bị đánh dấu delete hoặc config lỗi)
-		RunOut("sc.exe", "delete", svcName)
-		RunOut("sc.exe", "create", svcName, "type=", "kernel", "start=", "demand", "binPath=", bin)
-		if out2, err2 := RunOut("sc.exe", "start", svcName); err2 != nil {
+		driverCmdRunner("sc.exe", "delete", svcName)
+		driverCmdRunner("sc.exe", "create", svcName, "type=", "kernel", "start=", "demand", "binPath=", bin)
+		if out2, err2 := driverCmdRunner("sc.exe", "start", svcName); err2 != nil {
 			return fmt.Errorf("không thể khởi động dịch vụ %s: %s (%v)", svcName, strings.TrimSpace(out2), err2)
 		}
 	}
@@ -74,16 +83,17 @@ func CleanupByovd() {
 	if DriverStrategy() == DriverStrategyResident {
 		return
 	}
-	if ThrottleStopAppRunning() {
-		return
-	}
+	appRunning := isThrottleStopAppRunning()
 
 	for _, d := range []struct{ name, file string }{
 		{"ThrottleStop", "ThrottleStop.sys"},
 		{"WinRing0_1_2_0", "WinRing0x64.sys"},
 	} {
-		RunOut("sc.exe", "stop", d.name)
-		RunOut("sc.exe", "delete", d.name)
+		if d.name == "ThrottleStop" && appRunning {
+			continue
+		}
+		driverCmdRunner("sc.exe", "stop", d.name)
+		driverCmdRunner("sc.exe", "delete", d.name)
 		_ = os.Remove(filepath.Join(sysRoot(), "System32", "drivers", d.file))
 	}
 }
@@ -91,10 +101,21 @@ func CleanupByovd() {
 // DriverSession: Deep Module quản lý vòng đời đóng kín (RAII) của driver kernel
 type DriverSession struct{}
 
+// NewDriverSession khởi tạo instance DriverSession
+func NewDriverSession() *DriverSession {
+	return &DriverSession{}
+}
+
+// RunScoped thực thi tác vụ với HardwareBus phù hợp với GPUProfile thông qua receiver
+func (s *DriverSession) RunScoped(prof GPUProfile, fn func(bus HardwareBus) error) error {
+	return RunScoped(prof, fn)
+}
+
 // RunScoped thực thi tác vụ với HardwareBus phù hợp với GPUProfile,
 // đảm bảo tự động dọn dẹp driver ngay cả khi xảy ra lỗi hoặc panic
 func RunScoped(prof GPUProfile, fn func(bus HardwareBus) error) error {
-	return RunScopedBus(prof.HasSafePL0, fn)
+	needsMMIO := prof.RequiresMMIO || prof.HasSafePL0 || prof.DeviceID == 0x2189 || prof.Family == "TU116" || prof.Family == "TU106"
+	return RunScopedBus(needsMMIO, fn)
 }
 
 // RunScopedBus thực thi fn với HardwareBus, tải ThrottleStop nếu needsPL0=true
@@ -105,11 +126,11 @@ func RunScopedBus(needsPL0 bool, fn func(bus HardwareBus) error) error {
 	if err := EnsureDriverLoaded("WinRing0_1_2_0", "WinRing0x64.sys"); err != nil {
 		return fmt.Errorf("WinRing0 error: %w", err)
 	}
-	wh, err := OpenDevice(`\\.\WinRing0_1_2_0`)
+	wh, err := openWinRing0()
 	if err != nil {
 		return fmt.Errorf("không thể mở handle WinRing0: %w", err)
 	}
-	defer CloseHandle(wh)
+	defer driverCloseHandle(wh)
 
 	// 2. Tải và mở ThrottleStop nếu cần truy cập MMIO vật lý
 	var th syscall.Handle = 0
@@ -117,12 +138,12 @@ func RunScopedBus(needsPL0 bool, fn func(bus HardwareBus) error) error {
 		if err := EnsureDriverLoaded("ThrottleStop", "ThrottleStop.sys"); err != nil {
 			return fmt.Errorf("ThrottleStop error: %w", err)
 		}
-		t, err := OpenThrottleStop()
+		t, err := openThrottleStop()
 		if err != nil {
 			return fmt.Errorf("không thể mở handle ThrottleStop: %w", err)
 		}
 		th = t
-		defer CloseHandle(th)
+		defer driverCloseHandle(th)
 	}
 
 	// 3. Khởi tạo ProductionBus và chạy closure
