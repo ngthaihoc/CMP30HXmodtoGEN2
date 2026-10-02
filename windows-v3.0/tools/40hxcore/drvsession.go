@@ -132,18 +132,15 @@ func RunScopedBus(needsPL0 bool, fn func(bus HardwareBus) error) error {
 	}
 	defer driverCloseHandle(wh)
 
-	// 2. Tải và mở ThrottleStop nếu cần truy cập MMIO vật lý
+	// 2. Tải và mở ThrottleStop nếu cần truy cập MMIO vật lý (tuỳ chọn: trên CPU AMD không hỗ trợ MSR Intel hoặc khi bị chặn, tiếp tục với WinRing0)
 	var th syscall.Handle = 0
 	if needsPL0 {
-		if err := EnsureDriverLoaded("ThrottleStop", "ThrottleStop.sys"); err != nil {
-			return fmt.Errorf("ThrottleStop error: %w", err)
+		if err := EnsureDriverLoaded("ThrottleStop", "ThrottleStop.sys"); err == nil {
+			if t, err := openThrottleStop(); err == nil {
+				th = t
+				defer driverCloseHandle(th)
+			}
 		}
-		t, err := openThrottleStop()
-		if err != nil {
-			return fmt.Errorf("không thể mở handle ThrottleStop: %w", err)
-		}
-		th = t
-		defer driverCloseHandle(th)
 	}
 
 	// 3. Khởi tạo ProductionBus và chạy closure

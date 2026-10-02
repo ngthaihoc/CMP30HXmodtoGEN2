@@ -24,6 +24,8 @@ const (
 	// WinRing0 (CTL(fn,acc) = (40000<<16)|(acc<<14)|(fn<<2))
 	ioctlRpci = (40000 << 16) | (1 << 14) | (0x851 << 2)
 	ioctlWpci = (40000 << 16) | (2 << 14) | (0x852 << 2)
+	ioctlRmem = (40000 << 16) | (1 << 14) | (0x841 << 2)
+	ioctlWmem = (40000 << 16) | (2 << 14) | (0x842 << 2)
 )
 
 type bar0RdIn struct {
@@ -136,6 +138,32 @@ func PciWr(wh syscall.Handle, bdf uint32, reg uint32, data []byte) error {
 	binary.LittleEndian.PutUint32(ib[4:], reg)
 	copy(ib[8:], data)
 	_, err := IoCtl(wh, ioctlWpci, ib, nil)
+	return err
+}
+
+// ---- Physical Memory via WinRing0 ----
+
+// WRReadMem: Đọc 4 byte từ bộ nhớ vật lý qua WinRing0 (IOCTL 0x9C406104)
+func WRReadMem(wh syscall.Handle, addr uint64) (uint32, error) {
+	ib := make([]byte, 16)
+	binary.LittleEndian.PutUint64(ib[0:], addr)
+	binary.LittleEndian.PutUint32(ib[8:], 4)
+	binary.LittleEndian.PutUint32(ib[12:], 1)
+	ob := make([]byte, 4)
+	if _, err := IoCtl(wh, ioctlRmem, ib, ob); err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(ob), nil
+}
+
+// WRWriteMem: Ghi 4 byte vào bộ nhớ vật lý qua WinRing0 (IOCTL 0x9C40A108)
+func WRWriteMem(wh syscall.Handle, addr uint64, val uint32) error {
+	ib := make([]byte, 20)
+	binary.LittleEndian.PutUint64(ib[0:], addr)
+	binary.LittleEndian.PutUint32(ib[8:], 4)
+	binary.LittleEndian.PutUint32(ib[12:], 1)
+	binary.LittleEndian.PutUint32(ib[16:], val)
+	_, err := IoCtl(wh, ioctlWmem, ib, nil)
 	return err
 }
 

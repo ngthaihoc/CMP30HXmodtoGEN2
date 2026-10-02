@@ -216,3 +216,108 @@ func TestDriverSession_RunScoped_EnablesMMIOForTU116(t *testing.T) {
 		t.Fatalf("expected ThrottleStop to be opened for CMP 30HX profile requiring MMIO")
 	}
 }
+
+func TestDriverSession_RunScopedBus_FallbackWhenThrottleStopFails(t *testing.T) {
+	origRunner := driverCmdRunner
+	origOpenWR := openWinRing0
+	origOpenTS := openThrottleStop
+	origClose := driverCloseHandle
+	defer func() {
+		driverCmdRunner = origRunner
+		openWinRing0 = origOpenWR
+		openThrottleStop = origOpenTS
+		driverCloseHandle = origClose
+	}()
+
+	driverCmdRunner = func(name string, args ...string) (string, error) {
+		if len(args) >= 2 && args[0] == "query" && args[1] == "WinRing0_1_2_0" {
+			return "STATE: 4  RUNNING", nil
+		}
+		if len(args) >= 2 && (args[0] == "start" || args[0] == "query") && args[1] == "ThrottleStop" {
+			return "", errors.New("ERROR_GEN_FAILURE 31")
+		}
+		return "", nil
+	}
+	openWinRing0 = func() (syscall.Handle, error) { return 111, nil }
+	openThrottleStop = func() (syscall.Handle, error) { return 0, errors.New("driver not started") }
+	driverCloseHandle = func(h syscall.Handle) {}
+
+	called := false
+	err := RunScopedBus(true, func(bus HardwareBus) error {
+		called = true
+		prod, ok := bus.(*ProductionBus)
+		if !ok {
+			t.Fatalf("expected bus to be *ProductionBus")
+		}
+		if prod.wh != 111 {
+			t.Errorf("expected WinRing0 handle 111, got %v", prod.wh)
+		}
+		if prod.th != 0 {
+			t.Errorf("expected ThrottleStop handle 0, got %v", prod.th)
+		}
+		return nil
+	})
+
+	if err != nil {
+		t.Fatalf("expected RunScopedBus to succeed with fallback, got error: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected closure to be executed despite ThrottleStop failure")
+	}
+}
+
+func TestProductionBus_MMIO_FallbackToWinRing0(t *testing.T) {
+	// Khi cả hai handle = 0
+	busNoHandles := NewProductionBus(0, 0)
+	if _, err := busNoHandles.ReadMMIO(0x1000); err == nil {
+		t.Errorf("expected error when both handles are zero")
+	}
+	if err := busNoHandles.WriteMMIO(0x1000, 0x123); err == nil {
+		t.Errorf("expected error when both handles are zero")
+	}
+
+	// Khi th = 0 nhưng wh != 0, ProductionBus phải uỷ quyền sang WinRing0 (WRReadMem / WRWriteMem)
+	busFallback := NewProductionBus(999, 0)
+	if busFallback.th != 0 || busFallback.wh != 999 {
+		t.Fatalf("unexpected handles: wh=%v, th=%v", busFallback.wh, busFallback.th)
+	}
+	// WRReadMem/WRWriteMem gọi IoCtl với handle 999 (sẽ trả lỗi ioctl thay vì 'ThrottleStop handle is zero')
+	_, rErr := busFallback.ReadMMIO(0x1000)
+	if rErr != nil && rErr.Error() == "ThrottleStop handle is zero" {
+		t.Errorf("ReadMMIO should have fallen back to WinRing0 instead of returning ThrottleStop handle is zero")
+	}
+	wErr := busFallback.WriteMMIO(0x1000, 0x123)
+	if wErr != nil && wErr.Error() == "ThrottleStop handle is zero" {
+		t.Errorf("WriteMMIO should have fallen back to WinRing0 instead of returning ThrottleStop handle is zero")
+	}
+}
+
+func TestDriverSession_RunScoped_Delegates(t *testing.T) {
+	origRunner := driverCmdRunner
+	origOpenWR := openWinRing0
+	origClose := driverCloseHandle
+	defer func() {
+		driverCmdRunner = origRunner
+		openWinRing0 = origOpenWR
+		driverCloseHandle = origClose
+	}()
+
+	driverCmdRunner = func(name string, args ...string) (string, error) {
+		return "STATE: 4  RUNNING", nil
+	}
+	openWinRing0 = func() (syscall.Handle, error) { return 111, nil }
+	driverCloseHandle = func(h syscall.Handle) {}
+
+	session := NewDriverSession()
+	called := false
+	err := session.RunScoped(GPUProfile{DeviceID: 0x1F0B, Family: "TU106"}, func(bus HardwareBus) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected closure to be called")
+	}
+}

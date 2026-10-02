@@ -907,7 +907,7 @@ func installDrivers() {
 	//   两者普通模式(testsigning off)即可加载。安装阶段仅放好驱动文件 +
 	//   注册 demand 服务; 真正的加载与自清理由登录后的 -gen2(SYSTEM 任务)
 	//   完成 → 用完即卸, 游戏时系统无第三方驱动。
-	tsApp := throttleStopAppRunning()
+	tsApp := hxcore.ThrottleStopAppRunning()
 	for _, d := range []struct{ name, file string }{
 		{"ThrottleStop", "ThrottleStop.sys"},
 		{"WinRing0_1_2_0", "WinRing0x64.sys"},
@@ -987,62 +987,6 @@ func ensureService(name string, sysFile string) {
 		stateS = "STOPPED"
 	}
 	fmt.Printf("  服务 %s 已注册 (%s, %s), 登录后由 SYSTEM 任务加载\n", name, start, stateS)
-}
-
-// ensureSvcLoaded: 确保驱动服务已注册并加载。
-// v2.4.6: 由 SYSTEM 任务(或管理员手动)调用时 sc start 才有权限;
-// 普通权限(Run 键兜底)下失败属预期 — 静默交给 SYSTEM 任务处理。
-
-// throttleStopAppRunning: 本机 ThrottleStop 软件进程检测(第三方占用驱动时跳过自清理)。
-
-func throttleStopAppRunning() bool {
-	out, _ := hxcore.RunOut("tasklist.exe", "/FI", "IMAGENAME eq ThrottleStop.exe")
-	return strings.Contains(out, "ThrottleStop.exe")
-}
-
-// redeployDriverFile: v2.6.0 - 杀软可能删驱动文件, 每次 -gen2 前从 embed 重新释放到
-// System32\drivers(内容一致则跳过写入, 避免占用冲突)。返回 true = 驱动文件已就绪。
-
-func redeployDriverFile(sysFile string) bool {
-	data, err := embedded.ReadFile("embed/" + sysFile)
-	if err != nil {
-		return false
-	}
-
-	target := os.Getenv("SystemRoot") + "\\System32\\drivers\\" + sysFile
-	if cur, cerr := os.ReadFile(target); cerr == nil && len(cur) == len(data) {
-		return true
-	}
-	if werr := os.WriteFile(target, data, 0o644); werr != nil {
-		return false
-	}
-	return true
-}
-
-func ensureSvcLoaded(name string, sysFile string) {
-	if out, _ := hxcore.RunOut("sc.exe", "query", name); strings.Contains(out, "RUNNING") {
-		return // 已运行
-	}
-	if redeployDriverFile(sysFile) {
-		hxcore.AddDefenderExclusions()
-	}
-	bin := fmt.Sprintf("\\SystemRoot\\System32\\drivers\\%s", sysFile)
-	hxcore.RunOut("sc.exe", "create", name, "type=", "kernel", "start=", "demand", "binPath=", bin)
-	_, err := hxcore.RunOut("sc.exe", "start", name)
-	if err != nil {
-		// 首次启动失败 - 常见于杀软删除驱动文件或服务配置被改为 disabled。
-		// 删除服务 -> 重新部署 -> 用新建服务重试一次。
-
-		hxcore.RunOut("sc.exe", "delete", name)
-		redeployDriverFile(sysFile)
-		hxcore.RunOut("sc.exe", "create", name, "type=", "kernel", "start=", "demand", "binPath=", bin)
-		if out, err := hxcore.RunOut("sc.exe", "start", name); err != nil {
-			fmt.Printf("[Gen2] 启动服务 %s 失败: %s\n", name, strings.TrimSpace(out))
-			if !isAdmin() {
-				fmt.Println("[Gen2] 当前非管理员 — 交给 SYSTEM 计划任务处理(无需操作)")
-			}
-		}
-	}
 }
 
 func setupBootEntry() error {
@@ -1415,96 +1359,77 @@ func gen2Main() {
 // probe30HX: Chẩn đoán chỉ đọc thanh ghi BAR0 MMIO link và PHY CMP 30HX (TU116)
 func probe30HX() {
 	fmt.Println("=== Chẩn đoán chỉ đọc thanh ghi BAR0 MMIO CMP 30HX (TU116) ===")
-	sysDir := os.Getenv("SystemRoot") + "\\System32\\drivers"
-	if _, err := os.Stat(filepath.Join(sysDir, "WinRing0x64.sys")); err != nil {
-		copyEmbedTo(filepath.Join(sysDir, "WinRing0x64.sys"), "WinRing0x64.sys")
-	}
-	ensureSvcLoaded("WinRing0_1_2_0", "WinRing0x64.sys")
-
-	wh, err := hxcore.OpenDevice(`\\.\WinRing0_1_2_0`)
-	if err != nil {
-		fmt.Printf("[!] Mở WinRing0 thất bại: %v\n", err)
-		return
-	}
-	defer hxcore.CloseHandle(wh)
-
-	gpuBDF, gpuProfile, gpuFound := hxcore.FindGPUPCIWithProfile(wh)
-	if !gpuFound {
-		fmt.Println("[!] Không định vị được card đồ hoạ hỗ trợ (30HX/40HX) trên bus PCI")
-		return
-	}
-	gpuBus := (gpuBDF >> 8) & 0xFF
-	fmt.Printf("[Probe] Card đồ hoạ: %s (DEV_%04X) tại %02x:%02x.%x\n", gpuProfile.Name, gpuProfile.DeviceID, gpuBus, (gpuBDF>>3)&0x1F, gpuBDF&7)
-
-	bar0raw, err := hxcore.PciRd(wh, gpuBDF, 0x10)
-	if err != nil || bar0raw == 0 || bar0raw == 0xFFFFFFFF {
-		fmt.Printf("[!] Đọc BAR0 bất thường: 0x%08X (err=%v)\n", bar0raw, err)
-		return
-	}
-	bar0Phys := uint64(bar0raw & 0xFFFFFFF0)
-	fmt.Printf("[Probe] PCI BAR0 (0x10) = 0x%08X (Địa chỉ vật lý gốc: 0x%08X)\n", bar0raw, bar0Phys)
-
-	if _, err := os.Stat(filepath.Join(sysDir, "ThrottleStop.sys")); err != nil {
-		copyEmbedTo(filepath.Join(sysDir, "ThrottleStop.sys"), "ThrottleStop.sys")
-	}
-	ensureSvcLoaded("ThrottleStop", "ThrottleStop.sys")
-
-	th, err := hxcore.OpenThrottleStop()
-	if err != nil {
-		fmt.Printf("[!] Driver ThrottleStop chưa được mở: %v\n", err)
-		return
-	}
-	defer hxcore.CloseHandle(th)
-
-	boot0, berr := hxcore.TSRead(th, bar0Phys+0x0)
-	if berr != nil {
-		fmt.Printf("[!] Đọc BOOT_0 thất bại: %v\n", berr)
-		return
-	}
-	fmt.Printf("[Probe] NV_PMC_BOOT_0 (BAR0+0x00000) = 0x%08X\n", boot0)
-
-	regs := []struct {
-		off  uint64
-		name string
-	}{
-		{0x00088084, "LNKCAP (NV_XVE 0x84)"},
-		{0x000880A4, "LNKCAP2 (NV_XVE 0xA4)"},
-		{0x000880A8, "LNKCTL2 (NV_XVE 0xA8)"},
-		{0x000880F0, "NV_XVE_0xF0"},
-		{0x0008841C, "NV_XVE_PRIV_MISC_1"},
-		{0x00088700, "NV_XVE_0x700"},
-		{0x00088708, "NV_XVE_0x708"},
-		{0x0008870C, "NV_XVE_0x70C"},
-		{0x00088714, "NV_XVE_0x714"},
-		{0x00088720, "NV_XVE_0x720"},
-		{0x0008872C, "NV_XVE_OVR (0x72C)"},
-		{0x0008C040, "NV_XVE_LINK_CONFIG_0"},
-		{0x0008C1C0, "NV_XVE_PL_LINK_RATE"},
-		{0x0008C2C0, "NV_XVE_CYA_0"},
-		{0x0008C4B0, "PHY_LANE0_SPEED (2.5G/5G)"},
-		{0x0008C4B4, "PHY_LANE1_SPEED"},
-		{0x0008C4B8, "PHY_LANE2_SPEED"},
-		{0x0008C4BC, "PHY_LANE3_SPEED"},
-	}
-
-	fmt.Println("\n[Probe] ===== Giá trị thực đo thanh ghi link PCIe và PHY BAR0 =====")
-	for _, r := range regs {
-		val, rerr := hxcore.TSRead(th, bar0Phys+r.off)
-		if rerr != nil {
-			fmt.Printf("  0x%06X (%-26s): Đọc thất bại (%v)\n", r.off, r.name, rerr)
-		} else {
-			extra := ""
-			if r.off == 0x0008C2C0 {
-				if (val & (1 << 2)) != 0 {
-					extra = " [bit2=1 DIS_G2 bật -> khóa Gen2!]"
-				} else {
-					extra = " [bit2=0 DIS_G2 tắt -> cho phép Gen2]"
-				}
-			}
-			fmt.Printf("  0x%06X (%-26s): 0x%08X%s\n", r.off, r.name, val, extra)
+	err := hxcore.RunScopedBus(true, func(bus hxcore.HardwareBus) error {
+		gpuBDF, gpuProfile, gpuFound := hxcore.FindGPUPCIWithBus(bus)
+		if !gpuFound {
+			fmt.Println("[!] Không định vị được card đồ hoạ hỗ trợ (30HX/40HX) trên bus PCI")
+			return nil
 		}
+		gpuBus := (gpuBDF >> 8) & 0xFF
+		fmt.Printf("[Probe] Card đồ hoạ: %s (DEV_%04X) tại %02x:%02x.%x\n", gpuProfile.Name, gpuProfile.DeviceID, gpuBus, (gpuBDF>>3)&0x1F, gpuBDF&7)
+
+		bar0raw, err := bus.ReadPCIConfig(gpuBDF, 0x10)
+		if err != nil || bar0raw == 0 || bar0raw == 0xFFFFFFFF {
+			fmt.Printf("[!] Đọc BAR0 bất thường: 0x%08X (err=%v)\n", bar0raw, err)
+			return nil
+		}
+		bar0Phys := uint64(bar0raw & 0xFFFFFFF0)
+		fmt.Printf("[Probe] PCI BAR0 (0x10) = 0x%08X (Địa chỉ vật lý gốc: 0x%08X)\n", bar0raw, bar0Phys)
+
+		boot0, berr := bus.ReadMMIO(bar0Phys + 0x0)
+		if berr != nil {
+			fmt.Printf("[!] Đọc BOOT_0 thất bại: %v\n", berr)
+			return nil
+		}
+		fmt.Printf("[Probe] NV_PMC_BOOT_0 (BAR0+0x00000) = 0x%08X\n", boot0)
+
+		regs := []struct {
+			off  uint64
+			name string
+		}{
+			{0x00088084, "LNKCAP (NV_XVE 0x84)"},
+			{0x000880A4, "LNKCAP2 (NV_XVE 0xA4)"},
+			{0x000880A8, "LNKCTL2 (NV_XVE 0xA8)"},
+			{0x000880F0, "NV_XVE_0xF0"},
+			{0x0008841C, "NV_XVE_PRIV_MISC_1"},
+			{0x00088700, "NV_XVE_0x700"},
+			{0x00088708, "NV_XVE_0x708"},
+			{0x0008870C, "NV_XVE_0x70C"},
+			{0x00088714, "NV_XVE_0x714"},
+			{0x00088720, "NV_XVE_0x720"},
+			{0x0008872C, "NV_XVE_OVR (0x72C)"},
+			{0x0008C040, "NV_XVE_LINK_CONFIG_0"},
+			{0x0008C1C0, "NV_XVE_PL_LINK_RATE"},
+			{0x0008C2C0, "NV_XVE_CYA_0"},
+			{0x0008C4B0, "PHY_LANE0_SPEED (2.5G/5G)"},
+			{0x0008C4B4, "PHY_LANE1_SPEED"},
+			{0x0008C4B8, "PHY_LANE2_SPEED"},
+			{0x0008C4BC, "PHY_LANE3_SPEED"},
+		}
+
+		fmt.Println("\n[Probe] ===== Giá trị thực đo thanh ghi link PCIe và PHY BAR0 =====")
+		for _, r := range regs {
+			val, rerr := bus.ReadMMIO(bar0Phys + r.off)
+			if rerr != nil {
+				fmt.Printf("  0x%06X (%-26s): Đọc thất bại (%v)\n", r.off, r.name, rerr)
+			} else {
+				extra := ""
+				if r.off == 0x0008C2C0 {
+					if (val & (1 << 2)) != 0 {
+						extra = " [bit2=1 DIS_G2 bật -> khóa Gen2!]"
+					} else {
+						extra = " [bit2=0 DIS_G2 tắt -> cho phép Gen2]"
+					}
+				}
+				fmt.Printf("  0x%06X (%-26s): 0x%08X%s\n", r.off, r.name, val, extra)
+			}
+		}
+		fmt.Println("======================================================")
+		return nil
+	})
+	if err != nil {
+		fmt.Printf("[!] Lỗi khởi tạo phiên driver chẩn đoán: %v\n", err)
 	}
-	fmt.Println("======================================================")
 }
 
 // ---------- v3.0.1: Daemon thường trú (khi chính sách driver=resident, khởi chạy từ tác vụ đăng nhập -guard) ----------

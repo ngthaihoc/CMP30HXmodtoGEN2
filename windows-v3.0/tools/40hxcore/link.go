@@ -122,7 +122,9 @@ func (n *LinkNegotiator) Negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint3
 	bar0Phys, err := n.resolveBAR0(gpuBDF)
 	if err == nil && bar0Phys != 0 {
 		if err := n.injectMMIOShadowRegisters(bar0Phys, prof, targetGen); err != nil {
-			return res, err
+			if errors.Is(err, ErrFamilyMismatch) {
+				return res, err
+			}
 		}
 	}
 
@@ -152,7 +154,7 @@ func (n *LinkNegotiator) Negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint3
 		// Đối với các profile không phải TU116 (như CMP 40HX TU106), thực hiện Root Link Disable trước
 		if prof.DeviceID != 0x2189 && prof.Family != "TU116" && rootBDF != 0xFFFFFFFF {
 			n.rootLinkDisable(rootBDF, gpuBDF, bar0Phys, prof, targetGen)
-			cur = n.linkSpeed(gpuBDF, cap)
+			cur = n.pollRetrain(gpuBDF, rootBDF, cap, targetGen)
 		}
 
 		if cur < targetGen && n.bus.PnpResetDevice(prof.DeviceID) {
@@ -231,7 +233,9 @@ func (n *LinkNegotiator) rootLinkDisable(rootBDF uint32, gpuBDF uint32, bar0Phys
 	}
 	if gcap := n.findPcieCap(gpuBDF); gcap != 0 {
 		n.setTLS(gpuBDF, gcap, uint16(targetGen))
+		n.restoreLnkctl(gpuBDF, gcap)
 	}
+	n.disableRootASPM(rootBDF, rcap)
 }
 
 func (n *LinkNegotiator) resolveBAR0(gpuBDF uint32) (uint64, error) {
@@ -614,17 +618,23 @@ func (p *ProductionBus) WritePCIConfig(bdf uint32, reg uint32, data []byte) erro
 }
 
 func (p *ProductionBus) ReadMMIO(physAddr uint64) (uint32, error) {
-	if p.th == 0 {
-		return 0, errors.New("ThrottleStop handle is zero")
+	if p.th != 0 {
+		return TSRead(p.th, physAddr)
 	}
-	return TSRead(p.th, physAddr)
+	if p.wh != 0 {
+		return WRReadMem(p.wh, physAddr)
+	}
+	return 0, errors.New("ThrottleStop handle is zero")
 }
 
 func (p *ProductionBus) WriteMMIO(physAddr uint64, val uint32) error {
-	if p.th == 0 {
-		return errors.New("ThrottleStop handle is zero")
+	if p.th != 0 {
+		return TSWrite(p.th, physAddr, val)
 	}
-	return TSWrite(p.th, physAddr, val)
+	if p.wh != 0 {
+		return WRWriteMem(p.wh, physAddr, val)
+	}
+	return errors.New("ThrottleStop handle is zero")
 }
 
 func (p *ProductionBus) PnpResetDevice(devID uint16) bool {
