@@ -236,14 +236,8 @@ func RescanPCIBus(log io.Writer) error {
 	}
 	fmt.Fprintln(log, "[*] Đang phát lệnh quét lại phần cứng toàn bộ Bus PCIe (PCI Bus Rescan)...")
 
-	// Cách 1: Sử dụng pnputil /scan-devices
-	out, err := hxcore.RunOut("pnputil.exe", "/scan-devices")
-	if err == nil {
-		fmt.Fprintf(log, "    [OK] pnputil đã kích hoạt quét bus: %s\n", strings.TrimSpace(out))
-	} else {
-		// Cách 2: Dự phòng bằng PowerShell Device Root Re-enumerate
-		fmt.Fprintln(log, "    [!] pnputil trả về cảnh báo, kích hoạt tầng quét dự phòng PowerShell...")
-		psCmd := `
+	// 1. Kích hoạt quét bus qua SetupAPI CM_Reenumerate_DevNode (Root devnode và PCI-to-PCI bridges)
+	psRescanCmd := `
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -256,9 +250,21 @@ public class DeviceManager {
 "@
 $devInst = [IntPtr]::Zero
 [DeviceManager]::CM_Locate_DevNode_Ex([ref]$devInst, $null, 0, [IntPtr]::Zero)
-[DeviceManager]::CM_Reenumerate_DevNode_Ex($devInst, 0, [IntPtr]::Zero)
+[DeviceManager]::CM_Reenumerate_DevNode_Ex($devInst, 1, [IntPtr]::Zero)
+
+# Bật lại mọi thiết bị NVIDIA hoặc 3D Controller nếu đang bị vô hiệu hóa (Disabled / Code 22)
+Get-PnpDevice -PresentOnly:$false | Where-Object { 
+    ($_.InstanceId -like "*10DE*" -or $_.Class -eq "Display" -or $_.FriendlyName -like "*3D*") -and $_.Status -eq "Disabled" 
+} | ForEach-Object { 
+    try { Enable-PnpDevice -InstanceId $_.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {} 
+}
 `
-		_, _ = execPowerShell(psCmd)
+	_, _ = execPowerShell(psRescanCmd)
+
+	// 2. Chạy pnputil /scan-devices
+	out, err := hxcore.RunOut("pnputil.exe", "/scan-devices")
+	if err == nil {
+		fmt.Fprintf(log, "    [OK] pnputil đã kích hoạt quét bus: %s\n", strings.TrimSpace(out))
 	}
 
 	// Chờ bus đàm phán lại tín hiệu vi sai
@@ -355,12 +361,16 @@ func FixError43AndCASO(log io.Writer, status *CMP30HXStatus) error {
 		k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, targetClassPath, registry.SET_VALUE)
 		if err == nil {
 			defer k.Close()
-			// Kích hoạt Cross-Adapter Scan-Out (CASO) cho card đào không cổng
+			// Kích hoạt Cross-Adapter Scan-Out (CASO) & Microsoft Hybrid Graphics cho card đào
 			_ = k.SetDWordValue("EnableCrossAdapterScanOut", 1)
-			_ = k.SetDWordValue("AdapterType", 0)
+			_ = k.SetDWordValue("EnableMsHybrid", 1)
+			_ = k.SetDWordValue("EnableCoproc", 1)
 
-			// Tối ưu hoá không gian nhớ MMIO 32-bit (tránh lỗi 43 do Above 4G Decoding tắt trong CSM)
-			_ = k.SetDWordValue("LargePageMinimum", 0xFFFFFFFF)
+			// XÓA BỎ AdapterType: Giá trị AdapterType=0 chặn đứng DirectCompute, Vulkan, CUDA trên desktop WDDM
+			_ = k.DeleteValue("AdapterType")
+
+			// Xóa bỏ LargePageMinimum tránh xung đột bộ nhớ hệ thống
+			_ = k.DeleteValue("LargePageMinimum")
 
 			// Thiết lập chế độ CPU-RM (EnableGpuFirmware = 0) cho Turing TU116 trên main CSM
 			_ = k.SetDWordValue("EnableGpuFirmware", 0)
@@ -370,7 +380,47 @@ func FixError43AndCASO(log io.Writer, status *CMP30HXStatus) error {
 			_ = k.SetDWordValue("PowerMizerLevel", 1)
 			_ = k.SetDWordValue("PowerMizerLevelAC", 1)
 
-			fmt.Fprintln(log, "    [OK] Đã cấu hình CASO, tối ưu MMIO 32-bit, và thiết lập CPU-RM cho Turing TU116.")
+			// Đăng ký Khronos OpenCL và Vulkan ICD để GPU-Z và phần mềm nhận diện đầy đủ Computing
+			for _, oclPath := range []string{`SOFTWARE\Khronos\OpenCL\Vendors`, `SOFTWARE\WOW6432Node\Khronos\OpenCL\Vendors`} {
+				vk, _, err := registry.CreateKey(registry.LOCAL_MACHINE, oclPath, registry.SET_VALUE)
+				if err == nil {
+					_ = vk.SetDWordValue("nvopencl.dll", 0)
+					_ = vk.SetDWordValue("nvopencl64.dll", 0)
+					vk.Close()
+				}
+			}
+			for _, vkPath := range []string{`SOFTWARE\Khronos\Vulkan\Drivers`, `SOFTWARE\WOW6432Node\Khronos\Vulkan\Drivers`} {
+				vk, _, err := registry.CreateKey(registry.LOCAL_MACHINE, vkPath, registry.SET_VALUE)
+				if err == nil {
+					_ = vk.SetDWordValue("nv-vk64.json", 0)
+					_ = vk.SetDWordValue("nv-vk32.json", 0)
+					vk.Close()
+				}
+			}
+
+			fmt.Fprintln(log, "    [OK] Đã cấu hình CASO, EnableMsHybrid, xóa AdapterType, đăng ký OpenCL/Vulkan ICD.")
+		}
+	}
+
+	// Dọn dẹp các khóa vô tình bị gán vào iGPU (0000) từ các lần chạy trước
+	baseKey, err := registry.OpenKey(registry.LOCAL_MACHINE, hxcore.GpuClassPath, registry.ENUMERATE_SUB_KEYS)
+	if err == nil {
+		subkeys, _ := baseKey.ReadSubKeyNames(-1)
+		baseKey.Close()
+		for _, sub := range subkeys {
+			if strings.HasPrefix(sub, "0") && sub != status.DriverClassIndex {
+				sk, err := registry.OpenKey(registry.LOCAL_MACHINE, hxcore.GpuClassPath+`\`+sub, registry.QUERY_VALUE|registry.SET_VALUE)
+				if err == nil {
+					drvDesc, _, _ := sk.GetStringValue("DriverDesc")
+					matchID, _, _ := sk.GetStringValue("MatchingDeviceId")
+					if !strings.Contains(drvDesc, "NVIDIA") && !strings.Contains(strings.ToUpper(matchID), "10DE") {
+						_ = sk.DeleteValue("AdapterType")
+						_ = sk.DeleteValue("LargePageMinimum")
+						_ = sk.DeleteValue("EnableGpuFirmware")
+					}
+					sk.Close()
+				}
+			}
 		}
 	}
 
