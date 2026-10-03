@@ -35,10 +35,11 @@ func main() {
 	flagWatchdog := flag.Bool("watchdog", false, "Cai dat tac vu canh gac tu dong Keep-Alive")
 	flagUnwatchdog := flag.Bool("unwatchdog", false, "Go bo tac vu canh gac tu dong Keep-Alive")
 	flagStatus := flag.Bool("status", false, "Kiem tra va in bao cao trang thai chan doan")
+	flagNoAdmin := flag.Bool("noadmin", false, "Bo qua kiem tra quyen Administrator")
 	flag.Parse()
 
-	// Kiểm tra quyền Administrator
-	if !hxcore.IsAdmin() {
+	// Kiểm tra quyền Administrator (trừ khi có cờ -noadmin hoặc chỉ xem -status)
+	if !*flagNoAdmin && !*flagStatus && !hxcore.IsAdmin() {
 		hxcore.SelfElevate("FixCMP30HX_CSM")
 		return
 	}
@@ -56,6 +57,25 @@ func main() {
 
 func attachConsoleIfCLI() {
 	modkernel32 := syscall.NewLazyDLL("kernel32.dll")
+	procGetStdHandle := modkernel32.NewProc("GetStdHandle")
+	procGetFileType := modkernel32.NewProc("GetFileType")
+	const STD_OUTPUT_HANDLE = ^uint32(10) // -11
+	const STD_ERROR_HANDLE = ^uint32(11)  // -12
+	const FILE_TYPE_CHAR = 2
+
+	hStdOut, _, _ := procGetStdHandle.Call(uintptr(STD_OUTPUT_HANDLE))
+	ft, _, _ := procGetFileType.Call(hStdOut)
+
+	// Nếu stdout đã được redirect vào pipe hoặc file (khác char/console hoặc hStdOut hợp lệ và khác 0)
+	if hStdOut != 0 && hStdOut != uintptr(syscall.InvalidHandle) && ft != 0 && ft != FILE_TYPE_CHAR {
+		os.Stdout = os.NewFile(hStdOut, "/dev/stdout")
+		hStdErr, _, _ := procGetStdHandle.Call(uintptr(STD_ERROR_HANDLE))
+		if hStdErr != 0 && hStdErr != uintptr(syscall.InvalidHandle) {
+			os.Stderr = os.NewFile(hStdErr, "/dev/stderr")
+		}
+		return
+	}
+
 	procAttachConsole := modkernel32.NewProc("AttachConsole")
 	const ATTACH_PARENT_PROCESS = ^uint32(0) // -1
 	r, _, _ := procAttachConsole.Call(uintptr(ATTACH_PARENT_PROCESS))
@@ -74,6 +94,8 @@ func attachConsoleIfCLI() {
 			os.Stdout = f
 			os.Stderr = f
 		}
+	} else if hStdOut != 0 && hStdOut != uintptr(syscall.InvalidHandle) {
+		os.Stdout = os.NewFile(hStdOut, "/dev/stdout")
 	}
 }
 
@@ -84,7 +106,7 @@ func runCLI(doFix, doScan, doWatchdog, doUnwatchdog, doStatus bool) {
 
 	if doStatus {
 		fmt.Println("================================================================")
-		fmt.Println("  BÁO CÁO CHẨN ĐOÁN CMP 30HX TRÊN HỆ THỐNG CSM / LEGACY BIOS")
+		fmt.Println("  BÁO CÁO CHẨN ĐOÁN CMP 30HX TRÊN HỆ THỐNG UEFI / CSM")
 		fmt.Println("================================================================")
 		fmt.Printf("Chế độ Firmware: %s (Raw: %d)\n", fw.ModeName, fw.RawValue)
 		if fw.DiskDetails != "" {
@@ -97,9 +119,18 @@ func runCLI(doFix, doScan, doWatchdog, doUnwatchdog, doStatus bool) {
 		if gpu.DeviceInstanceID != "" {
 			fmt.Printf("Device Instance ID: %s\n", gpu.DeviceInstanceID)
 		}
+		if gpu.DriverClassIndex != "" {
+			fmt.Printf("Driver Class Index: %s\n", gpu.DriverClassIndex)
+		}
+		if gpu.IsBasicDisplay {
+			fmt.Println("[!] CẢNH BÁO DRIVER: CMP 30HX đang chạy 'Microsoft Basic Display Adapter'!")
+			fmt.Println("    -> Cần cài driver NVIDIA mod DEV_2189 để kích hoạt 3D và CUDA.")
+		} else if gpu.DriverDesc != "" {
+			fmt.Printf("Driver hiện tại:    %s (%s)\n", gpu.DriverDesc, gpu.DriverVersion)
+		}
 		if gpu.ProblemCode != 0 {
 			fmt.Printf("Mã lỗi thiết bị:    Code %d (%s)\n", gpu.ProblemCode, gpu.ProblemDesc)
-		} else if gpu.Detected && gpu.IsPresent {
+		} else if gpu.Detected && gpu.IsPresent && !gpu.IsBasicDisplay {
 			fmt.Println("Mã lỗi thiết bị:    Không có lỗi (Hoạt động tốt)")
 		}
 		fmt.Printf("Chống ngủ D3cold:   %v\n", gpu.HasD3ColdBlocked)
@@ -169,11 +200,14 @@ func runGUI() {
 		}
 
 		if !gpu.Detected || !gpu.IsPresent {
-			sb.WriteString("❌ TRẠNG THÁI GPU: CMP 30HX ĐANG BỊ BIẾN MẤT KHỎI DEVICE MANAGER!\n")
-			sb.WriteString("   (Do tụt link PCIe trong CSM hoặc Windows đưa card vào trạng thái D3cold)\n")
+			sb.WriteString("❌ TRẠNG THÁI GPU: CMP 30HX ĐANG BỊ BIẾN MẤT KHỎI DEVICE MANAGER (Code 45)!\n")
+			sb.WriteString("   (Do tụt link PCIe, Windows D3cold hoặc khe PCIe UEFI chưa khóa Gen2)\n")
+		} else if gpu.IsBasicDisplay {
+			sb.WriteString("⚠️ TRẠNG THÁI GPU: ĐANG CHẠY 'MICROSOFT BASIC DISPLAY ADAPTER'!\n")
+			sb.WriteString("   (Cần cài Driver NVIDIA mod DEV_2189 qua Have Disk để nhận full 3D/CUDA)\n")
 		} else if gpu.ProblemCode == 43 {
 			sb.WriteString("⚠️ TRẠNG THÁI GPU: ĐANG DÍNH LỖI 43 (CODE 43)!\n")
-			sb.WriteString("   (Do Above 4G bị tắt trong CSM, thiếu CASO hoặc xung đột MMIO 32-bit)\n")
+			sb.WriteString("   (Do Above 4G bị tắt, thiếu CASO hoặc xung đột MMIO 32-bit)\n")
 		} else if gpu.ProblemCode != 0 {
 			sb.WriteString(fmt.Sprintf("⚠️ TRẠNG THÁI GPU: Mã sự cố Code %d (%s)\n", gpu.ProblemCode, gpu.ProblemDesc))
 		} else {
@@ -191,7 +225,7 @@ func runGUI() {
 
 	err := MainWindow{
 		AssignTo: &mw,
-		Title:    "Công Cụ Sửa Lỗi 43 & Biến Mất Device Manager Cho CMP 30HX (CSM / Legacy)",
+		Title:    "Công Cụ Sửa Lỗi 43 & Biến Mất Device Manager Cho CMP 30HX (UEFI / CSM)",
 		MinSize:  Size{Width: 720, Height: 680},
 		Size:     Size{Width: 750, Height: 720},
 		Layout:   VBox{},

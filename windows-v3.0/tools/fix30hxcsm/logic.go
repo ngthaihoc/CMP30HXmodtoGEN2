@@ -40,6 +40,8 @@ type CMP30HXStatus struct {
 	IsHiddenOrGhost  bool   // Bị biến mất / Thiết bị ẩn (Code 45)
 	DeviceInstanceID string // Ví dụ: PCI\VEN_10DE&DEV_2189&SUBSYS_408A1458\...
 	DriverClassIndex string // Ví dụ: 0001
+	DriverDesc       string // Tên mô tả driver
+	DriverProvider   string // Nhà cung cấp driver
 	StatusString     string // "OK", "Error", "Degraded"...
 	ProblemCode      uint32 // 43, 12, 45...
 	ProblemDesc      string
@@ -47,6 +49,7 @@ type CMP30HXStatus struct {
 	HasD3ColdBlocked bool
 	HasCASOEnabled   bool
 	HasTdrOptimized  bool
+	IsBasicDisplay   bool   // true nếu đang bị nhận diện là Microsoft Basic Display Adapter
 }
 
 // SystemDiagnostic tổng hợp toàn bộ thông tin chẩn đoán
@@ -171,41 +174,67 @@ if ($dev) {
 		}
 	}
 
-	// 3. Tìm Class Index trong Display Class (0000, 0001...)
+	// 3. Phân giải Driver Class Index (0000, 0001...)
 	if st.Detected {
-		classKey, err := registry.OpenKey(registry.LOCAL_MACHINE, hxcore.GpuClassPath, registry.ENUMERATE_SUB_KEYS)
-		if err == nil {
-			defer classKey.Close()
-			subkeys, _ := classKey.ReadSubKeyNames(-1)
-			for _, sub := range subkeys {
-				if strings.HasPrefix(sub, "0") {
-					sk, err := registry.OpenKey(registry.LOCAL_MACHINE, hxcore.GpuClassPath+`\`+sub, registry.QUERY_VALUE)
-					if err == nil {
-						matchID, _, _ := sk.GetStringValue("MatchingDeviceId")
-						driverDesc, _, _ := sk.GetStringValue("DriverDesc")
-						drvVer, _, _ := sk.GetStringValue("DriverVersion")
-						if strings.Contains(strings.ToUpper(matchID), CMP30HXHardwareID) ||
-							strings.Contains(driverDesc, "CMP 30HX") ||
-							strings.Contains(driverDesc, "TU116") {
-							st.DriverClassIndex = sub
-							st.DriverVersion = drvVer
+		// Cách 1: Đọc trực tiếp thuộc tính "Driver" từ Enum\PCI instance
+		if st.DeviceInstanceID != "" {
+			instKey, err := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Enum\`+st.DeviceInstanceID, registry.QUERY_VALUE)
+			if err == nil {
+				driverVal, _, _ := instKey.GetStringValue("Driver")
+				instKey.Close()
+				idx := ParseDriverClassIndex(driverVal)
+				if idx != "" {
+					st.DriverClassIndex = idx
+				}
+			}
+		}
 
-							// Kiểm tra các khoá chống ngủ & CASO
-							d3Val, _, _ := sk.GetIntegerValue("D3ColdSupported")
-							rmVal, _, _ := sk.GetIntegerValue("RmDisableGpuPowerMgmt")
-							casoVal, _, _ := sk.GetIntegerValue("EnableCrossAdapterScanOut")
-							if d3Val == 0 && rmVal == 1 {
-								st.HasD3ColdBlocked = true
-							}
-							if casoVal == 1 {
-								st.HasCASOEnabled = true
+		// Cách 2: Nếu chưa tìm được DriverClassIndex, duyệt GpuClassPath
+		if st.DriverClassIndex == "" {
+			classKey, err := registry.OpenKey(registry.LOCAL_MACHINE, hxcore.GpuClassPath, registry.ENUMERATE_SUB_KEYS)
+			if err == nil {
+				subkeys, _ := classKey.ReadSubKeyNames(-1)
+				classKey.Close()
+				for _, sub := range subkeys {
+					if strings.HasPrefix(sub, "0") {
+						sk, err := registry.OpenKey(registry.LOCAL_MACHINE, hxcore.GpuClassPath+`\`+sub, registry.QUERY_VALUE)
+						if err == nil {
+							matchID, _, _ := sk.GetStringValue("MatchingDeviceId")
+							driverDesc, _, _ := sk.GetStringValue("DriverDesc")
+							if strings.Contains(strings.ToUpper(matchID), CMP30HXHardwareID) ||
+								strings.Contains(driverDesc, "CMP 30HX") ||
+								strings.Contains(driverDesc, "TU116") {
+								st.DriverClassIndex = sub
+								sk.Close()
+								break
 							}
 							sk.Close()
-							break
 						}
-						sk.Close()
 					}
 				}
+			}
+		}
+
+		// Đọc thông tin chi tiết và cờ trạng thái từ Driver Class
+		if st.DriverClassIndex != "" {
+			sk, err := registry.OpenKey(registry.LOCAL_MACHINE, hxcore.GpuClassPath+`\`+st.DriverClassIndex, registry.QUERY_VALUE)
+			if err == nil {
+				st.DriverDesc, _, _ = sk.GetStringValue("DriverDesc")
+				st.DriverProvider, _, _ = sk.GetStringValue("ProviderName")
+				st.DriverVersion, _, _ = sk.GetStringValue("DriverVersion")
+				st.IsBasicDisplay = IsGenericBasicDisplayDriver(st.DriverDesc, st.DriverProvider)
+
+				// Kiểm tra các khoá chống ngủ & CASO
+				d3Val, _, _ := sk.GetIntegerValue("D3ColdSupported")
+				rmVal, _, _ := sk.GetIntegerValue("RmDisableGpuPowerMgmt")
+				casoVal, _, _ := sk.GetIntegerValue("EnableCrossAdapterScanOut")
+				if d3Val == 0 && rmVal == 1 {
+					st.HasD3ColdBlocked = true
+				}
+				if casoVal == 1 {
+					st.HasCASOEnabled = true
+				}
+				sk.Close()
 			}
 		}
 	}
@@ -221,6 +250,32 @@ if ($dev) {
 	}
 
 	return st
+}
+
+// ParseDriverClassIndex trích xuất chỉ số Class (ví dụ "0001") từ chuỗi Driver (ví dụ "{4d36e968-e325-11ce-bfc1-08002be10318}\0001")
+func ParseDriverClassIndex(rawDriver string) string {
+	rawDriver = strings.TrimSpace(rawDriver)
+	if rawDriver == "" {
+		return ""
+	}
+	parts := strings.Split(rawDriver, `\`)
+	if len(parts) == 2 && strings.HasPrefix(parts[1], "0") {
+		return parts[1]
+	}
+	return ""
+}
+
+// IsGenericBasicDisplayDriver kiểm tra xem thiết bị có đang bị nhận nhầm thành driver cơ bản không
+func IsGenericBasicDisplayDriver(desc, provider string) bool {
+	d := strings.ToLower(strings.TrimSpace(desc))
+	p := strings.ToLower(strings.TrimSpace(provider))
+	if strings.Contains(d, "basic display") || strings.Contains(d, "vga standard") || strings.Contains(d, "basic render") {
+		return true
+	}
+	if strings.Contains(p, "microsoft") && !strings.Contains(d, "nvidia") {
+		return true
+	}
+	return false
 }
 
 // IsWatchdogInstalled kiểm tra xem tác vụ canh gác đã đăng ký chưa

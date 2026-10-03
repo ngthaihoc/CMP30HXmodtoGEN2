@@ -1,7 +1,7 @@
 @echo off
 setlocal
 chcp 65001 >nul
-title CMP 30HX - Sua Loi 43, Khoi Phuc Bien Mat Trong CSM va Mo Khoa GPU-Z
+title CMP 30HX - Sua Loi 43, Khoi Phuc Bien Mat (UEFI / CSM) va Mo Khoa GPU-Z
 
 :: ================================================================
 :: 1. KIEM TRA QUYEN ADMINISTRATOR (UAC DA TANG PHONG THU)
@@ -75,11 +75,11 @@ for %%a in (%*) do (
 cls
 echo ===============================================================================
 echo     CONG CU FIX SAU LOI 43, BIEN MAT THIET BI VA MO KHOA GPU-Z CHO CMP 30HX
-echo     Toi uu hoa chuyen dung cho Mainboard chay CSM / Legacy BIOS / Windows 10
+echo     Tuong thich toi uu cho ca he thong UEFI va CSM / Legacy BIOS / Windows 10/11
 echo ===============================================================================
 echo.
 echo  [*] TINH TRANG THIET BI HIEN TAI TREN HE THONG:
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$fw = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\SystemInformation' -Name 'FirmwareType' -ErrorAction SilentlyContinue).FirmwareType; $fwStr = if ($fw -eq 1) { 'CSM / Legacy BIOS [Can toi uu]' } elseif ($fw -eq 2) { 'UEFI Thuan' } else { 'Khong xac dinh' }; Write-Host ('    - Che do Firmware Boot : ' + $fwStr) -ForegroundColor Yellow; $devs = Get-PnpDevice -PresentOnly:$false | Where-Object { $_.InstanceId -like '*VEN_10DE*' -or $_.Class -eq 'Display' -or $_.FriendlyName -like '*3D*' }; if ($devs) { foreach ($d in $devs) { $p = if ($d.Present) { '[ON - Dang ket noi]' } else { '[OFF - An/Rot bus (Code 45)]' }; $color = if ($d.Present -and $d.Status -eq 'OK') { 'Green' } else { 'Cyan' }; Write-Host ('    - Thiet bi: ' + $d.FriendlyName + ' | Status: ' + $d.Status + ' ' + $p) -ForegroundColor $color } } else { Write-Host '    - Khong tim thay thiet bi NVIDIA hoac 3D Controller nao tren bus PnP!' -ForegroundColor Red }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$fw = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\SystemInformation' -Name 'FirmwareType' -ErrorAction SilentlyContinue).FirmwareType; $fwStr = if ($fw -eq 1) { 'CSM / Legacy BIOS [Can toi uu]' } elseif ($fw -eq 2) { 'UEFI Thuan [Khuyen nghi khoa PCIe Gen2 trong BIOS]' } else { 'Khong xac dinh' }; Write-Host ('    - Che do Firmware Boot : ' + $fwStr) -ForegroundColor Yellow; $devs = Get-PnpDevice -PresentOnly:$false | Where-Object { $_.InstanceId -like '*VEN_10DE*' -or $_.Class -eq 'Display' -or $_.FriendlyName -like '*3D*' }; $hasBasic30 = $false; if ($devs) { foreach ($d in $devs) { $p = if ($d.Present) { '[ON - Dang ket noi]' } else { '[OFF - An/Rot bus (Code 45)]' }; $is30 = ($d.InstanceId -like '*VEN_10DE&DEV_2189*'); $isBasic = ($d.FriendlyName -like '*Basic Display*'); $extra = ''; if ($is30 -and $isBasic) { $extra = ' <-- [CANH BAO: CHUA CO DRIVER NVIDIA, DANG CHAY BASIC DISPLAY]'; $hasBasic30 = $true }; $color = if ($d.Present -and $d.Status -eq 'OK' -and -not ($is30 -and $isBasic)) { 'Green' } else { 'Cyan' }; Write-Host ('    - Thiet bi: ' + $d.FriendlyName + ' | Status: ' + $d.Status + ' ' + $p + $extra) -ForegroundColor $color } if ($hasBasic30) { Write-Host '    [!] Phat hien CMP 30HX dang chay generic Basic Display! Chon muc [9] de xem huong dan cai Driver.' -ForegroundColor Magenta } } else { Write-Host '    - Khong tim thay thiet bi NVIDIA hoac 3D Controller nao tren bus PnP!' -ForegroundColor Red }"
 echo.
 echo -------------------------------------------------------------------------------
 echo   [1] TU DONG SUA TOAN DIEN TAT CA LOI [KHUYEN DUNG 1-CHAM]
@@ -327,35 +327,46 @@ goto :main_menu
 :show_bios_and_driver_guide
 cls
 echo ===============================================================================
-echo   HUONG DAN CAI DRIVER VA CAU HINH BIOS CHO CMP 30HX TREN CSM
+echo   HUONG DAN CAI DRIVER VA CAU HINH BIOS CHO CMP 30HX (UEFI / CSM)
 echo ===============================================================================
 echo.
-echo A. HUONG DAN CAI DRIVER KHI DEVICE MANAGER HIEN '3D VIDEO CONTROLLER':
+echo A. HUONG DAN CAI DRIVER KHI HIEN 'MICROSOFT BASIC DISPLAY ADAPTER' HOAC '3D CONTROLLER':
 echo    1. Vi CMP 30HX mang Hardware ID 'DEV_2189' (ID card dao coin), bo cai driver
-echo       NVIDIA goc (Game Ready / Studio) thuong chan khong cho cai truc tiep va bao
-echo       'This graphics driver could not find compatible graphics hardware'.
+echo       NVIDIA goc chan khong cho cai truc tiep va bao 'graphics driver could not find
+echo       compatible graphics hardware'. Windows do do tu nap driver generic 'Microsoft
+echo       Basic Display Adapter'.
 echo.
-echo    2. Cac phuong an cai dat chuan xac:
-echo       - Phuong an a: Dung bo driver da mod san INF cho CMP 30HX hoac P106-100.
-echo       - Phuong an b: Dung cong cu NVIDIA-patcher tu dong go bo gioi han mining.
-echo       - Phuong an c: Cai qua Device Manager: Chuot phai vao '3D Video Controller' -^>
-echo         'Update driver' -^> 'Browse my computer for drivers' -^> 'Let me pick from a list'
-echo         -^> Chon 'Display adapters' -^> 'Have Disk...' -^> Tro toi file .inf cua driver
-echo         (Vi du driver GTX 1660 Super hoac ban driver da them DEV_2189).
+echo    2. Quy trinh cai Driver NVIDIA bang phuong phap 'Have Disk...' (Chuan xac 100%%):
+echo       - Buoc 1: Mo Device Manager -> Nhan menu 'View' -> Tick 'Show hidden devices'.
+echo       - Buoc 2: Tim den 'Microsoft Basic Display Adapter' (hoac '3D Video Controller')
+echo         cua card CMP 30HX -> Chuot phai chon 'Update driver'.
+echo       - Buoc 3: Chon 'Browse my computer for drivers' -> 'Let me pick from a list of
+echo         available drivers on my computer'.
+echo       - Buoc 4: Chon loai thiet bi la 'Display adapters' -> Nhan 'Have Disk...'.
+echo       - Buoc 5: Nhan 'Browse...' -> Tro toi file 'nv_dispig.inf' (nam trong thu muc
+echo         giai nen bo cai driver NVIDIA, thuong la C:\NVIDIA\DisplayDriver\...\Display.Driver\).
+echo       - Buoc 6: Chon model tuong duong chip TU116 (vi du: 'NVIDIA GeForce GTX 1660 SUPER'
+echo         hoac 'GTX 1660') -> Bam Next va xac nhan cai dat (Yes khi co canh bao Update Driver).
+echo       - Buoc 7: Sau khi cai xong, chay muc [1] hoac [3] tren menu de bat CASO va GPU-Z!
 echo.
-echo B. CAU HINH BIOS BAT BUOC TREN MAINBOARD CHAY CSM:
-echo    1. Primary Display / Initial Display Output:
-echo       - Phai chon 'iGPU' (Card onboard Intel/AMD) hoac card phu co cong xuat hinh.
-echo       - TUYET DOI KHONG chon khe PCIe cua CMP 30HX lam card xuat hinh chinh cua BIOS.
-echo    2. Above 4G Decoding:
-echo       - Neu BIOS co muc nay va cho phep Bat (Enable) khi CSM dang bat, hay CHON ENABLE.
-echo    3. PCIe Link Speed:
-echo       - Chuyen khe cam CMP 30HX sang 'Gen2' (hoac Gen1 / Auto) de tin hieu on dinh.
-echo    4. Fast Boot:
-echo       - Chon DISABLED de BIOS luon khoi tao lai bus PCIe khi bat may.
+echo B. CAU HINH BIOS BAT BUOC TREN HE THONG CHAY UEFI (DE CHONG MAT CARD VA LOI 43):
+echo    1. PCIe Slot Speed (QUAN TRONG NHAT):
+echo       - Bo phan eFuse Gen3 tren silicon TU116 cua CMP 30HX da bi NVIDIA cat bo!
+echo       - TRONG BIOS UEFI, PHAI DUA KHE PCIe CUA CMP 30HX VE 'GEN2' (hoac Gen1).
+echo       - TUYET DOI KHONG de Auto hoac Gen3/Gen4 vi BIOS se dam phan that bai va ngat link.
+echo    2. Windows Fast Startup:
+echo       - Phai tat Fast Startup (Hiberboot) de Windows luon re-train PCIe khi bat may.
+echo       - Script da tu dong thuc hien viec nay qua lenh powercfg -h off.
+echo    3. Above 4G Decoding:
+echo       - BAT (ENABLE) 100%% trong BIOS UEFI de cap phat day du MMIO cho 6GB VRAM.
+echo    4. Primary Display / Initial Display Output:
+echo       - Chon 'iGPU' hoac card phu co cong xuat hinh, TUYET DOI KHONG chon khe CMP 30HX.
 echo.
-echo C. GIAI PHAP TRIET DE:
-echo    Chuyen o dia sang GPT (chay muc [7]) roi vao BIOS TAT HAN CSM de chay UEFI thuan!
+echo C. CAU HINH BIOS TREN MAINBOARD CHAY CSM / LEGACY:
+echo    1. Primary Display: Chon iGPU hoac card xuat hinh phu.
+echo    2. Above 4G Decoding: Bat Enable neu BIOS CSM ho tro.
+echo    3. PCIe Link Speed: Chuyen sang Gen2 hoac Gen1 de tranh loi tin hieu.
+echo    4. Fast Boot: Chon Disabled.
 echo ===============================================================================
 echo.
 pause
@@ -386,15 +397,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$src = 'using System; us
 echo  [2/4] Kiem tra va tu dong kich hoat lai thiet bi neu dang bi Disabled [Code 22]...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$devs = Get-PnpDevice -PresentOnly:$false | Where-Object { ($_.InstanceId -like '*VEN_10DE*' -or $_.Class -eq 'Display' -or $_.FriendlyName -like '*3D*') -and $_.Status -eq 'Disabled' }; if ($devs) { foreach ($d in $devs) { Write-Host ('    [*] Dang bat lai thiet bi bi khoa: ' + $d.InstanceId) -ForegroundColor Yellow; try { Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction Stop; Write-Host '    [OK] Da bat lai thanh cong!' -ForegroundColor Green } catch { Write-Host ('    [!] Khong the bat tu dong: ' + $_.Exception.Message) -ForegroundColor Red } } } else { Write-Host '    [OK] Khong co thiet bi do hoa nao bi ket o trang thai Disabled.' -ForegroundColor Gray; }"
 
-echo  [3/4] Xu ly device node ket trang thai ngat ket noi ao [Code 45 Phantom/Ghost Node]...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ghosts = Get-PnpDevice -PresentOnly:$false | Where-Object { $_.InstanceId -like '*VEN_10DE&DEV_2189*' -and -not $_.Present }; if ($ghosts) { foreach ($g in $ghosts) { Write-Host ('    [*] Phat hien node ao bi rot ket noi (Code 45): ' + $g.InstanceId) -ForegroundColor Yellow; Write-Host '    [*] Dang giai phong node cu de ep Windows quet lai bus phan cung that...' -ForegroundColor Yellow; $arg = '/remove-device \"' + $g.InstanceId + '\"'; Start-Process pnputil.exe -ArgumentList $arg -NoNewWindow -Wait } } else { Write-Host '    [OK] Khong co node ao rac bi ket.' -ForegroundColor Gray; }"
+echo  [3/4] Khoa cam ngu D3cold truc tiep tren toan bo Hardware Instance PCIe cua CMP 30HX...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$pciBase = 'HKLM:\SYSTEM\CurrentControlSet\Enum\PCI'; Get-ChildItem $pciBase -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -like '*VEN_10DE&DEV_2189*' } | ForEach-Object { Get-ChildItem $_.PSPath -ErrorAction SilentlyContinue | ForEach-Object { $paramPath = $_.PSPath + '\Device Parameters'; if (-not (Test-Path $paramPath)) { New-Item -Path $paramPath -Force | Out-Null }; Set-ItemProperty -Path $paramPath -Name 'EnhancedPowerManagementEnabled' -Value 0 -Type DWord -Force; Set-ItemProperty -Path $paramPath -Name 'AllowIdleIrpInD3' -Value 0 -Type DWord -Force; Set-ItemProperty -Path $paramPath -Name 'D3ColdSupported' -Value 0 -Type DWord -Force; Set-ItemProperty -Path $paramPath -Name 'DeviceSelectiveSuspended' -Value 0 -Type DWord -Force; } }; Write-Host '    [OK] Da khoa cam D3cold tren Enum PCI de giu link PCIe luon thuc.' -ForegroundColor Green;"
 
 echo  [4/4] Quet lai phan cung toan bo he thong bang pnputil...
 pnputil /scan-devices >nul 2>&1
 timeout /t 2 /nobreak >nul 2>&1
 
 :: Bao cao ket qua tim kiem lai thiet bi
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$target = Get-PnpDevice | Where-Object { $_.InstanceId -like '*VEN_10DE&DEV_2189*' -or $_.FriendlyName -like '*3D*' -or ($_.Class -eq 'Display' -and $_.InstanceId -like '*VEN_10DE*') }; if ($target) { Write-Host '    [V] THANH CONG: Windows da nhin thay card do hoa!' -ForegroundColor Green; $target | Format-Table FriendlyName, InstanceId, Status -AutoSize } else { Write-Host '    [!] Card van chua xuat hien tren Device Manager.' -ForegroundColor Yellow; Write-Host '        Nguyen nhan: Mainboard CSM cap dien cham hoac khe PCIe dang o trang thai ngat link.' -ForegroundColor Gray; Write-Host '        Hay thu cam card sang khe PCIe khac hoac kiem tra nguon 8-pin.' -ForegroundColor Gray; }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$target = Get-PnpDevice | Where-Object { $_.InstanceId -like '*VEN_10DE&DEV_2189*' -or $_.FriendlyName -like '*3D*' -or ($_.Class -eq 'Display' -and $_.InstanceId -like '*VEN_10DE*') }; if ($target) { Write-Host '    [V] THANH CONG: Windows da nhin thay card do hoa!' -ForegroundColor Green; $target | Format-Table FriendlyName, InstanceId, Status -AutoSize; foreach ($t in $target) { if ($t.FriendlyName -like '*Basic Display*') { Write-Host '    [!] LUU Y: Card dang mang ten Microsoft Basic Display Adapter. Vui long chay muc [9] de cai driver NVIDIA mod DEV_2189!' -ForegroundColor Magenta } } } else { Write-Host '    [!] Card van chua xuat hien tren Device Manager (dang o trang thai an Code 45).' -ForegroundColor Yellow; Write-Host '        Nguyen nhan chinh:' -ForegroundColor Yellow; Write-Host '        1. BIOS UEFI: Khe PCIe chua duoc khoa ve Gen2 (eFuse TU116 khong the chay Gen3/Auto).' -ForegroundColor Gray; Write-Host '        2. Nguon phu 8-pin PCIe chua tiep xuc tot hoac Fast Startup chua duoc tat.' -ForegroundColor Gray; Write-Host '        Hay kiem tra muc [9] de xem huong dan cau hinh BIOS UEFI chuan.' -ForegroundColor Cyan; }"
 exit /b 0
 
 :: -------------------------------------------------------------------------------
@@ -421,8 +432,8 @@ reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v "TdrDelay" /t
 reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v "TdrDdiDelay" /t REG_DWORD /d 10 /f >nul 2>&1
 reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v "TdrLevel" /t REG_DWORD /d 3 /f >nul 2>&1
 
-echo  [2/4] Xu ly cau hinh Driver Class NVIDIA: Xoa AdapterType, bat EnableMsHybrid va CASO...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$dispClass = 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}'; Get-ChildItem $dispClass -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -match '^\d{4}$' } | ForEach-Object { $p = $_.PSPath; $desc = (Get-ItemProperty -Path $p -Name 'DriverDesc' -ErrorAction SilentlyContinue).DriverDesc; $matchId = (Get-ItemProperty -Path $p -Name 'MatchingDeviceId' -ErrorAction SilentlyContinue).MatchingDeviceId; $isNvidia = ($desc -like '*NVIDIA*' -or $desc -like '*CMP*' -or $desc -like '*TU116*' -or $matchId -like '*10DE*'); if ($isNvidia) { Write-Host ('    [*] Tim thay Driver Class NVIDIA: ' + $_.PSChildName + ' (' + $desc + ')') -ForegroundColor Cyan; Set-ItemProperty -Path $p -Name 'EnableCrossAdapterScanOut' -Value 1 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'EnableMsHybrid' -Value 1 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'EnableCoproc' -Value 1 -Type DWord -Force; if (Get-ItemProperty -Path $p -Name 'AdapterType' -ErrorAction SilentlyContinue) { Remove-ItemProperty -Path $p -Name 'AdapterType' -Force -ErrorAction SilentlyContinue; Write-Host '    [OK] Da XOA BO AdapterType [Khoi phuc DirectCompute/CUDA/Vulkan thanh cong].' -ForegroundColor Green }; Remove-ItemProperty -Path $p -Name 'LargePageMinimum' -Force -ErrorAction SilentlyContinue; Set-ItemProperty -Path $p -Name 'D3ColdSupported' -Value 0 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'DeviceSelectiveSuspended' -Value 0 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'RmDisableGpuPowerMgmt' -Value 1 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'RmEnableAggressivePciePowerManagement' -Value 0 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'DisableASPM' -Value 1 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'DisablePCIePowerManagement' -Value 1 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'EnableGpuFirmware' -Value 0 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'PowerMizerEnable' -Value 0 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'PowerMizerLevel' -Value 1 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'PowerMizerLevelAC' -Value 1 -Type DWord -Force; Write-Host '    [OK] Da cau hinh toi uu WDDM, CASO va khoa nguon cho GPU NVIDIA.' -ForegroundColor Green } else { Remove-ItemProperty -Path $p -Name 'AdapterType' -Force -ErrorAction SilentlyContinue; Remove-ItemProperty -Path $p -Name 'LargePageMinimum' -Force -ErrorAction SilentlyContinue; Remove-ItemProperty -Path $p -Name 'EnableGpuFirmware' -Force -ErrorAction SilentlyContinue } }"
+echo  [2/4] Xu ly cau hinh Driver Class: Xoa AdapterType, bat EnableMsHybrid va CASO...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$targetClass = $null; $pciBase = 'HKLM:\SYSTEM\CurrentControlSet\Enum\PCI'; Get-ChildItem $pciBase -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -like '*VEN_10DE&DEV_2189*' } | ForEach-Object { Get-ChildItem $_.PSPath -ErrorAction SilentlyContinue | ForEach-Object { $drv = (Get-ItemProperty -Path $_.PSPath -Name 'Driver' -ErrorAction SilentlyContinue).Driver; if ($drv -and $drv -match '\\(\d{4})$') { $targetClass = $matches[1] } } }; $dispClass = 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}'; Get-ChildItem $dispClass -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -match '^\d{4}$' } | ForEach-Object { $p = $_.PSPath; $sub = $_.PSChildName; $desc = (Get-ItemProperty -Path $p -Name 'DriverDesc' -ErrorAction SilentlyContinue).DriverDesc; $matchId = (Get-ItemProperty -Path $p -Name 'MatchingDeviceId' -ErrorAction SilentlyContinue).MatchingDeviceId; $isNvidia = ($sub -eq $targetClass -or $desc -like '*NVIDIA*' -or $desc -like '*CMP*' -or $desc -like '*TU116*' -or $matchId -like '*10DE*'); if ($isNvidia) { Write-Host ('    [*] Tim thay Driver Class: ' + $sub + ' (' + $desc + ')') -ForegroundColor Cyan; Set-ItemProperty -Path $p -Name 'EnableCrossAdapterScanOut' -Value 1 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'EnableMsHybrid' -Value 1 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'EnableCoproc' -Value 1 -Type DWord -Force; if (Get-ItemProperty -Path $p -Name 'AdapterType' -ErrorAction SilentlyContinue) { Remove-ItemProperty -Path $p -Name 'AdapterType' -Force -ErrorAction SilentlyContinue; Write-Host '    [OK] Da XOA BO AdapterType [Khoi phuc DirectCompute/CUDA/Vulkan thanh cong].' -ForegroundColor Green }; Remove-ItemProperty -Path $p -Name 'LargePageMinimum' -Force -ErrorAction SilentlyContinue; Set-ItemProperty -Path $p -Name 'D3ColdSupported' -Value 0 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'DeviceSelectiveSuspended' -Value 0 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'RmDisableGpuPowerMgmt' -Value 1 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'RmEnableAggressivePciePowerManagement' -Value 0 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'DisableASPM' -Value 1 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'DisablePCIePowerManagement' -Value 1 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'EnableGpuFirmware' -Value 0 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'PowerMizerEnable' -Value 0 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'PowerMizerLevel' -Value 1 -Type DWord -Force; Set-ItemProperty -Path $p -Name 'PowerMizerLevelAC' -Value 1 -Type DWord -Force; Write-Host ('    [OK] Da cau hinh toi uu WDDM, CASO va khoa nguon cho Driver Class ' + $sub) -ForegroundColor Green } else { Remove-ItemProperty -Path $p -Name 'AdapterType' -Force -ErrorAction SilentlyContinue; Remove-ItemProperty -Path $p -Name 'LargePageMinimum' -Force -ErrorAction SilentlyContinue; Remove-ItemProperty -Path $p -Name 'EnableGpuFirmware' -Force -ErrorAction SilentlyContinue } }"
 
 echo  [3/4] Dang ky Khronos OpenCL va Vulkan ICD DLLs vao Registry...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$oclPaths = @('HKLM:\SOFTWARE\Khronos\OpenCL\Vendors', 'HKLM:\SOFTWARE\WOW6432Node\Khronos\OpenCL\Vendors'); foreach ($path in $oclPaths) { if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }; Set-ItemProperty -Path $path -Name 'nvopencl.dll' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue; Set-ItemProperty -Path $path -Name 'nvopencl64.dll' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue }; $vkPaths = @('HKLM:\SOFTWARE\Khronos\Vulkan\Drivers', 'HKLM:\SOFTWARE\WOW6432Node\Khronos\Vulkan\Drivers'); foreach ($path in $vkPaths) { if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }; Set-ItemProperty -Path $path -Name 'nv-vk64.json' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue; Set-ItemProperty -Path $path -Name 'nv-vk32.json' -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue }; Write-Host '    [OK] Da dam bao dang ky Khronos OpenCL va Vulkan ICD.' -ForegroundColor Green;"
