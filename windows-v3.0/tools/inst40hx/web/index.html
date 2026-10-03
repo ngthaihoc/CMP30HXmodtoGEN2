@@ -51,16 +51,16 @@
         <div class="hud-card hardware-card">
           <div class="card-header-compact">
             <span class="card-eyebrow" data-i18n="hud_silicon_title">THÔNG TIN BÁN DẪN & BUS</span>
-            <span class="badge badge-emerald" id="gpuDetectedBadge">CMP 40HX (TU106)</span>
+            <span class="badge" id="gpuDetectedBadge">Đang quét...</span>
           </div>
           <div class="hardware-specs-grid">
             <div class="spec-unit">
               <span class="spec-label" data-i18n="spec_bus_id">PCIe Bus:</span>
-              <span class="spec-value mono" id="specBusId">VEN_10DE & DEV_1F0B</span>
+              <span class="spec-value mono" id="specBusId">Đang kiểm tra...</span>
             </div>
             <div class="spec-unit">
               <span class="spec-label" data-i18n="spec_gsp">GSP-RM Firmware:</span>
-              <span class="spec-value highlight-cyan" id="specGsp">Đã nạp (GSP Mode)</span>
+              <span class="spec-value highlight-cyan" id="specGsp">Đang kiểm tra...</span>
             </div>
             <div class="spec-unit">
               <span class="spec-label" data-i18n="spec_vanguard">Riot Vanguard / Game:</span>
@@ -76,7 +76,7 @@
           <div class="lane-matrix-box">
             <div class="lane-matrix-header">
               <span class="lane-title" data-i18n="lane_topology">PCIe x16 Physical Lanes Topology:</span>
-              <span class="lane-status-text mono" id="laneSummaryText">16/16 Lanes Negotiated</span>
+              <span class="lane-status-text mono" id="laneSummaryText">0/16 Làn (Đang quét...)</span>
             </div>
             <div class="lane-pins-grid" id="lanePinsGrid">
               <!-- 16 lanes rendered by JS -->
@@ -87,7 +87,7 @@
         <div class="hud-card throughput-card">
           <div class="card-header-compact">
             <span class="card-eyebrow" data-i18n="hud_bandwidth_title">BĂNG THÔNG & LIÊN KẾT PCIE</span>
-            <span class="boost-badge" id="boostRatio">~25.6x BOOST</span>
+            <span class="boost-badge" id="boostRatio">-- BOOST</span>
           </div>
           
           <div class="speed-compare-row">
@@ -103,15 +103,15 @@
             </div>
             <div class="speed-box after">
               <span class="speed-tag highlight" data-i18n="speed_unlocked">ĐÃ MỞ KHOÁ TOÀN BỘ</span>
-              <div class="speed-num mono highlight-emerald" id="currentThroughput">~6.4 <span class="unit">GB/s</span></div>
-              <span class="speed-sub mono highlight-emerald">Gen2 x16 @ 5.0 GT/s</span>
+              <div class="speed-num mono highlight-emerald" id="currentThroughput">0 <span class="unit">MB/s</span></div>
+              <span class="speed-sub mono highlight-emerald" id="currentSpeedSub">Chưa kích hoạt</span>
             </div>
           </div>
 
           <!-- Throughput Gauge Bar -->
           <div class="gauge-container">
             <div class="gauge-bar-track">
-              <div class="gauge-bar-fill" id="gaugeBarFill" style="width: 100%;">
+              <div class="gauge-bar-fill" id="gaugeBarFill" style="width: 0%;">
                 <div class="gauge-shimmer"></div>
               </div>
             </div>

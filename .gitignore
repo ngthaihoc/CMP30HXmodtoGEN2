@@ -12,3 +12,5 @@ Test_Mock_CMP30HX_Linux.sh
 *.zip
 commits.txt
 diff.txt
+*~
+*.exe~

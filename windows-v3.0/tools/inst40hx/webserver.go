@@ -171,7 +171,22 @@ func runWebGUI() {
 		autoHard := hxcore.ConfigInt("Gen2AutoHard", 1) != 0
 		cnt, interval := hxcore.Gen2RetryPolicy()
 
-		gpuFound := flags["Card đồ hoạ"]
+		gpuProf, gpuFound := hxcore.FindGPUWithProfile()
+		gpuName := "Chưa phát hiện GPU CMP"
+		pciBusId := "Không phát hiện"
+		isGen2 := false
+		if gpuFound {
+			gpuName = gpuProf.Name + " (" + gpuProf.Family + ")"
+			pciBusId = gpuProf.HardwareID
+			isGen2 = gen2Succeeded
+			if !isGen2 {
+				st := hxcore.ReadUnlockStateV2(0, 0)
+				if st.Speed >= 2 || st.TLS >= 2 {
+					isGen2 = true
+				}
+			}
+		}
+
 		gspActive := flags["GSP (EnableGpuFirmware)"]
 
 		aspmOK := true
@@ -197,10 +212,10 @@ func runWebGUI() {
 
 		resp := map[string]interface{}{
 			"gpuDetected":    gpuFound,
-			"gpuName":        "CMP 40HX / 30HX (Turing)",
-			"pciBusId":       "VEN_10DE & DEV_1F0B",
+			"gpuName":        gpuName,
+			"pciBusId":       pciBusId,
 			"gspActive":      gspActive,
-			"isGen2":         gen2Succeeded || flags["Tác vụ tự khởi động"],
+			"isGen2":         isGen2,
 			"driverStrategy": strat,
 			"autoHard":       autoHard,
 			"retryCount":     cnt,

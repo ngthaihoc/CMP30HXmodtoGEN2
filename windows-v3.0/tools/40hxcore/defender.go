@@ -63,10 +63,9 @@ func psArray(ps []string) string {
 
 // ErrMpUnavailable: Defender 管理模块缺失(第三方杀软接管/精简系统把模块拿掉)。
 // 供调用方 errors.Is 判断后显示简短提示, 避免把整段报错嵌套进界面文案。
-var ErrMpUnavailable = errors.New("Defender 管理模块不可用")
+var ErrMpUnavailable = errors.New("Mô-đun quản lý Defender không khả dụng")
 
-// mpErr: 把 Defender 相关命令的错误转成人话 — 最常见的根因是模块不存在
-// (第三方杀软接管/精简系统把 Defender 模块拿掉), 给出明确后续动作。
+// mpErr: Chuyển đổi lỗi liên quan đến Defender thành thông điệp rõ ràng
 func mpErr(action, out string, err error) error {
 	low := strings.ToLower(out)
 	switch {
@@ -74,37 +73,36 @@ func mpErr(action, out string, err error) error {
 		strings.Contains(low, "commandnotfoundexception"),
 		strings.Contains(out, "不是内部"),
 		strings.Contains(out, "无法将"):
-		return fmt.Errorf("%w: 本机未安装 Defender 管理模块(%s)", ErrMpUnavailable, action)
+		return fmt.Errorf("%w: Máy tính chưa cài mô-đun quản lý Defender (%s)", ErrMpUnavailable, action)
 	}
 	msg := strings.TrimSpace(out)
 	if len(msg) > 200 {
 		msg = msg[:200]
 	}
 	if msg != "" {
-		return fmt.Errorf("%s 失败: %v %s", action, err, msg)
+		return fmt.Errorf("%s thất bại: %v %s", action, err, msg)
 	}
-	return fmt.Errorf("%s 失败: %v", action, err)
+	return fmt.Errorf("%s thất bại: %v", action, err)
 }
 
 func runMp(cmd string) (string, error) {
 	return RunOut("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", psUtf8+cmd)
 }
 
-// AddDefenderExclusions: 安装时调用 — 把驱动文件/备份目录加进 Defender 排除。
-// 失败返回错误(模块缺失会有对应提示); 驱动能正常加载时不影响, 仅防误删增强。
+// AddDefenderExclusions: Thêm file driver / thư mục sao lưu vào danh sách loại trừ Defender.
 func AddDefenderExclusions() error {
 	ps := ExclusionPaths()
 	if len(ps) == 0 {
-		return fmt.Errorf("无排除路径")
+		return fmt.Errorf("Không có đường dẫn loại trừ")
 	}
 	out, err := runMp("Add-MpPreference -ExclusionPath " + psArray(ps))
 	if err != nil {
-		return mpErr("添加 Defender 排除", out, err)
+		return mpErr("Thêm loại trừ Defender", out, err)
 	}
 	return nil
 }
 
-// RemoveDefenderExclusions: 卸载时调用 — 清理本工具加过的排除项(精确同名移除)。
+// RemoveDefenderExclusions: Khi gỡ cài đặt — dọn dẹp các mục loại trừ đã thêm.
 func RemoveDefenderExclusions() error {
 	ps := ExclusionPaths()
 	if len(ps) == 0 {
@@ -112,17 +110,16 @@ func RemoveDefenderExclusions() error {
 	}
 	out, err := runMp("Remove-MpPreference -ExclusionPath " + psArray(ps))
 	if err != nil {
-		return mpErr("移除 Defender 排除", out, err)
+		return mpErr("Gỡ bỏ loại trừ Defender", out, err)
 	}
 	return nil
 }
 
-// DefenderExclusionsPresent: 查询排除列表是否已含固定项(两个 System32 .sys + 备份目录)。
-// 返回 (是否全部命中, 错误)。查询失败(模块缺失等)返回错误, 调用方提示"无法查询"。
+// DefenderExclusionsPresent: Kiểm tra danh sách loại trừ đã chứa file driver hay chưa.
 func DefenderExclusionsPresent() (bool, error) {
 	out, err := runMp("@((Get-MpPreference).ExclusionPath) | ConvertTo-Json -Compress")
 	if err != nil {
-		return false, mpErr("查询 Defender 排除", out, err)
+		return false, mpErr("Truy vấn danh sách loại trừ Defender", out, err)
 	}
 	out = strings.TrimSpace(out)
 	if out == "" || out == "null" {
@@ -131,13 +128,12 @@ func DefenderExclusionsPresent() (bool, error) {
 	var paths []string
 	if strings.HasPrefix(out, "[") {
 		if err := json.Unmarshal([]byte(out), &paths); err != nil {
-			return false, fmt.Errorf("解析 Defender 排除列表失败: %v", err)
+			return false, fmt.Errorf("Phân tích danh sách loại trừ Defender thất bại: %v", err)
 		}
 	} else {
-		// PowerShell ConvertTo-Json 对单元素数组会拍平成标量
 		var s string
 		if err := json.Unmarshal([]byte(out), &s); err != nil {
-			return false, fmt.Errorf("解析 Defender 排除列表失败: %v", err)
+			return false, fmt.Errorf("Phân tích danh sách loại trừ Defender thất bại: %v", err)
 		}
 		paths = []string{s}
 	}
@@ -163,11 +159,11 @@ func DefenderExclusionsPresent() (bool, error) {
 	return hit == len(want), nil
 }
 
-// DefenderRealtimeProtectionOn: 查询 Defender 实时防护当前是否开启。
+// DefenderRealtimeProtectionOn: Kiểm tra bảo vệ thời gian thực của Defender.
 func DefenderRealtimeProtectionOn() (bool, error) {
 	out, err := runMp("(Get-MpComputerStatus).RealTimeProtectionEnabled | ConvertTo-Json -Compress")
 	if err != nil {
-		return false, mpErr("查询 Defender 实时防护", out, err)
+		return false, mpErr("Truy vấn bảo vệ thời gian thực Defender", out, err)
 	}
 	switch strings.ToLower(strings.TrimSpace(out)) {
 	case "true", "1":
@@ -175,21 +171,20 @@ func DefenderRealtimeProtectionOn() (bool, error) {
 	case "false", "0", "":
 		return false, nil
 	}
-	return false, fmt.Errorf("查询 Defender 实时防护返回异常: %s", strings.TrimSpace(out))
+	return false, fmt.Errorf("Truy vấn bảo vệ thời gian thực Defender trả về bất thường: %s", strings.TrimSpace(out))
 }
 
-// SetDefenderRealtimeProtection: 关闭(on=false)或恢复开启(on=true) Defender 实时防护。
-// 高风险操作 — 调用方(GUI)需以显式勾选 + 明确提示为前提。
+// SetDefenderRealtimeProtection: Tắt hoặc bật lại bảo vệ thời gian thực Defender.
 func SetDefenderRealtimeProtection(on bool) error {
 	v := "False"
-	act := "关闭"
+	act := "Tắt"
 	if on {
 		v = "True"
-		act = "恢复开启"
+		act = "Bật lại"
 	}
 	out, err := runMp("Set-MpPreference -DisableRealtimeMonitoring $" + v)
 	if err != nil {
-		return mpErr(act+" Defender 实时防护(若 Windows 安全中心开了'篡改防护'会被拒绝, 请先关闭它)", out, err)
+		return mpErr(act+" bảo vệ thời gian thực Defender (nếu Windows Security đang bật 'Tamper Protection' thao tác sẽ bị từ chối, hãy tắt nó trước)", out, err)
 	}
 	return nil
 }

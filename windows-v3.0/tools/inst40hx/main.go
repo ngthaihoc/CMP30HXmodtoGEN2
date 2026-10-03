@@ -93,14 +93,10 @@ func main() {
 	}
 	// GUI 无窗口版(v1.1): 输出全部镜像到日志(默认 %TEMP%\40HX_installer.log, 可 -log 指定)
 	setupLog("40HX_installer.log")
-	// v3.0.0: Mặc định khởi chạy giao diện Web Control Center hiện đại (runWebGUI).
-	// Người dùng có thể chỉ định cờ -gui-classic nếu muốn mở giao diện Win32 cũ (walk).
-	if hasArg("-gui-classic") {
+	// v2.6.0: 双击(无参数)或 UAC 提权重启(-elevated)默认进入 GUI 管理界面;
+	// 命令行参数(-gen2/-task/-uninstall/-status/-silent/-hard)语义保持不变。
+	if len(os.Args) <= 1 || (len(os.Args) == 2 && os.Args[1] == "-elevated") {
 		runGUI()
-		return
-	}
-	if hasArg("-web") || len(os.Args) <= 1 || (len(os.Args) == 2 && os.Args[1] == "-elevated") {
-		runWebGUI()
 		return
 	}
 	// install/-uninstall 需管理员: 非提升时自动 ShellExecute runas 弹 UAC 重启
@@ -297,9 +293,7 @@ func argIndex(name string) int {
 
 func printHelp() {
 	fmt.Println("Trình Mở Khoá & Kích Hoạt PCIe CMP 40HX / 30HX trên Windows")
-	fmt.Println("  Cách dùng: 40HXInstaller.exe                  # Khởi chạy Modern Web Control Center (mặc định)")
-	fmt.Println("             40HXInstaller.exe -web             # Khởi chạy Modern Web Control Center")
-	fmt.Println("             40HXInstaller.exe -gui-classic     # Khởi chạy giao diện Win32 cổ điển (walk)")
+	fmt.Println("  Cách dùng: 40HXInstaller.exe                  # Cài đặt giao diện / toàn bộ (cần Admin)")
 	fmt.Println("             40HXInstaller.exe -gen2            # Mở khoá Gen2 ngay lập tức")
 	fmt.Println("             40HXInstaller.exe -gen3            # (CMP 30HX) Mở khoá Gen3 ngay lập tức")
 	fmt.Println("             40HXInstaller.exe -force-root-gen2 # (CMP 30HX) Ép Root Port huấn luyện lại Gen2")
@@ -321,7 +315,7 @@ func isAdmin() bool {
 func enableGsp() error {
 	key := hxcore.FindGpuClassKey()
 	if key == "" {
-		return errors.New("找不到 40HX 的设备注册表键 (Class 子键)")
+		return errors.New("Không tìm thấy khoá thiết bị GPU trong Registry (Class subkey)")
 	}
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, key, registry.SET_VALUE)
 	if err != nil {
@@ -331,7 +325,7 @@ func enableGsp() error {
 	return k.SetDWordValue(gpuEnableFw, 1)
 }
 
-// disableGsp: 删 EnableGpuFirmware (卸载用, 恢复默认关)
+// disableGsp: Xoá EnableGpuFirmware (Dùng khi gỡ cài đặt, khôi phục mặc định tắt)
 func disableGsp() {
 	key := hxcore.FindGpuClassKey()
 	if key == "" {
@@ -345,48 +339,44 @@ func disableGsp() {
 	k.DeleteValue(gpuEnableFw)
 }
 
-// ensureGspSilent: 确保 GSP 启用 (EnableGpuFirmware=1)。
-// 供 -gen2(登录自启动)调用: 若 GSP 被改回(≠1)则重新启用。
-// 写 HKLM 需管理员: 当前是管理员直接写; 否则注册一次性 SYSTEM 计划任务
-// (SYSTEM 权限写 HKLM 无需 UAC, 无窗口)。
-// 返回 true = GSP 已启用或已安排重设。
+// ensureGspSilent: Đảm bảo GSP được kích hoạt (EnableGpuFirmware=1).
 func ensureGspSilent() bool {
 	if hxcore.GspEnabled() {
-		return true // 已启用
-	}
-	fmt.Println("[GSP] EnableGpuFirmware 被改回, 重新启用...")
-	if isAdmin() {
-		if err := enableGsp(); err != nil {
-			fmt.Println("[GSP] 重设失败:", err)
-			return false
-		}
-		fmt.Println("[GSP] 已重设 EnableGpuFirmware=1 (重启后 GSP-RM 生效)")
 		return true
 	}
-	// 非管理员: 用 SYSTEM 计划任务一次性重设 (无 UAC 弹窗)
+	fmt.Println("[GSP] EnableGpuFirmware bị thay đổi, đang kích hoạt lại...")
+	if isAdmin() {
+		if err := enableGsp(); err != nil {
+			fmt.Println("[GSP] Thiết lập lại thất bại:", err)
+			return false
+		}
+		fmt.Println("[GSP] Đã kích hoạt lại EnableGpuFirmware=1 (Có hiệu lực sau khi khởi động lại)")
+		return true
+	}
+	// Không phải Admin: Dùng tác vụ SYSTEM tạm thời
 	exe, _ := os.Executable()
 	abs, _ := filepath.Abs(exe)
 	tn := "40HXGspEnsure"
 	if out, err := hxcore.RunOut("schtasks.exe", "/create", "/tn", tn,
 		"/tr", fmt.Sprintf("\"%s\" -gspensure -silent", abs),
 		"/sc", "once", "/st", "00:00", "/ru", "SYSTEM", "/f"); err != nil {
-		fmt.Printf("[GSP] 计划任务创建失败: %s\n", strings.TrimSpace(out))
+		fmt.Printf("[GSP] Đăng ký tác vụ thất bại: %s\n", strings.TrimSpace(out))
 		return false
 	}
 	hxcore.RunOut("schtasks.exe", "/run", "/tn", tn)
 	hxcore.RunOut("schtasks.exe", "/delete", "/tn", tn, "/f")
-	fmt.Println("[GSP] 已通过 SYSTEM 任务重设 EnableGpuFirmware=1")
+	fmt.Println("[GSP] Đã thiết lập EnableGpuFirmware=1 thông qua tác vụ SYSTEM")
 	return true
 }
 
-// gspEnsureMain: -gspensure 模式 (SYSTEM 计划任务调用, 只重设 GSP 后退出)
+// gspEnsureMain: -gspensure (Gọi bởi tác vụ SYSTEM)
 func gspEnsureMain() {
 	if isAdmin() {
 		if err := enableGsp(); err != nil {
-			fmt.Println("[GSP] gspensure 重设失败:", err)
+			fmt.Println("[GSP] gspensure thiết lập lại thất bại:", err)
 			return
 		}
-		fmt.Println("[GSP] gspensure: EnableGpuFirmware=1 已设置")
+		fmt.Println("[GSP] gspensure: EnableGpuFirmware=1 đã được thiết lập")
 	}
 }
 
@@ -424,27 +414,26 @@ func deployEspEfi(esp string) (backedUp bool, err error) {
 		return false, rerr
 	}
 	// 写盘前校验 embed 数据本身完整 (PE 头 + 长度合理, 防 embed 损坏)
-	if len(data) < 0x2000 { // < 8KB 的 EFI 文件必为损坏
-		return false, fmt.Errorf("内嵌 40HXUNLK.EFI 数据异常 (%d bytes)", len(data))
+	if len(data) < 0x2000 {
+		return false, fmt.Errorf("Dữ liệu 40HXUNLK.EFI nhúng không bình thường (%d bytes)", len(data))
 	}
 	if !bytes.HasPrefix(data, []byte("MZ")) {
-		return false, errors.New("内嵌 40HXUNLK.EFI 不是有效 PE 镜像(缺 MZ 头)")
+		return false, errors.New("40HXUNLK.EFI nhúng không phải là PE image hợp lệ (thiếu MZ header)")
 	}
 
-	// A. 主路径
+	// A. Đường dẫn chính
 	dirA := esp + ":" + efiDir // Y:\EFI\40HX
 	if merr := os.MkdirAll(dirA, 0o644); merr != nil {
 		return false, merr
 	}
 	pA := filepath.Join(dirA, efiFile)
 	if werr := writeVerified(pA, data); werr != nil {
-		// 写失败或校验不一致 → 删掉可能半截的文件, 避免被 BCD 引用成坏引导
 		os.Remove(pA)
 		return false, werr
 	}
-	fmt.Printf("    [A] %s  (%d bytes, 校验 OK)\n", "\\EFI\\40HX\\"+efiFile, len(data))
+	fmt.Printf("    [A] %s  (%d bytes, xác thực OK)\n", "\\EFI\\40HX\\"+efiFile, len(data))
 
-	// B. 标准回退路径
+	// B. Đường dẫn dự phòng chuẩn UEFI
 	dirB := esp + ":" + efiStdDir // Y:\EFI\Boot
 	if merr := os.MkdirAll(dirB, 0o644); merr != nil {
 		return false, merr
@@ -452,22 +441,19 @@ func deployEspEfi(esp string) (backedUp bool, err error) {
 	pB := filepath.Join(dirB, efiStdF) // bootx64.efi
 	pBak := pB + efiBakExt             // bootx64.efi.40hx.bak
 	if _, berr := os.Stat(pBak); berr != nil {
-		// 无备份记录 → 若目标存在且不是我们已部署的副本, 先备份
 		if old, oerr := os.ReadFile(pB); oerr == nil && !bytes.Equal(old, data) {
 			if cerr := os.Rename(pB, pBak); cerr != nil {
-				return false, fmt.Errorf("备份原 %s 失败: %v", pB, cerr)
+				return false, fmt.Errorf("Sao lưu file gốc %s thất bại: %v", pB, cerr)
 			}
-			fmt.Printf("    [B] 原 %s 已备份为 %s\n", efiStdF, efiStdF+efiBakExt)
+			fmt.Printf("    [B] File gốc %s đã được sao lưu thành %s\n", efiStdF, efiStdF+efiBakExt)
 			backedUp = true
-		} else if oerr != nil {
-			// 目标不存在: 无备份(本来就是空位)
 		}
 	}
 	if werr := writeVerified(pB, data); werr != nil {
 		os.Remove(pB)
 		return backedUp, werr
 	}
-	fmt.Printf("    [B] %s  (%d bytes, 校验 OK)\n", "\\EFI\\Boot\\"+efiStdF, len(data))
+	fmt.Printf("    [B] %s  (%d bytes, xác thực OK)\n", "\\EFI\\Boot\\"+efiStdF, len(data))
 	return backedUp, nil
 }
 
@@ -479,26 +465,22 @@ func writeVerified(path string, data []byte) error {
 	}
 	rb, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("写后校验读取失败 %s: %v", path, err)
+		return fmt.Errorf("Đọc kiểm tra sau khi ghi thất bại %s: %v", path, err)
 	}
 	if !bytes.Equal(rb, data) {
-		return fmt.Errorf("写后校验不一致 %s (%d ≠ %d bytes)", path, len(rb), len(data))
+		return fmt.Errorf("Dữ liệu ghi không khớp %s (%d ≠ %d bytes)", path, len(rb), len(data))
 	}
 	return nil
 }
 
-// alreadyInstalled: 检测是否已安装过(避免无意义/重复的覆盖安装)。
-// 判据: ① 固件启动项 "40HX Unlock" 存在; ② ESP 上已有 \EFI\40HX\40HXUNLK.EFI。
-// 任一命中即认为装过 — 用于重入提示(不会因此阻止用户, 仅弹确认)。
+// alreadyInstalled: Kiểm tra xem đã từng cài đặt chưa
 func alreadyInstalled() bool {
-	// ① bcdedit 固件枚举(不挂 ESP, 快速)
 	if out, _ := hxcore.RunOut("bcdedit.exe", "/enum", "firmware"); strings.Contains(out, bootDesc) {
 		return true
 	}
-	// ② ESP 文件
 	esp := hxcore.MountESP()
 	if esp == "" {
-		return false // 挂不上 ESP 时保守视为未装(后面 [5/8] 会报错引导)
+		return false
 	}
 	defer hxcore.UnmountESP(esp)
 	if _, err := os.Stat(esp + ":" + efiDir + "\\" + efiFile); err == nil {
@@ -507,32 +489,24 @@ func alreadyInstalled() bool {
 	return false
 }
 
-// verifyBootEntry: 读回 {fwbootmgr} displayorder, 确认 40HX Unlock 是否在首位。
-// 返回 (exists, isFirst, displayOrder描述)。
-// 用 bcdedit /enum firmware 读固件 NVRAM — 若固件忽略 bcdedit 的写入,
-// 这里会如实反映(不在列表/不在首位), 从而让安装器给出 BIOS 手动指引。
-// 注意: bcdedit 输出为 GBK, 中文系统"标识符/说明"是乱码; 但字段值
-// (guid / displayorder / 40HX Unlock / path) 均为 ASCII, 按块解析可靠。
+// verifyBootEntry: Đọc lại displayorder kiểm tra 40HX Unlock có nằm đầu tiên không
 func verifyBootEntry() (bool, bool, string) {
 	out, err := hxcore.RunOut("bcdedit.exe", "/enum", "firmware")
 	if err != nil {
-		return false, false, "(bcdedit 读取失败: " + err.Error() + ")"
+		return false, false, "(Đọc bcdedit thất bại: " + err.Error() + ")"
 	}
 	lines := strings.Split(out, "\r\n")
 	if len(lines) < 2 {
 		lines = strings.Split(out, "\n")
 	}
 
-	// 1. 收集 displayorder 下的 GUID 序列(固件实际启动顺序)
 	var order []string
 	for i := 0; i < len(lines); i++ {
 		t := strings.TrimSpace(lines[i])
 		if strings.HasPrefix(t, "displayorder") {
-			// 首个 GUID 可能同行: "displayorder {guid}"
 			if m := guidRe().FindString(t); m != "" {
 				order = append(order, strings.Trim(m, "{}"))
 			}
-			// 后续缩进行 {guid}
 			for j := i + 1; j < len(lines); j++ {
 				s := strings.TrimSpace(lines[j])
 				if strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}") {
@@ -541,16 +515,14 @@ func verifyBootEntry() (bool, bool, string) {
 					break
 				}
 			}
-			break // displayorder 只在 {fwbootmgr} 段, 取首个即可
+			break
 		}
 	}
 
-	// 2. 找 description 为 "40HX Unlock" 的块的 GUID
 	target := ""
 	for i := 0; i < len(lines); i++ {
 		if strings.HasPrefix(strings.TrimSpace(lines[i]), "description") &&
 			strings.Contains(lines[i], bootDesc) {
-			// 往上找最近的 {guid} 行 = 该块 identifier
 			for j := i - 1; j >= 0 && j > i-6; j-- {
 				if m := guidRe().FindString(lines[j]); m != "" {
 					target = strings.Trim(m, "{}")
@@ -563,12 +535,12 @@ func verifyBootEntry() (bool, bool, string) {
 	if target == "" {
 		joined := strings.Join(order, " > ")
 		if joined == "" {
-			joined = "(固件无 displayorder 条目)"
+			joined = "(Firmware không có mục displayorder)"
 		}
 		return false, false, joined
 	}
 	if len(order) == 0 {
-		return true, false, "(displayorder 为空)"
+		return true, false, "(displayorder rỗng)"
 	}
 	isFirst := order[0] == target
 	return true, isFirst, strings.Join(order, " > ")
@@ -578,133 +550,118 @@ var _guidRe = regexp.MustCompile(`\{([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4
 
 func guidRe() *regexp.Regexp { return _guidRe }
 
-// ===================== 安装 =====================
-
-// applyPowerSettings: 快速启动 + PCIe ASPM 两项电源优化(v2.6.0 [3.6/8] 段抽取,
-// v2.6.0 GUI 策略页复用)。幂等: 原本已关则不动; 返回逐项说明行。
+// applyPowerSettings: Tắt Fast Startup và PCIe ASPM
 func applyPowerSettings() []string {
 	notes := []string{}
 	if hxcore.FastStartupOn() {
 		if err := hxcore.SetFastStartupOff(); err != nil {
-			notes = append(notes, fmt.Sprintf("快速启动关闭失败: %v (不影响安装, 建议电源选项手动关)", err))
+			notes = append(notes, fmt.Sprintf("Tắt Khởi động nhanh thất bại: %v (không ảnh hưởng cài đặt, khuyên tắt trong Power Options)", err))
 		} else {
-			notes = append(notes, "快速启动已关闭(原为开): 关机将走完整 UEFI 引导; 电源选项可恢复")
+			notes = append(notes, "Khởi động nhanh đã tắt: Tắt máy mở lại sẽ nạp đầy đủ trình khởi động UEFI")
 		}
 	} else {
-		notes = append(notes, "快速启动: 原本已关(OK)")
+		notes = append(notes, "Khởi động nhanh: Đã tắt từ trước (OK)")
 	}
 	if ac, dc, ok := hxcore.ASPMSavings(); !ok {
-		notes = append(notes, "PCIe ASPM: 本机未公开该设置, 跳过")
+		notes = append(notes, "PCIe ASPM: Máy tính không hỗ trợ cấu hình này, bỏ qua")
 	} else if ac == 0 && dc == 0 {
-		notes = append(notes, "PCIe ASPM: 原本已关(OK)")
+		notes = append(notes, "PCIe ASPM: Đã tắt từ trước (OK)")
 	} else {
 		if err := hxcore.SetASPMOff(); err != nil {
-			notes = append(notes, fmt.Sprintf("ASPM 关闭失败: %v", err))
+			notes = append(notes, fmt.Sprintf("Tắt ASPM thất bại: %v", err))
 		} else {
-			notes = append(notes, fmt.Sprintf("PCIe ASPM 已关闭(原 AC=%d/DC=%d): 减少空闲降到 Gen1; 恢复: powercfg 命令见 README", ac, dc))
+			notes = append(notes, fmt.Sprintf("PCIe ASPM đã tắt (Gốc AC=%d/DC=%d): Tránh tụt xung về Gen1 khi nghỉ", ac, dc))
 		}
 	}
 	return notes
 }
 
-// installEFI: ESP 双路部署 40HXUNLK.EFI + 固件启动项(v2.6.0 [5/8]+[6/8] 段抽取,
-// v2.6.0 GUI 组件安装页复用)。返回 EFI 是否部署成功;
-// [7/8] Gen2 任务注册不依赖此结果(EFI 失败只跳过 EFI 两步 — 社区 #2/#5/#6/#7 统一根因修复)。
 func installEFI() bool {
-	//    主路径  \EFI\40HX\40HXUNLK.EFI  — BCD 启动项引用
-	//    fallback \EFI\Boot\bootx64.efi   — UEFI 标准回退路径, 解决部分主板
-	//    忽略 BCD displayorder / 不认非标准目录(社区"装完重启没反应"主因)。
-	//    原 bootx64.efi 备份为 bootx64.efi.40hx.bak, 卸载时恢复。
 	efiOK := false
-	fmt.Println("    · 部署解锁 EFI 到系统 EFI 分区(双路)...")
+	fmt.Println("    · Triển khai EFI mở khoá vào phân vùng EFI hệ thống (song song)...")
 	esp := hxcore.MountESP()
 	if esp == "" {
 		if hxcore.FirmwareIsLegacy() {
-			fmt.Println("[!] 本系统为传统 BIOS(Legacy)+MBR 引导 — 没有 EFI 分区, 解锁 EFI 无法部署。")
-			fmt.Println("    算力解锁需要 UEFI+GPT: 请先用微软 mbr2gpt 无损转换(完整步骤见弹窗),")
-			fmt.Println("    转换完成并改 UEFI 引导后重跑本安装器。")
-			fmt.Println("    [i] Gen2 登录自启不受影响, 继续注册(见 [7/8])。")
-			msgbox("40HX 安装器 (需要先转换硬盘为 GPT)",
-				"本系统是传统 BIOS(Legacy)+MBR 引导, 没有 EFI 分区,\n"+
-					"算力解锁 EFI 无法部署 — 这就是\"EFI 装不上\"的原因。\n\n"+
-					"请先转成 UEFI+GPT(微软官方无损转换, 不动数据):\n"+
-					"  1. 备份重要数据; 确认未启用 BitLocker(有则先暂停)\n"+
-					"  2. 管理员命令提示符运行:  mbr2gpt /validate /allowfullos\n"+
-					"  3. 显示 Validation completed successfully 后运行:\n"+
+			fmt.Println("[!] Hệ thống đang khởi động chuẩn Legacy BIOS + MBR — Không có phân vùng EFI, không thể nạp EFI mở khoá.")
+			fmt.Println("    Mở khoá tính toán yêu cầu chuẩn UEFI+GPT: Vui lòng dùng lệnh mbr2gpt của Microsoft để chuyển đổi không mất dữ liệu,")
+			fmt.Println("    sau khi chuyển đổi xong và đổi BIOS sang UEFI, hãy chạy lại bộ cài này.")
+			fmt.Println("    [i] Tự mở khoá PCIe Gen2 khi đăng nhập không bị ảnh hưởng, tiếp tục đăng ký (xem mục [7/8]).")
+			msgbox("Trình Cài Đặt 40HX (Cần chuyển đổi ổ đĩa sang GPT)",
+				"Hệ thống hiện tại đang khởi động chuẩn Legacy BIOS + MBR, không có phân vùng EFI,\n"+
+					"do đó không thể nạp file EFI mở khoá tính toán.\n\n"+
+					"Vui lòng chuyển đổi sang chuẩn UEFI+GPT (công cụ mbr2gpt chính thức của Microsoft, không mất dữ liệu):\n"+
+					"  1. Sao lưu dữ liệu quan trọng; Tắt BitLocker nếu đang bật\n"+
+					"  2. Mở Command Prompt (Admin) và chạy:  mbr2gpt /validate /allowfullos\n"+
+					"  3. Khi hiện 'Validation completed successfully', chạy tiếp:\n"+
 					"        mbr2gpt /convert /allowfullos\n"+
-					"  4. 重启进 BIOS, 把启动模式从 Legacy 改为 UEFI(关 CSM)\n"+
-					"  5. 进 Windows 后重新运行本安装器\n\n"+
-					"注意: 转换不可逆; 需 Win10 1703+ / Win11 且主板支持 UEFI。\n"+
-					"本次安装将继续完成 Gen2 部分(算力解锁等转换后重跑安装器)。",
+					"  4. Khởi động lại máy vào BIOS, chuyển chế độ Boot sang UEFI (Tắt CSM)\n"+
+					"  5. Đăng nhập vào Windows và mở lại bộ cài này\n\n"+
+					"Lưu ý: Quá trình chuyển đổi không thể hoàn tác; yêu cầu Win10 1703+ / Win11 và bo mạch chủ hỗ trợ UEFI.\n"+
+					"Ứng dụng sẽ tiếp tục thực hiện phần mở khoá Gen2.",
 				mbIconWarn)
 		} else {
-			fmt.Println("[!] 无法挂载 EFI 分区(mountvol /S 失败)")
-			fmt.Println("    系统是 UEFI, 常见原因: BitLocker/第三方加密未暂停、ESP 分区异常。")
-			fmt.Println("    可手动: mountvol S: /S, 复制 40HXUNLK.EFI 到 S:\\EFI\\40HX\\, mountvol S: /D")
-			msgbox("40HX 安装器 (EFI 分区挂载失败)",
-				"无法挂载 EFI 分区 (mountvol /S 失败), 解锁 EFI 本次未部署。\n"+
-					"系统引导不受影响。\n\n"+
-					"常见原因: BitLocker/第三方加密未暂停、ESP 分区异常。\n"+
-					"可手动部署(见日志与《EFI应急修复指南.md》)。\n\n"+
-					"本次安装将继续完成 Gen2 部分, 算力解锁待 EFI 部署成功后生效。",
+			fmt.Println("[!] Không thể gắn phân vùng EFI (mountvol /S thất bại)")
+			fmt.Println("    Hệ thống là UEFI, nguyên nhân thường gặp: BitLocker chưa tạm dừng hoặc phân vùng ESP bị lỗi.")
+			fmt.Println("    Có thể thao tác thủ công: mountvol S: /S, copy 40HXUNLK.EFI vào S:\\EFI\\40HX\\, sau đó mountvol S: /D")
+			msgbox("Trình Cài Đặt 40HX (Lỗi gắn phân vùng EFI)",
+				"Không thể gắn phân vùng EFI (lệnh mountvol /S thất bại), file EFI mở khoá chưa được nạp.\n"+
+					"Khởi động hệ thống vẫn an toàn không bị ảnh hưởng.\n\n"+
+					"Nguyên nhân thường gặp: BitLocker hoặc phần mềm mã hoá chưa tạm dừng, phân vùng ESP bị lỗi.\n"+
+					"Có thể nạp thủ công (xem nhật ký và hướng dẫn sửa lỗi EFI).\n\n"+
+					"Ứng dụng sẽ tiếp tục thực hiện phần mở khoá PCIe Gen2.",
 				mbIconWarn)
 		}
 		return false
 	}
-	fmt.Printf("    ESP 挂载于 %s: \\\n", esp)
+	fmt.Printf("    ESP đã gắn tại %s: \\\n", esp)
 	fb, err := deployEspEfi(esp)
 	hxcore.UnmountESP(esp)
 	if err != nil {
-		fmt.Println("[!] 复制 EFI 失败:", err)
-		msgbox("40HX 安装器 (EFI 写入失败)",
-			"复制解锁 EFI 到 ESP 失败(已做写后校验, 坏文件不会残留):\n"+err.Error()+
-				"\n\n系统引导未受影响, 重启应能正常进 Windows。\n\n"+
-				"如需手动部署, 见同目录《EFI应急修复指南.md》中\n"+
-				"“手动部署”一节。\n\n"+
-				"本次安装将继续完成 Gen2 部分。", mbIconWarn)
+		fmt.Println("[!] Sao chép EFI thất bại:", err)
+		msgbox("Trình Cài Đặt 40HX (Lỗi ghi file EFI)",
+			"Sao chép file EFI mở khoá vào ESP thất bại (đã kiểm tra xác thực sau khi ghi):\n"+err.Error()+
+				"\n\nKhởi động hệ thống không bị ảnh hưởng, máy tính vẫn vào Windows bình thường.\n\n"+
+				"Ứng dụng sẽ tiếp tục thực hiện phần mở khoá PCIe Gen2.", mbIconWarn)
 		return false
 	}
 	if fb {
-		fmt.Println("    [!] 检测到原 bootx64.efi, 已备份为 bootx64.efi.40hx.bak")
+		fmt.Println("    [!] Phát hiện bootx64.efi gốc, đã sao lưu thành bootx64.efi.40hx.bak")
 	}
 	efiOK = true
 
-	// BootOrder (v2.4: 写回验证 + BIOS 指引弹框); 仅 EFI 部署成功才执行
-	fmt.Println("    · 设置固件启动项(40HX Unlock 置顶)...")
+	// BootOrder (v2.4: Ghi lại xác thực + Hộp thoại hướng dẫn BIOS); chỉ chạy khi EFI nạp thành công
+	fmt.Println("    · Cấu hình mục khởi động BIOS (Đưa 40HX Unlock lên vị trí đầu tiên)...")
 	bootOK := false
 	if err := setupBootEntry(); err != nil {
-		fmt.Println("[!] 自动设置启动项失败:", err)
+		fmt.Println("[!] Tự động cấu hình mục khởi động thất bại:", err)
 	} else {
 		if ex, first, ord := verifyBootEntry(); ex {
 			bootOK = first
 			if first {
-				fmt.Println("    启动项已置顶并验证通过 (固件 displayorder 首位)")
+				fmt.Println("    Mục khởi động đã được đưa lên đầu tiên và xác thực thành công (DisplayOrder #1)")
 			} else {
-				fmt.Println("    [!] 启动项已创建, 但不在 displayorder 首位:")
-				fmt.Println("        当前固件顺序: " + ord)
-				fmt.Println("        请进 BIOS 手动将 '40HX Unlock' 设为第一启动项(见弹窗)")
+				fmt.Println("    [!] Mục khởi động đã tạo nhưng chưa nằm ở vị trí đầu tiên (DisplayOrder):")
+				fmt.Println("        Thứ tự hiện tại trong BIOS: " + ord)
+				fmt.Println("        Vui lòng vào BIOS đặt '40HX Unlock' lên vị trí Boot Option #1 (xem hộp thoại)")
 			}
 		} else {
-			fmt.Println("    [!] 未能在固件启动列表中找到 '40HX Unlock' 项")
-			fmt.Println("        (部分主板忽略 BCD 写入, 请进 BIOS 手动添加/置顶)")
+			fmt.Println("    [!] Không tìm thấy mục '40HX Unlock' trong danh sách khởi động BIOS")
+			fmt.Println("        (Một số bo mạch chủ bỏ qua lệnh ghi BCD, vui lòng vào BIOS thêm thủ công)")
 		}
 	}
 	if !bootOK {
-		// BIOS 指引弹窗 (社区用户不看日志/README 的关键一步)
-		msgbox("40HX 安装器 (重要: 请按提示操作)",
-			"自动启动项未被固件接受。\n"+
-				"请重启并按 Del/F2 进 BIOS, 完成以下设置(否则不解锁):\n\n"+
-				"1. 关闭 Secure Boot(已开则未签名 EFI 会被拒)\n"+
-				"2. 关闭 Fast Boot / 快速启动(若有)\n"+
-				"3. 在 [启动顺序/Boot Priority] 中把 '40HX Unlock' 设为第一项\n"+
-				"   或手动从启动设备选择 \\EFI\\40HX\\40HXUNLK.EFI\n"+
-				"4. 若列表只有 Windows Boot Manager:\n"+
-				"   - 部分主板需关闭 CSM(纯 UEFI)后才会出现该启动项\n"+
-				"   - 或直接选 UEFI 盘符启动(走 bootx64 回退)\n\n"+
-				"安装器已把解锁 EFI 同时部署到:\n"+
-				"  \\EFI\\40HX\\40HXUNLK.EFI  (BCD 路径)\n"+
-				"  \\EFI\\Boot\\bootx64.efi    (标准回退路径)\n\n"+
-				"详细日志: "+filepath.Join(os.TempDir(), "40HX_installer.log"),
+		// Hướng dẫn thao tác BIOS
+		msgbox("Trình Cài Đặt 40HX (Lưu ý quan trọng: Thao tác BIOS)",
+			"Mục khởi động tự động chưa được BIOS chấp nhận ưu tiên đầu tiên.\n"+
+				"Vui lòng khởi động lại máy, bấm Del/F2 để vào BIOS và hoàn thành các thiết lập sau:\n\n"+
+				"1. Tắt Secure Boot (Secure Boot = Disabled)\n"+
+				"2. Tắt Fast Boot / Khởi động nhanh (nếu có)\n"+
+				"3. Trong mục [Thứ tự khởi động / Boot Priority], đặt '40HX Unlock' lên vị trí đầu tiên (#1)\n"+
+				"   hoặc chọn khởi động thủ công từ file \\EFI\\40HX\\40HXUNLK.EFI\n"+
+				"4. Nếu danh sách chỉ có Windows Boot Manager:\n"+
+				"   - Hãy tắt CSM (chọn chế độ thuần UEFI) để mục khởi động xuất hiện\n"+
+				"   - Hoặc chọn khởi động trực tiếp từ ổ UEFI (sử dụng bootx64)\n\n"+
+				"Nhật ký chi tiết: "+filepath.Join(os.TempDir(), "40HX_installer.log"),
 			mbIconError)
 	}
 	return efiOK
@@ -712,193 +669,165 @@ func installEFI() bool {
 
 func install() {
 	fmt.Println("==============================================")
-	fmt.Println("  CMP 40HX Windows Unlock Installer v3.0.0")
-	fmt.Println("  Tensor 解锁(EFI V70 + GSP 启用) + PCIe Gen2 + 自启动")
+	fmt.Println("  CMP 40HX / 30HX Windows Unlock Installer v3.0.0")
+	fmt.Println("  Mở khoá Băng thông PCIe Gen2 x16 & Tính toán")
 	fmt.Println("==============================================")
 
 	if !isAdmin() {
-		fmt.Println("[!] 需要管理员权限。")
-		msgbox("40HX 安装器", "需要管理员权限。\n请右键本程序 -> 以管理员身份运行。", mbIconError)
+		fmt.Println("[!] Yêu cầu quyền Quản trị viên (Administrator).")
+		msgbox("Trình Cài Đặt 40HX / 30HX", "Cần quyền Quản trị viên (Administrator).\nVui lòng nhấp chuột phải vào ứng dụng -> Chọn 'Run as administrator'.", mbIconError)
 		return
 	}
 	if lockOnce(`Local\40HXInstaller_v1`) == nil {
-		msgbox("40HX 安装器", "安装器已在运行, 请勿重复点击。", mbIconInfo)
+		msgbox("Trình Cài Đặt 40HX / 30HX", "Trình cài đặt đang chạy, vui lòng không nhấp trùng lặp.", mbIconInfo)
 		return
 	}
 
-	// 0. 重入检测: 已装过(固件启动项/GSP 键已存在) → 确认后再覆盖,
-	//    避免用户误以为需要反复安装、或在不知情下覆盖现有部署。
+	// 0. Kiểm tra cài đặt trước đó
 	if alreadyInstalled() {
-		fmt.Println("[!] 检测到 40HX 解锁已安装过(启动项/GSP 键存在)。")
-		if !msgboxYesNo("40HX 安装器",
-			"检测到 40HX 解锁已安装过。\n\n"+
-				"再次安装会覆盖现有部署(驱动与启动项会更新, 不会损坏系统引导)。\n"+
-				"如果是想修复异常/升级, 选\"是\"继续;\n"+
-				"如果只是误打开, 选\"否\"保持现状即可。\n\n"+
-				"继续重新安装?") {
-			fmt.Println("已取消 — 保持现有安装不变。")
+		fmt.Println("[!] Phát hiện mở khoá 40HX đã được cài đặt trước đó (mục khởi động/khoá GSP đã tồn tại).")
+		if !msgboxYesNo("Trình Cài Đặt 40HX / 30HX",
+			"Phát hiện mở khoá 40HX đã được cài đặt trên hệ thống này.\n\n"+
+				"Cài đặt lại sẽ ghi đè thiết lập hiện có (driver và mục khởi động sẽ được cập nhật, không ảnh hưởng khởi động Windows).\n"+
+				"Nếu bạn muốn sửa lỗi hoặc nâng cấp, chọn \"Yes\" để tiếp tục;\n"+
+				"Nếu chỉ vô tình mở, chọn \"No\" để giữ nguyên trạng thái.\n\n"+
+				"Bạn có muốn tiếp tục cài đặt lại?") {
+			fmt.Println("Đã huỷ — Giữ nguyên trạng thái cài đặt hiện tại.")
 			return
 		}
-		fmt.Println("    用户确认, 继续覆盖安装。")
+		fmt.Println("    Người dùng xác nhận, tiếp tục cài đặt ghi đè.")
 	}
 
-	// 1. GPU 检测
-	fmt.Print("[1/8] 检测 GPU ... ")
+	// 1. Kiểm tra GPU
+	fmt.Print("[1/8] Kiểm tra GPU ... ")
 	if !hxcore.FindGPU() {
-		fmt.Println("未找到 " + gpuVenDev)
-		fmt.Println("[!] 未检测到 CMP 40HX。中止。")
-		msgbox("40HX 安装器", "未检测到 CMP 40HX 显卡 (VEN_10DE&DEV_1F0B)。\n安装中止。", mbIconError)
+		fmt.Println("Không tìm thấy " + gpuVenDev)
+		fmt.Println("[!] Không phát hiện card CMP 40HX / 30HX. Dừng cài đặt.")
+		msgbox("Trình Cài Đặt 40HX / 30HX", "Không tìm thấy card màn hình CMP 40HX / 30HX tương thích.\nQuá trình cài đặt đã dừng lại.", mbIconError)
 		return
 	}
-	fmt.Println("CMP 40HX 已找到")
+	fmt.Println("Đã tìm thấy GPU tương thích!")
 
 	// 2. Secure Boot
-	fmt.Print("[2/8] Secure Boot 检查 ... ")
+	fmt.Print("[2/8] Kiểm tra Secure Boot ... ")
 	if hxcore.SecureBootOn() {
-		fmt.Println("开启!")
-		fmt.Println("[!] Secure Boot 开启时, 未签名 EFI(40HXUNLK) 会被固件拒绝。")
-		msgbox("40HX 安装器 (需要关闭 Secure Boot)",
-			"检测到 Secure Boot 开启, 未签名的解锁 EFI 会被固件拒绝。\n\n"+
-				"请重启进 BIOS 关闭后再运行本安装器:\n"+
-				"  1. 重启, 开机按 Del / F2(部分主板 F1/F10/F12)进 BIOS\n"+
-				"  2. 找 Security / Boot / 启动 选项卡\n"+
-				"  3. 将 Secure Boot 设为 Disabled\n"+
-				"     (若灰显, 先设 CSM/兼容模式 或恢复默认安全设置)\n"+
-				"  4. 保存退出(F10)后重新运行本程序\n\n"+
-				"这是解锁必需的: 40HX 解锁 EFI 无微软签名。",
+		fmt.Println("Đang BẬT!")
+		fmt.Println("[!] Secure Boot đang bật, file EFI mở khoá chưa ký sẽ bị BIOS từ chối nạp.")
+		msgbox("Trình Cài Đặt 40HX / 30HX (Cần tắt Secure Boot)",
+			"Phát hiện Secure Boot đang BẬT, file EFI mở khoá sẽ bị BIOS từ chối nạp.\n\n"+
+				"Vui lòng vào BIOS tắt Secure Boot trước khi chạy bộ cài:\n"+
+				"  1. Khởi động lại máy, bấm Del / F2 (hoặc F1/F10/F12 tuỳ bo mạch chủ)\n"+
+				"  2. Tìm mục Security / Boot\n"+
+				"  3. Chuyển Secure Boot sang Disabled\n"+
+				"  4. Bấm F10 lưu và khởi động lại vào Windows\n\n"+
+				"Đây là bước bắt buộc vì EFI mở khoá không có chữ ký số của Microsoft.",
 			mbIconError)
 		return
 	}
-	fmt.Println("关闭/不可用(OK)")
+	fmt.Println("Đã tắt / Không khả dụng (OK)")
 
-	// 3. 测试签名 (v2.5 不需要 — BYOVD 预签名驱动普通模式即可加载)
-	fmt.Print("[3/8] 测试签名 ... ")
+	// 3. Test Signing
+	fmt.Print("[3/8] Kiểm tra Test Signing ... ")
 	if hxcore.TestSigningOn() {
-		fmt.Println("已开启 — v2.5 不需要, 装完可 bcdedit /set testsigning off 关闭")
+		fmt.Println("Đang bật — Bản v3.0 không cần Test Signing, có thể tắt bằng lệnh: bcdedit /set testsigning off")
 	} else {
-		fmt.Println("关闭(OK) — v2.5 全程免测试签名")
+		fmt.Println("Đã tắt (OK) — Bản v3.0 hoàn toàn không yêu cầu Test Signing (An toàn Anti-Cheat)")
 	}
 
-	// 3.5 GSP 启用 (v2.3: 解锁不黑屏的关键!)
-	// 40HX 默认 GSP 关(CPU-RM 模式) -> EFI 解锁后 nvlddmkm 拒绝 -> Code43 黑屏
-	// EnableGpuFirmware=1 -> GSP-RM 管理 SEC2/booter -> 接受解锁状态
-	fmt.Print("[3.5/8] 启用 GSP (EnableGpuFirmware) ... ")
+	// 3.5 Bật GSP (EnableGpuFirmware)
+	fmt.Print("[3.5/8] Kích hoạt GSP (EnableGpuFirmware) ... ")
 	if hxcore.GspEnabled() {
 		if sub, _, fw := hxcore.GspDiag(); sub != "" {
-			fmt.Printf("已启用(OK) — Class\\%s EnableGpuFirmware=%d\n", sub, fw)
+			fmt.Printf("Đã kích hoạt (OK) — Class\\%s EnableGpuFirmware=%d\n", sub, fw)
 		} else {
-			fmt.Println("已启用(OK)")
+			fmt.Println("Đã kích hoạt (OK)")
 		}
 	} else {
 		if err := enableGsp(); err != nil {
-			// v2.4.1: 附带 AdapterString 诊断 — 伪装驱动(雨糖识别成2070等)会命中此分支
 			_, adapterDiag, _ := hxcore.GspDiag()
-			fmt.Println("设置失败:", err)
-			if adapterDiag != "" && !strings.Contains(adapterDiag, "无 CMP 40HX") {
-				fmt.Println("    [!] 实际 AdapterString:", adapterDiag)
+			fmt.Println("Thiết lập thất bại:", err)
+			if adapterDiag != "" && !strings.Contains(adapterDiag, "Không có CMP 40HX") {
+				fmt.Println("    [!] AdapterString thực tế:", adapterDiag)
 			} else if adapterDiag != "" {
 				fmt.Println("    [!]", adapterDiag)
 			}
-			fmt.Println("    [!] 若驱动是伪装版(识别成 2070 等): 换未伪装版驱动或手动设 GSP")
-			msgbox("40HX 安装器", "设置 EnableGpuFirmware=1 失败(需管理员)。\n解锁后可能黑屏/掉驱动。\n错误: "+err.Error()+"\n若驱动是伪装版(识别成2070等),请换未伪装驱动或用 -status 查 AdapterString。", mbIconError)
+			msgbox("Trình Cài Đặt 40HX / 30HX", "Thiết lập EnableGpuFirmware=1 thất bại (cần quyền Admin).\nSau khi mở khoá có thể bị lỗi Code 43 / đen màn hình.\nLỗi: "+err.Error()+"\nNếu dùng driver giả lập (nhận diện thành 2070...), hãy đổi sang driver gốc.", mbIconError)
 			return
 		}
-		fmt.Println("已设 EnableGpuFirmware=1 (重启生效)")
-		fmt.Println("    [!] GSP 必需: 否则 EFI 解锁后驱动不认 -> Code43 黑屏")
+		fmt.Println("Đã thiết lập EnableGpuFirmware=1 (Có hiệu lực sau khi khởi động lại)")
+		fmt.Println("    [!] GSP là bắt buộc: Tránh driver từ chối card dẫn đến lỗi Code 43 đen màn hình")
 	}
 
-	// 3.6 系统电源设置 (v2.6.0: 社区 v2.4.5 排障结论)
-	//     快速启动: "关机→再开"走休眠恢复, 不做完整 UEFI 引导, EFI 可能不跑
-	//     PCIe ASPM: 开启时空闲会降到 Gen1, 登录后实测容易被误读成"Gen2 失败"
-	//     两项幂等设置, 只在当前为开时改; 均可在电源选项恢复, 不碰其他电源策略
-	fmt.Print("[3.6/8] 电源设置(快速启动 + PCIe 链路省电) ... ")
+	// 3.6 Cấu hình nguồn điện
+	fmt.Print("[3.6/8] Cấu hình nguồn (Tắt Khởi động nhanh & Tiết kiệm điện PCIe ASPM) ... ")
 	pwrNotes := applyPowerSettings()
-	fmt.Println("完成")
+	fmt.Println("Hoàn tất")
 	for _, n := range pwrNotes {
 		fmt.Println("    - " + n)
 	}
 
-	// 4. 驱动安装
-	fmt.Println("[4/8] 准备 Gen2 BYOVD 驱动(ThrottleStop + WinRing0)...")
+	// 4. Cài đặt Driver PCIe
+	fmt.Println("[4/8] Chuẩn bị Driver PCIe BYOVD (ThrottleStop + WinRing0)...")
 	installDrivers()
 
-	// 4.5 Defender 精确排除(防杀软误删驱动文件导致 Gen2 自启失败)
-	//     只加我们自己的驱动/备份/发布目录, 不关任何系统防护。
-	fmt.Print("[4.5/8] Defender 排除(防误删) ... ")
+	// 4.5 Thêm ngoại lệ Defender
+	fmt.Print("[4.5/8] Thêm ngoại lệ Windows Defender (Chống xoá nhầm driver) ... ")
 	if err := hxcore.AddDefenderExclusions(); err != nil {
-		fmt.Println("未执行(可忽略):", err)
+		fmt.Println("Bỏ qua:", err)
 	} else {
-		fmt.Println("已加白 ThrottleStop/WinRing0 驱动文件与备份目录")
+		fmt.Println("Đã thêm thư mục driver và ProgramData vào danh sách an toàn")
 	}
 
-	// 5+6. EFI 部署与启动项 (v2.6.0: 抽取为 installEFI, GUI 按组件复用)
-	fmt.Println("[5/8]+[6/8] 部署解锁 EFI 与固件启动项(双路写入 + displayorder 置顶)...")
+	// 5+6. Triển khai EFI và mục khởi động BIOS
+	fmt.Println("[5/8]+[6/8] Triển khai EFI mở khoá và mục khởi động BIOS...")
 	efiOK := installEFI()
 
-	// 7. Gen2 自启动(安装时不 retrain!)
-	// 重要: 安装过程中绝不执行 Gen2 PCIe 重训。此时 nvlddmkm 正占用 GPU,
-	// 强行 retrain 会让 GPU/链路进入异常状态, 导致下次开机 EFI 接力或
-	// nvlddmkm 初始化失败(实测: 设备报 code19 / Windows 启动异常进安全模式)。
-	// 正确时机 = 重启后登录时执行(与手动方案一致, 已验证稳定)。
-	// v2.6.0: 两路互斥串行设计 — Run 键登录瞬间先试 + SYSTEM 任务延迟30s确认;
-	// 单实例互斥体(gen2AcquireSingleInstance)保证二者不会同时进入驱动加载临界区。
-	// Run 键在普通权限下无法 sc start 驱动 → 自动交权给 SYSTEM 任务(静默)。
-	fmt.Println("[7/8] 注册 Gen2 登录自启动(SYSTEM 任务 + Run 键, 互斥串行)...")
+	// 7. Đăng ký tự mở khoá PCIe Gen2 khi đăng nhập
+	fmt.Println("[7/8] Đăng ký tự động mở khoá PCIe khi đăng nhập Windows (Tác vụ SYSTEM + Run Key)...")
 	setRunKey()
 	if err := setupGen2Task(); err != nil {
-		// v2.6.0: 任务是 Gen2 链的命脉, 注册失败必须让用户看见并可一键修复
 		fmt.Println("[!]", err)
-		msgbox("40HX 安装器 (Gen2 自启注册失败)",
-			"Gen2 登录自启任务注册失败 — 登录后不会自动解锁 Gen2。\n\n"+
-				"请稍后右键以管理员身份运行一次:\n"+
+		msgbox("Trình Cài Đặt 40HX / 30HX (Đăng ký tự khởi động thất bại)",
+			"Đăng ký tác vụ tự mở khoá PCIe khi đăng nhập thất bại.\n\n"+
+				"Vui lòng chạy lại bằng quyền Administrator lệnh:\n"+
 				"  40HXInstaller.exe -task\n\n"+
-				"其余安装步骤已完成。", mbIconWarn)
+				"Các bước cài đặt khác đã hoàn tất.", mbIconWarn)
 	}
 
 	fmt.Println()
-	fmt.Println("安装完成!")
+	fmt.Println("Cài đặt hoàn tất!")
 	if efiOK {
-		fmt.Println("  下次重启: 固件将自动运行 40HX Unlock (Tensor 解锁) -> 自动进 Windows")
+		fmt.Println("  Lần khởi động tiếp theo: Firmware sẽ tự động chạy 40HX Unlock -> Vào Windows")
 	} else {
-		fmt.Println("  [!] EFI 算力解锁本次未部署(见 [5/8] 说明) — 算力暂不会解锁,")
-		fmt.Println("      按 [5/8] 弹窗指引(mbr2gpt/手动部署)处理后重跑本安装器即可。")
+		fmt.Println("  [!] EFI mở khoá tính toán chưa được nạp (xem hướng dẫn ở bước [5/8]).")
 	}
-	fmt.Println("  GSP 已启用: 驱动以 GSP-RM 模式接管 GPU, 解锁后不再黑屏/掉驱动")
-	fmt.Println("  登录后: Gen2 自动解锁 (已注册自启动, 无窗口静默)")
-	fmt.Println("  [!] 安装时不重训 PCIe, 重启后登录时才执行(避免与显卡驱动冲突)")
-	fmt.Println("  重启后验证: 双击 40HXCheck.exe 查看解锁状态(SS0=0x88888888 即成功)")
-	fmt.Println("  若 testsigning 刚开启: 请先重启一次使驱动可加载")
-	// v2.4: 完成弹框含关键 BIOS/重启指引(社区用户不依赖 README 也能操作)
-	// v2.6.0: EFI 成败给出不同指引; 告知电源设置已自动调整及恢复方式
+	fmt.Println("  GSP đã bật: Driver chạy chế độ GSP-RM tiếp nhận card, không bị Code 43")
+	fmt.Println("  Sau khi đăng nhập: PCIe Gen2 sẽ tự động mở khoá chạy ngầm")
+	fmt.Println("  Kiểm tra sau khi khởi động lại: Chạy 40HXCheck.exe để xem trạng thái")
+
 	efiNote := ""
 	if efiOK {
-		efiNote = "重启时请注意:\n" +
-			"  · 若黑屏/显示 40HX 文字日志约 10~30 秒, 属正常(正在解锁)\n" +
-			"  · 解锁完成后会自动进入 Windows\n\n" +
-			"若重启后直接进了 Windows(没跑解锁), 请进 BIOS(Del/F2):\n" +
-			"  1. 关闭 Secure Boot(未签名 EFI 需要)\n" +
-			"  2. 关闭 Fast Boot\n" +
-			"  3. 把 '40HX Unlock' 设为第一启动项\n" +
-			"     (若列表只有 Windows Boot Manager, 关 CSM 后再看)\n"
+		efiNote = "Lưu ý khi khởi động lại máy:\n" +
+			"  · Nếu màn hình tối khoảng 10-30 giây và hiện chữ 40HX, đó là bình thường (đang mở khoá)\n" +
+			"  · Sau khi mở khoá xong, máy sẽ tự động vào Windows\n\n" +
+			"Nếu khởi động lại mà vào thẳng Windows (không chạy mở khoá), hãy vào BIOS (Del/F2):\n" +
+			"  1. Tắt Secure Boot\n" +
+			"  2. Tắt Fast Boot\n" +
+			"  3. Đặt '40HX Unlock' lên vị trí Boot Option đầu tiên (#1)\n"
 	} else {
-		efiNote = "[!] 本次 EFI 算力解锁未部署(原因见上方弹窗/日志):\n" +
-			"  · 算力暂不会解锁, 按指引处理后重跑安装器即可\n" +
-			"  · Gen2 自启已注册, 不受影响\n"
+		efiNote = "[!] Lần này EFI mở khoá tính toán chưa được nạp (xem nhật ký):\n" +
+			"  · Tính toán Tensor tạm thời chưa mở, sau khi xử lý theo hướng dẫn hãy chạy lại bộ cài\n" +
+			"  · Phần mở khoá PCIe Gen2 khi đăng nhập đã được đăng ký và sẵn sàng\n"
 	}
-	msgbox("40HX 安装器 (安装完成)",
-		"✅ 安装完成! "+map[bool]string{true: "重启后将自动执行解锁。", false: "Gen2 部分已就绪。"}[efiOK]+"\n\n"+
+	msgbox("Trình Cài Đặt 40HX / 30HX (Cài đặt hoàn tất)",
+		"✅ Cài đặt hoàn tất! "+map[bool]string{true: "Khởi động lại máy sẽ tự động thực hiện mở khoá.", false: "Phần mở khoá Gen2 đã sẵn sàng."}[efiOK]+"\n\n"+
 			efiNote+
-			"\n重启进系统后:\n"+
-			"  · 双击同目录的 40HXCheck.exe 验证 — 显示\n"+
-			"    '解锁成功: Tensor 满血(SS0=0x88888888)' 即完成\n"+
-			"  · 若提示未解锁, 它会给下一步(如开 Above 4G)\n\n"+
-			"· 测试签名若刚开启: 先重启一次驱动才可加载\n"+
-			"· GSP 已启用(EnableGpuFirmware=1): 解锁不黑屏的关键\n"+
-			"· 已自动关闭快速启动与 PCIe 链路省电(ASPM):\n"+
-			"  前者保证关机再开也走完整 UEFI 引导, 后者减少空闲降到 Gen1;\n"+
-			"  恢复方式见 README §2.4\n"+
-			"· 登录后 Gen2 自动解锁(静默)\n\n"+
-			"详细日志: "+filepath.Join(os.TempDir(), "40HX_installer.log"),
+			"\nSau khi khởi động lại vào hệ thống:\n"+
+			"  · Chạy 40HXCheck.exe cùng thư mục để kiểm tra trạng thái\n"+
+			"  · GSP đã kích hoạt (EnableGpuFirmware=1): Giúp driver nhận card không bị Code 43\n"+
+			"  · Đã tự động tắt Fast Startup và tiết kiệm điện PCIe (ASPM)\n"+
+			"  · PCIe Gen2 sẽ tự động kích hoạt khi đăng nhập Windows (chạy ngầm, dùng xong gỡ driver an toàn)\n\n"+
+			"Nhật ký chi tiết: "+filepath.Join(os.TempDir(), "40HX_installer.log"),
 		mbIconInfo)
 }
 
@@ -908,43 +837,35 @@ func installDrivers() {
 		out, _ := hxcore.RunOut("sc.exe", "query", name)
 		return strings.Contains(out, "RUNNING")
 	}
-	// v2.5: 不再常驻 40hx_bridge(需测试签名)。Gen2 改 BYOVD:
-	//   ThrottleStop(任意物理内存写, EV 预签名) + WinRing0(PCI config) —
-	//   两者普通模式(testsigning off)即可加载。安装阶段仅放好驱动文件 +
-	//   注册 demand 服务; 真正的加载与自清理由登录后的 -gen2(SYSTEM 任务)
-	//   完成 → 用完即卸, 游戏时系统无第三方驱动。
 	tsApp := hxcore.ThrottleStopAppRunning()
 	for _, d := range []struct{ name, file string }{
 		{"ThrottleStop", "ThrottleStop.sys"},
 		{"WinRing0_1_2_0", "WinRing0x64.sys"},
 	} {
 		dst := filepath.Join(sysDir, d.file)
-		// 本机装了 ThrottleStop 软件 → 复用其同名驱动, 绝不覆盖/删除(避免冲突+写保护)
 		if tsApp {
-			fmt.Printf("  检测到 ThrottleStop 软件, 复用其 %s 驱动(不覆盖/不删)\n", d.name)
+			fmt.Printf("  Phát hiện phần mềm ThrottleStop, tái sử dụng driver %s (không ghi đè/không xoá)\n", d.name)
 			continue
 		}
 		if svcRunning(d.name) {
-			fmt.Printf("  %s 已在运行, 跳过覆盖(保持当前状态)\n", d.name)
+			fmt.Printf("  Dịch vụ %s đang chạy, bỏ qua ghi đè (giữ nguyên trạng thái)\n", d.name)
 			continue
 		}
 		hxcore.RunOut("sc.exe", "stop", d.name)
-		// 留一份到 %ProgramData%\40HXUnlock\drivers 作为持久备份源
-		// (40HXCheck 实测/Gen2 临时部署都从这里取; System32 的会被用完即卸删除)
 		pdDir := filepath.Join(os.Getenv("ProgramData"), "40HXUnlock", "drivers")
 		os.MkdirAll(pdDir, 0o755)
 		copyEmbedTo(filepath.Join(pdDir, d.file), d.file)
 		if err := copyEmbedTo(dst, d.file); err != nil {
 			if _, statErr := os.Stat(dst); statErr != nil {
-				fmt.Printf("  [!] 复制 %s 失败: %v\n", d.file, err)
+				fmt.Printf("  [!] Sao chép %s thất bại: %v\n", d.file, err)
 				continue
 			}
 		} else {
-			fmt.Printf("  已复制 %s\n", d.file)
+			fmt.Printf("  Đã sao chép %s\n", d.file)
 		}
 		ensureService(d.name, d.file)
 	}
-	fmt.Println("  Gen2 驱动文件已就绪(demand), 登录后由 SYSTEM 任务临时加载并自清理")
+	fmt.Println("  Driver PCIe Gen2 đã sẵn sàng (demand), sẽ được tải và tự dọn dẹp khi đăng nhập")
 }
 
 // ensureService: 仅注册(或更新)驱动服务, 不在此处加载。
@@ -969,20 +890,18 @@ func ensureService(name string, sysFile string) {
 	hxcore.RunOut("sc.exe", "create", name, "type=", "kernel", "start=", "demand", "binPath=", bin)
 	out, err := hxcore.RunOut("sc.exe", "query", name)
 	if err != nil || !strings.Contains(out, "STATE") {
-		fmt.Printf("  [!] 注册服务 %s 失败: %s\n", name, strings.TrimSpace(out))
+		fmt.Printf("  [!] Đăng ký dịch vụ %s thất bại: %s\n", name, strings.TrimSpace(out))
 		return
 	}
-	// 纠正被安全软件/策略改错的启动类型(Disabled 会导致 Gen2 永远拉不起)。
-	// 启动类型在 sc qc, 不在 query; 状态(STOPPED/RUNNING)在 query。
 	start := "demand"
 	if qc, qerr := hxcore.RunOut("sc.exe", "qc", name); qerr == nil {
 		qcu := strings.ToUpper(qc)
 		switch {
 		case strings.Contains(qcu, "DISABLED"):
 			hxcore.RunOut("sc.exe", "config", name, "start=", "demand")
-			start = "demand(原被改 DISABLED, 已修正)"
+			start = "demand(Gốc bị DISABLED, đã sửa lại)"
 		case strings.Contains(qcu, "AUTO_START"):
-			start = "auto(注意: 应为 demand)"
+			start = "auto(Lưu ý: Nên là demand)"
 		}
 	}
 	stateS := "?"
@@ -992,16 +911,14 @@ func ensureService(name string, sysFile string) {
 	case strings.Contains(out, "STOPPED"):
 		stateS = "STOPPED"
 	}
-	fmt.Printf("  服务 %s 已注册 (%s, %s), 登录后由 SYSTEM 任务加载\n", name, start, stateS)
+	fmt.Printf("  Dịch vụ %s đã đăng ký (%s, %s), khi đăng nhập sẽ được tác vụ SYSTEM nạp\n", name, start, stateS)
 }
 
 func setupBootEntry() error {
-	// 幂等: 已存在 "40HX Unlock" 项则跳过 (用全量 firmware 枚举, 描述在项详情)
 	if out, _ := hxcore.RunOut("bcdedit.exe", "/enum", "firmware"); strings.Contains(out, bootDesc) {
-		fmt.Println("    启动项已存在, 跳过")
+		fmt.Println("    Mục khởi động đã tồn tại, bỏ qua")
 		return nil
 	}
-	// 1. copy {bootmgr} 作模板
 	out, err := hxcore.RunOut("bcdedit.exe", "/copy", "{bootmgr}", "/d", bootDesc)
 	if err != nil {
 		return fmt.Errorf("bcdedit copy: %v", err)
@@ -1009,20 +926,18 @@ func setupBootEntry() error {
 	re := regexp.MustCompile(`\{([0-9a-fA-F-]{36})\}`)
 	m := re.FindStringSubmatch(out)
 	if len(m) < 2 {
-		return errors.New("无法解析 bcdedit 输出: " + out)
+		return errors.New("Không thể phân tích đầu ra bcdedit: " + out)
 	}
 	guid := m[1]
 	cleanup := func() { hxcore.RunOut("bcdedit.exe", "/delete", "{"+guid+"}", "/f") }
 
-	// 2. 找 ESP 盘符 (mountvol 重挂)
 	esp := hxcore.MountESP()
 	if esp == "" {
 		cleanup()
-		return errors.New("无法挂载 ESP")
+		return errors.New("Không thể gắn phân vùng ESP")
 	}
 	defer hxcore.UnmountESP(esp)
 
-	// 3. set device + path
 	if _, err := hxcore.RunOut("bcdedit.exe", "/set", "{"+guid+"}", "device", "partition="+esp+":"); err != nil {
 		cleanup()
 		return err
@@ -1032,19 +947,18 @@ func setupBootEntry() error {
 		cleanup()
 		return err
 	}
-	// 4. displayorder addfirst
 	if _, err := hxcore.RunOut("bcdedit.exe", "/set", "{fwbootmgr}", "displayorder", "{"+guid+"}", "/addfirst"); err != nil {
 		cleanup()
 		return err
 	}
-	fmt.Printf("    启动项 %s 已置顶\n", guid)
+	fmt.Printf("    Mục khởi động %s đã được đưa lên vị trí đầu tiên\n", guid)
 	return nil
 }
 
 func setRunKey() {
 	exe, err := os.Executable()
 	if err != nil {
-		fmt.Println("  [!] 无法获取 exe 路径:", err)
+		fmt.Println("  [!] Không thể lấy đường dẫn exe:", err)
 		return
 	}
 	abs, _ := filepath.Abs(exe)
@@ -1056,17 +970,16 @@ func setRunKey() {
 			`Software\Microsoft\Windows\CurrentVersion\Run`, registry.SET_VALUE)
 	}
 	if err != nil {
-		fmt.Println("  [!] Run 键写入失败:", err)
+		fmt.Println("  [!] Ghi khóa Run registry thất bại:", err)
 		return
 	}
 	defer k.Close()
 	if err := k.SetStringValue("40HXGen2", val); err != nil {
-		fmt.Println("  [!] Run 键设置失败:", err)
+		fmt.Println("  [!] Thiết lập khóa Run registry thất bại:", err)
 		return
 	}
-	// 注意: 这只是 HKCU Run 键(辅助通道, 登录瞬间先试); SYSTEM 计划任务才是权威通道。
-	// 不要打印成"Gen2 已注册", 以免与下方 setupGen2Task 的成功提示混淆。
-	fmt.Println("  Gen2 Run 键已写入(HKCU, 登录瞬间先试; SYSTEM 任务为权威通道): " + abs)
+	// Lưu ý: Đây là khóa HKCU Run (kênh dự phòng); Tác vụ SYSTEM mới là kênh chính thức.
+	fmt.Println("  Đã ghi khóa Gen2 Run (HKCU, dự phòng khi đăng nhập; Tác vụ SYSTEM là kênh chính): " + abs)
 }
 
 // setupGen2Task: v2.4.6 核心 — 注册 SYSTEM 计划任务, 登录时(延迟 30s)以
@@ -1099,7 +1012,7 @@ func setRunKey() {
 func setupGen2Task() error {
 	exe, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("无法获取 exe 路径: %v", err)
+		return fmt.Errorf("Không lấy được đường dẫn exe: %v", err)
 	}
 	abs, _ := filepath.Abs(exe)
 	tn := gen2TaskName
@@ -1108,19 +1021,18 @@ func setupGen2Task() error {
 		out, cerr := hxcore.RunOut("schtasks.exe", "/create", "/tn", tn,
 			"/tr", fmt.Sprintf("\"%s\" -gen2 -silent -guard", abs),
 			"/sc", "onlogon", "/ru", "SYSTEM", "/delay", "0000:30", "/f")
-		// 权威判据 = 退出码 0。任务已写入计划服务(中文机上 SUCCESS/成功 串不可靠, 不依赖)。
-		// 仅在退出码非 0 时才视为真实失败; 退出码 0 一律视为成功, 不再二次查询(避免提交延迟竞态误报)。
+		// Tiêu chí thành công = Mã thoát 0.
 		if cerr == nil {
-			fmt.Println("  Gen2 任务已注册(SYSTEM, 登录延迟30s, 静默): " + abs)
+			fmt.Println("  Tác vụ Gen2 đã đăng ký (SYSTEM, hoãn 30s sau đăng nhập, chạy ẩn): " + abs)
 			return nil
 		}
 		lastErr = strings.TrimSpace(out)
 		if attempt < 3 {
-			fmt.Printf("  [!] 任务注册失败(第%d次), 重试... (%s)\n", attempt, lastErr)
+			fmt.Printf("  [!] Đăng ký tác vụ thất bại (lần %d), đang thử lại... (%s)\n", attempt, lastErr)
 			time.Sleep(800 * time.Millisecond)
 		}
 	}
-	return fmt.Errorf("Gen2 计划任务创建失败(已重试): %s\n      可手动: 以管理员运行 40HXInstaller.exe -task", lastErr)
+	return fmt.Errorf("Tạo tác vụ lịch biểu Gen2 thất bại (đã thử lại): %s\n      Có thể chạy thủ công: Mở quyền Admin chạy 40HXInstaller.exe -task", lastErr)
 }
 
 // ===================== Gen2 解锁 (原生, 无 python) =====================
@@ -1481,7 +1393,7 @@ func gen2AutoHardEnabled() bool {
 func scheduleGen2Retry(depth int) {
 	count, interval := hxcore.Gen2RetryPolicy()
 	if depth >= count {
-		fmt.Printf("[Gen2] 自动重试预算已用完(%d/%d), 等下次登录再试\n", depth, count)
+		fmt.Printf("[Gen2] Đã dùng hết số lần thử lại tự động (%d/%d), đợi lần đăng nhập tiếp theo\n", depth, count)
 		return
 	}
 	t := time.Now().Add(time.Duration(interval) * time.Minute)

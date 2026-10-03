@@ -17,7 +17,6 @@ set "DO_UNINSTALL=0"
 set "DO_CLEAN_TASKS=0"
 set "NO_TASK=0"
 set "DO_PREFLIGHT_ONLY=0"
-set "DO_OPEN_UI=0"
 
 for %%a in (%*) do (
     if /i "%%~a"=="-noadmin" set "IS_ADMIN=1"
@@ -56,12 +55,6 @@ for %%a in (%*) do (
     if /i "%%~a"=="/fix-nvcpl" set "DO_FIX_NVCPL=1"
     if /i "%%~a"=="-fixnvcpl" set "DO_FIX_NVCPL=1"
     if /i "%%~a"=="/fixnvcpl" set "DO_FIX_NVCPL=1"
-    if /i "%%~a"=="-ui" set "DO_OPEN_UI=1"
-    if /i "%%~a"=="/ui" set "DO_OPEN_UI=1"
-    if /i "%%~a"=="-web" set "DO_OPEN_UI=1"
-    if /i "%%~a"=="/web" set "DO_OPEN_UI=1"
-    if /i "%%~a"=="-gui" set "DO_OPEN_UI=1"
-    if /i "%%~a"=="/gui" set "DO_OPEN_UI=1"
 )
 
 set "HAS_CLI_FLAG=0"
@@ -112,7 +105,6 @@ if "%IS_ADMIN%"=="0" (
 
 cd /d "%~dp0"
 
-if "%DO_OPEN_UI%"=="1" goto :open_control_center
 if "%DO_CLEAN_TASKS%"=="1" goto :clean_tasks
 if "%DO_UNINSTALL%"=="1" goto :uninstall
 if "%DO_FIX_NVCPL%"=="1" goto :FixNvidiaControlPanel
@@ -134,25 +126,21 @@ echo       - Mo khoa Gen2 x16 [5.0 GT/s], toi uu DEVCTL MRRS 512B
 echo       - TU DONG tich hop toi uu Riot Games (Valorant/LMHT)
 echo       - Don dep sach driver BYOVD tranh loi VAN 1067
 echo.
-echo   [2] Mo giao dien dieu khien Control Center (Web UI Dashboard) [MOI]
-echo       - Giao dien truc quan: Do bang thong, ma tran 16 lane PCIe, mo khoa 1-cham
-echo.
-echo   [3] Go bo cai dat (Tu dong xoa Scheduled Task va Don dep)
+echo   [2] Go bo cai dat (Tu dong xoa Scheduled Task va Don dep)
 echo       - Tu dong xoa sach Scheduled Task, Registry Run key cua script
 echo       - Go bo hoan toan khoi he thong
 echo.
-echo   [4] Khoi phuc va Sua loi mat NVIDIA Control Panel
+echo   [3] Khoi phuc va Sua loi mat NVIDIA Control Panel
 echo       - Dat lai service NVDisplay.ContainerLocalSystem ve tu dong [Auto] va khoi dong
 echo       - Phuc hoi dang ky Desktop Context Menu handler
 echo.
-echo   [5] Thoat
+echo   [4] Thoat
 echo.
 echo ================================================================
-%SystemRoot%\System32\choice.exe /c 12345 /t 10 /d 1 /m "Nhap lua chon cua ban [1-5] (Tu dong chon [1] sau 10 giay): "
-if errorlevel 5 exit /b 0
-if errorlevel 4 goto :FixNvidiaControlPanel
-if errorlevel 3 goto :clean_tasks
-if errorlevel 2 goto :open_control_center
+%SystemRoot%\System32\choice.exe /c 1234 /t 8 /d 1 /m "Nhap lua chon cua ban [1-4] (Tu dong chon [1] sau 8 giay): "
+if errorlevel 4 exit /b 0
+if errorlevel 3 goto :FixNvidiaControlPanel
+if errorlevel 2 goto :clean_tasks
 if errorlevel 1 goto :start_aio
 goto :start_aio
 
@@ -940,35 +928,6 @@ echo      Sau reboot: cho Scheduled Task chay du 15 giay, tao tai 3D/CUDA,
 echo      sau do moi dung GPU-Z/40HXCheck de danh gia Gen2.
 exit /b 0
 
-:: ================================================================
-:: MODULE 6.5: KHOI CHAY MODERN WEB CONTROL CENTER
-:: ================================================================
-:open_control_center
-cls
-echo ================================================================
-echo    DANG KHOI CHAY CMP CONTROL CENTER (WEB UI DASHBOARD)...
-echo ================================================================
-echo.
-set "SRC_INSTALLER="
-if exist "%~dp0windows-v3.0\release\40HXInstaller.exe" (
-    set "SRC_INSTALLER=%~dp0windows-v3.0\release\40HXInstaller.exe"
-) else if exist "%~dp0release\40HXInstaller.exe" (
-    set "SRC_INSTALLER=%~dp0release\40HXInstaller.exe"
-) else if exist "%~dp040HXInstaller.exe" (
-    set "SRC_INSTALLER=%~dp040HXInstaller.exe"
-)
-
-if not defined SRC_INSTALLER (
-    echo [X] LOI: Khong tim thay 40HXInstaller.exe!
-    pause
-    exit /b 1
-)
-
-echo [*] Dang mo giao dien qua trinh duyet...
-start "" "%SRC_INSTALLER%"
-echo [OK] Da khoi chay thanh cong. Ban co the dong cua so nay.
-timeout /t 3 >nul 2>&1
-exit /b 0
 
 :: ================================================================
 :: MODULE 7: UNINSTALL & SYSTEM CLEANUP
