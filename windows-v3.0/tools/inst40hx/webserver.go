@@ -30,7 +30,7 @@ func tryAcquireOp(what string) bool {
 	opMutex.Lock()
 	defer opMutex.Unlock()
 	if opBusyBy != "" {
-		fmt.Printf("[!] ─Éang bß║¡n thao t├íc '%s' ΓÇö Bß╗Å qua y├¬u cß║ºu '%s'\n", opBusyBy, what)
+		fmt.Printf("[!] Đang bận thao tác '%s' — Bỏ qua yêu cầu '%s'\n", opBusyBy, what)
 		return false
 	}
 	opBusyBy = what
@@ -106,12 +106,12 @@ func runWebGUI() {
 	}
 
 	AttachLogSink(hub)
-	fmt.Println("Khß╗ƒi chß║íy CMP 40HX / 30HX Modern Web Control Center...")
+	fmt.Println("Khởi chạy CMP 40HX / 30HX Modern Web Control Center...")
 
 	// Extract sub-filesystem from webFS
 	subWeb, err := fs.Sub(webFS, "web")
 	if err != nil {
-		fmt.Println("[!] Lß╗ùi nß║íp t├ái nguy├¬n web nh├║ng:", err)
+		fmt.Println("[!] Lỗi nạp tài nguyên web nhúng:", err)
 		runGUI() // Fallback to classic walk GUI
 		return
 	}
@@ -119,11 +119,22 @@ func runWebGUI() {
 	mux := http.NewServeMux()
 
 	// 1. Static Web Files
-	mux.Handle("/", http.FileServer(http.FS(subWeb)))
+	fsServer := http.FileServer(http.FS(subWeb))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if strings.HasSuffix(p, ".html") || p == "/" || p == "" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		} else if strings.HasSuffix(p, ".js") {
+			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		} else if strings.HasSuffix(p, ".css") {
+			w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		}
+		fsServer.ServeHTTP(w, r)
+	})
 
 	// 2. Real-time Logs SSE Stream
 	mux.HandleFunc("/api/logs/stream", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -160,7 +171,7 @@ func runWebGUI() {
 
 	// 3. Status API
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		items := scanStatus()
 
 		flags := make(map[string]bool)
@@ -172,11 +183,11 @@ func runWebGUI() {
 		autoHard := hxcore.ConfigInt("Gen2AutoHard", 1) != 0
 		cnt, interval := hxcore.Gen2RetryPolicy()
 
-		gpuFound := flags["Card ─æß╗ô hoß║í"]
+		gpuFound := flags["Card đồ hoạ"]
 		gspActive := flags["GSP (EnableGpuFirmware)"]
 
-		gpuName := "Ch╞░a ph├ít hiß╗çn GPU CMP"
-		pciBusId := "Kh├┤ng khß║ú dß╗Ñng"
+		gpuName := "Chưa phát hiện GPU CMP"
+		pciBusId := "Không khả dụng"
 		if prof, ok := hxcore.FindGPUWithProfile(); ok {
 			gpuName = fmt.Sprintf("%s (%s)", prof.Name, prof.Family)
 			pciBusId = prof.HardwareID
@@ -184,22 +195,22 @@ func runWebGUI() {
 
 		isGen2 := false
 		if gpuFound {
-			isGen2 = gen2Succeeded || flags["T├íc vß╗Ñ tß╗▒ khß╗ƒi ─æß╗Öng"]
+			isGen2 = gen2Succeeded || flags["Tác vụ tự khởi động"]
 		}
 
 		aspmOK := true
-		if v, ok := flags["Tiß║┐t kiß╗çm ─æiß╗çn PCIe (ASPM)"]; ok {
+		if v, ok := flags["Tiết kiệm điện PCIe (ASPM)"]; ok {
 			aspmOK = v
 		}
 
 		needGsp := !gspActive
 		needDrv := hxcore.Gen2DriversNeedDeploy()
 		needEfi := false
-		if flags["Chß║┐ ─æß╗Ö Boot"] {
-			needEfi = !flags["ESP EFI Mß╗ƒ kho├í"] || !flags["Mß╗Ñc khß╗ƒi ─æß╗Öng BIOS"]
+		if flags["Chế độ Boot"] {
+			needEfi = !flags["ESP EFI Mở khoá"] || !flags["Mục khởi động BIOS"]
 		}
-		needTask := !flags["T├íc vß╗Ñ tß╗▒ khß╗ƒi ─æß╗Öng"]
-		needFast := !flags["Khß╗ƒi ─æß╗Öng nhanh (Fast Startup)"]
+		needTask := !flags["Tác vụ tự khởi động"]
+		needFast := !flags["Khởi động nhanh (Fast Startup)"]
 		needAspm := !aspmOK
 		needPerf := !hxcore.HighPerfPlanActive()
 
@@ -235,15 +246,15 @@ func runWebGUI() {
 
 	// 4. Unlock Gen2 Now
 	mux.HandleFunc("/api/unlock-now", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if !tryAcquireOp("Mß╗ƒ kho├í PCIe ngay") {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		if !tryAcquireOp("Mở khoá PCIe ngay") {
 			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]string{"message": "Hß╗ç thß╗æng ─æang bß║¡n thao t├íc kh├íc."})
+			json.NewEncoder(w).Encode(map[string]string{"message": "Hệ thống đang bận thao tác khác."})
 			return
 		}
 		go func() {
 			defer releaseOp()
-			fmt.Println("[PCIe] Bß║»t ─æß║ºu k├¡ch hoß║ít mß╗ƒ kh├│a Gen2 ngay...")
+			fmt.Println("[PCIe] Bắt đầu kích hoạt mở khóa Gen2 ngay...")
 			gen2Main()
 		}()
 		json.NewEncoder(w).Encode(map[string]string{"status": "started"})
@@ -251,15 +262,15 @@ func runWebGUI() {
 
 	// 5. Full Install 1-Click
 	mux.HandleFunc("/api/full-install", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if !tryAcquireOp("C├ái ─æß║╖t to├án bß╗Ö") {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		if !tryAcquireOp("Cài đặt toàn bộ") {
 			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]string{"message": "Hß╗ç thß╗æng ─æang bß║¡n thao t├íc kh├íc."})
+			json.NewEncoder(w).Encode(map[string]string{"message": "Hệ thống đang bận thao tác khác."})
 			return
 		}
 		go func() {
 			defer releaseOp()
-			fmt.Println("== C├ái ─æß║╖t to├án bß╗Ö tß╗▒ ─æß╗Öng (Mß╗Öt chß║ím) ==")
+			fmt.Println("== Cài đặt toàn bộ tự động (Một chạm) ==")
 			install()
 		}()
 		json.NewEncoder(w).Encode(map[string]string{"status": "started"})
@@ -267,29 +278,29 @@ func runWebGUI() {
 
 	// 6. Gen2 and Autostart Task
 	mux.HandleFunc("/api/gen2-and-task", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if !tryAcquireOp("Mß╗ƒ kho├í & C├ái tß╗▒ khß╗ƒi ─æß╗Öng") {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		if !tryAcquireOp("Mở khoá & Cài tự khởi động") {
 			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]string{"message": "Hß╗ç thß╗æng ─æang bß║¡n thao t├íc kh├íc."})
+			json.NewEncoder(w).Encode(map[string]string{"message": "Hệ thống đang bận thao tác khác."})
 			return
 		}
 		go func() {
 			defer releaseOp()
-			fmt.Println("== Mß╗ƒ kho├í PCIe v├á c├ái ─æß║╖t tß╗▒ khß╗ƒi ─æß╗Öng ==")
-			fmt.Println("[PCIe] B╞░ß╗¢c 1/2: Mß╗ƒ kho├í phi├¬n hiß╗çn tß║íi...")
+			fmt.Println("== Mở khoá PCIe và cài đặt tự khởi động ==")
+			fmt.Println("[PCIe] Bước 1/2: Mở khoá phiên hiện tại...")
 			gen2Main()
-			fmt.Println("[PCIe] B╞░ß╗¢c 2/2: C├ái ─æß║╖t tß╗▒ khß╗ƒi ─æß╗Öng khi ─æ─âng nhß║¡p Windows...")
+			fmt.Println("[PCIe] Bước 2/2: Cài đặt tự khởi động khi đăng nhập Windows...")
 			installDrivers()
 			if err := hxcore.AddDefenderExclusions(); err != nil {
-				fmt.Println("  [Defender] Lß╗ùi ngoß║íi lß╗ç:", err)
+				fmt.Println("  [Defender] Lỗi ngoại lệ:", err)
 			} else {
-				fmt.Println("  [Defender] ─É├ú th├¬m loß║íi trß╗½ cho file driver v├á ProgramData")
+				fmt.Println("  [Defender] Đã thêm loại trừ cho file driver và ProgramData")
 			}
 			setRunKey()
 			if err := setupGen2Task(); err != nil {
-				fmt.Println("  [!] ─É─âng k├╜ t├íc vß╗Ñ tß╗▒ chß║íy thß║Ñt bß║íi:", err)
+				fmt.Println("  [!] Đăng ký tác vụ tự chạy thất bại:", err)
 			} else {
-				fmt.Println("  [Tß╗▒ chß║íy] ─É─âng k├╜ th├ánh c├┤ng ΓÇö Tß╗▒ ─æß╗Öng mß╗ƒ kho├í PCIe khi ─æ─âng nhß║¡p")
+				fmt.Println("  [Tự chạy] Đăng ký thành công — Tự động mở khoá PCIe khi đăng nhập")
 			}
 		}()
 		json.NewEncoder(w).Encode(map[string]string{"status": "started"})
@@ -297,15 +308,15 @@ func runWebGUI() {
 
 	// 7. Install Selected Components
 	mux.HandleFunc("/api/install", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		var sel map[string]bool
 		if err := json.NewDecoder(r.Body).Decode(&sel); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if !tryAcquireOp("C├ái ─æß║╖t th├ánh phß║ºn ─æ├ú chß╗ìn") {
+		if !tryAcquireOp("Cài đặt thành phần đã chọn") {
 			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]string{"message": "Hß╗ç thß╗æng ─æang bß║¡n thao t├íc kh├íc."})
+			json.NewEncoder(w).Encode(map[string]string{"message": "Hệ thống đang bận thao tác khác."})
 			return
 		}
 		go func() {
@@ -317,7 +328,7 @@ func runWebGUI() {
 
 	// 8. Save Policy
 	mux.HandleFunc("/api/save-policy", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		var req struct {
 			Strategy      int `json:"strategy"`
 			AutoHard      int `json:"autoHard"`
@@ -330,14 +341,14 @@ func runWebGUI() {
 		}
 
 		if err := hxcore.SetConfigInt("DriverStrategy", req.Strategy); err != nil {
-			http.Error(w, "L╞░u DriverStrategy thß║Ñt bß║íi: "+err.Error(), http.StatusInternalServerError)
+			http.Error(w, "Lưu DriverStrategy thất bại: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		hxcore.SetConfigInt("Gen2AutoHard", req.AutoHard)
 		hxcore.SetConfigInt("Gen2RetryCount", req.RetryCount)
 		hxcore.SetConfigInt("Gen2RetryIntervalMin", req.RetryInterval)
 
-		fmt.Printf("[Cß║Ñu h├¼nh] ─É├ú l╞░u: Chiß║┐n l╞░ß╗úc=%d Gen2AutoHard=%d Thß╗¡ lß║íi=%d lß║ºn / Gi├ún c├ích=%d ph├║t\n",
+		fmt.Printf("[Cấu hình] Đã lưu: Chiến lược=%d Gen2AutoHard=%d Thử lại=%d lần / Giãn cách=%d phút\n",
 			req.Strategy, req.AutoHard, req.RetryCount, req.RetryInterval)
 		json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
 	})
@@ -349,7 +360,7 @@ func runWebGUI() {
 		// Try dynamic port if 40100 is occupied
 		listener, err = net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
-			fmt.Println("[!] Kh├┤ng thß╗â tß║ío m├íy chß╗º web nß╗Öi bß╗Ö:", err)
+			fmt.Println("[!] Không thể tạo máy chủ web nội bộ:", err)
 			runGUI() // Fallback to walk GUI
 			return
 		}
@@ -358,8 +369,8 @@ func runWebGUI() {
 	addr := listener.Addr().String()
 	url := fmt.Sprintf("http://%s", addr)
 	fmt.Printf("\n============================================================\n")
-	fmt.Printf(" [Γ£ô] CMP Control Center Web UI ─æang chß║íy tß║íi: %s\n", url)
-	fmt.Printf("     Tß╗▒ ─æß╗Öng mß╗ƒ tr├¼nh duyß╗çt... (─É├│ng cß╗¡a sß╗ò n├áy ─æß╗â tho├ít)\n")
+	fmt.Printf(" [✓] CMP Control Center Web UI đang chạy tại: %s\n", url)
+	fmt.Printf("     Tự động mở trình duyệt... (Đóng cửa sổ này để thoát)\n")
 	fmt.Printf("============================================================\n\n")
 
 	// Auto launch browser
@@ -370,7 +381,7 @@ func runWebGUI() {
 
 	server := &http.Server{Handler: mux}
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		fmt.Println("[!] M├íy chß╗º web dß╗½ng:", err)
+		fmt.Println("[!] Máy chủ web dừng:", err)
 	}
 }
 

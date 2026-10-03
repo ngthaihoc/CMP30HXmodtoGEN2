@@ -8,58 +8,69 @@
   // --- Bilingual Dictionary ---
   const i18n = {
     vi: {
-      brand_desc: "NVIDIA CMP 40HX & 30HX PCIe Gen2 x16 / K├¡ch hoß║ít B─âng th├┤ng & T├¡nh to├ín",
-      status_connecting: "─Éang kß║┐t nß╗æi...",
-      status_connected: "Trß╗▒c tuyß║┐n (Live)",
-      status_disconnected: "Mß║Ñt kß║┐t nß╗æi",
-      btn_refresh: "Qu├⌐t lß║íi",
-      refresh_tooltip: "Qu├⌐t lß║íi m├┤i tr╞░ß╗¥ng hß╗ç thß╗æng",
-      hud_silicon_title: "TH├öNG TIN B├üN Dß║¬N & BUS",
-      spec_bus_id: "PCIe Bus:",
+      brand_desc: "NVIDIA CMP 40HX & 30HX PCIe Gen2 x16 / Kích hoạt Băng thông & Tính toán",
+      status_connecting: "Đang kết nối...",
+      status_connected: "Trực tuyến (Live)",
+      status_disconnected: "Mất kết nối",
+      btn_refresh: "Quét lại",
+      refresh_tooltip: "Quét lại môi trường hệ thống",
+      hud_silicon_title: "Thông tin Bán dẫn & PCIe Bus",
+      spec_bus_id: "PCIe Bus Device:",
       spec_gsp: "GSP-RM Firmware:",
       spec_vanguard: "Riot Vanguard / Game:",
-      spec_driver_strategy: "Chiß║┐n l╞░ß╗úc Driver:",
-      lane_topology: "Cß║Ñu tr├║c 16 l├án PCIe vß║¡t l├╜ (Physical Lanes):",
-      hud_bandwidth_title: "B─éNG TH├öNG & LI├èN Kß║╛T PCIE",
-      speed_locked: "Gß╗ÉC (KHO├ü EFUSE)",
-      speed_unlocked: "─É├â Mß╗₧ KHO├ü TO├ÇN Bß╗ÿ",
-      btn_unlock_title: "Mß╗₧ KHO├ü PCIE GEN2 NGAY",
-      btn_unlock_sub: "K├¡ch hoß║ít tß╗⌐c th├¼ phi├¬n hiß╗çn tß║íi (kh├┤ng cß║ºn khß╗ƒi ─æß╗Öng lß║íi m├íy)",
-      btn_full_title: "C├ÇI ─Éß║╢T TO├ÇN Bß╗ÿ 1-CHß║áM",
-      btn_full_sub: "Tß╗▒ ─æß╗Öng cß║Ñu h├¼nh chuß║⌐n: GSP + Driver + Tß╗▒ khß╗ƒi ─æß╗Öng + Nguß╗ôn",
-      btn_persist_title: "Mß╗ƒ kho├í & C├ái tß╗▒ khß╗ƒi ─æß╗Öng",
-      btn_persist_sub: "─É─âng k├╜ t├íc vß╗Ñ tß╗▒ chß║íy khi ─æ─âng nhß║¡p Windows",
-      audit_title: "Chß║⌐n ─æo├ín M├┤i tr╞░ß╗¥ng & Phß║ºn cß╗⌐ng",
-      audit_sub: "Kiß╗âm tra t├¡nh t╞░╞íng th├¡ch tr╞░ß╗¢c khi k├¡ch hoß║ít",
-      components_title: "Th├ánh phß║ºn & Thiß║┐t lß║¡p hß╗ç thß╗æng",
-      components_sub: "Chß╗ìn c├íc mß╗Ñc cß║ºn cß║¡p nhß║¡t hoß║╖c bß║Ñm [C├ái ─æß║╖t mß╗Ñc ─æ├ú chß╗ìn]",
-      desc_gsp: "Bß║»t buß╗Öc ─æß╗â tr├ính m├ú lß╗ùi Code 43 sau khi mß╗ƒ kh├│a",
-      desc_drv: "Nß║íp driver can thiß╗çp thanh ghi & cß║Ñp quyß╗ün an to├án",
-      desc_efi: "Nß║íp payload v├áo ph├ón v├╣ng ESP (chß╗ë ├íp dß╗Ñng cho chuß║⌐n UEFI)",
-      desc_task: "─É─âng k├╜ t├íc vß╗Ñ Task Scheduler SYSTEM v├á Run Key dß╗▒ ph├▓ng",
-      desc_fast: "Tr├ính t├¼nh trß║íng Windows nß║íp sleep image bß╗Å qua UEFI hook",
-      desc_aspm: "Tr├ính PCIe tß╗▒ ─æß╗Öng rß╗¢t vß╗ü Gen1 x1 khi m├íy t├¡nh ß╗ƒ trß║íng th├íi rß║únh",
-      desc_perf: "─Éß║úm bß║úo cß║Ñp ─æß╗º n─âng l╞░ß╗úng cho li├¬n kß║┐t PCIe hoß║ít ─æß╗Öng tß╗æi ─æa",
-      desc_defoff: "Chß╗ë cß║ºn thiß║┐t khi phß║ºn mß╗üm diß╗çt virus chß║╖n file sys can thiß╗çp",
-      btn_install_selected: "C├ái ─æß║╖t mß╗Ñc ─æ├ú chß╗ìn",
-      policy_title: "Chiß║┐n l╞░ß╗úc Driver & Tß╗▒ phß╗Ñc hß╗ôi",
-      policy_sub: "Cß║Ñu h├¼nh h├ánh vi sau khi ho├án tß║Ñt mß╗ƒ kh├│a",
-      strat_0_name: "D├╣ng xong gß╗í ngay (Khuy├¬n d├╣ng cho Game)",
-      strat_0_desc: "Sau khi n├óng tß╗æc ─æß╗Ö, driver can thiß╗çp ─æ╞░ß╗úc gß╗í ho├án to├án. An to├án tuyß╗çt ─æß╗æi vß╗¢i Riot Vanguard & Anti-Cheat.",
-      strat_1_name: "Tß╗▒ ─æß╗Öng thß╗¡ lß║íi khi lß╗ùi",
-      strat_1_desc: "Tß╗▒ ─æß╗Öng thß╗¡ lß║íi nß║┐u lß║ºn ─æß║ºu khß╗ƒi tß║ío GPU ch╞░a ─æß║ít tß╗æc ─æß╗Ö Gen2.",
-      strat_2_name: "Th╞░ß╗¥ng tr├║ (Canh giß╗» tß╗æc ─æß╗Ö PCIe)",
-      strat_2_desc: "Driver chß║íy nß╗ün th╞░ß╗¥ng trß╗▒c, ─æß╗ïnh kß╗│ kiß╗âm tra v├á ├⌐p xung PCIe trß╗ƒ lß║íi nß║┐u bß╗ï tß╗Ñt xung.",
-      desc_autohard: "Tß╗▒ ─æß╗Öng k├¡ch hoß║ít Stage 2 (Link Disable + Reset PnP) khi mß╗ƒ kh├│a th╞░ß╗¥ng kh├┤ng ─æß║ít",
-      retry_count_label: "Sß╗æ lß║ºn thß╗¡ lß║íi:",
-      retry_interval_label: "Gi├ún c├ích:",
-      btn_save_policy: "L╞░u cß║Ñu h├¼nh ch├¡nh s├ích",
-      terminal_title: "DIAGNOSTIC & LOG STREAM (REAL-TIME)",
-      log_lines: "d├▓ng log",
-      btn_clear_log: "X├│a",
-      btn_copy_log: "Sao ch├⌐p",
-      safety_title: "An to├án cho Game & Anti-Cheat (Riot Vanguard, EasyAntiCheat, BattlEye)",
-      safety_desc: "Giß║úi ph├íp v3.0 kh├┤ng flash VBIOS, kh├┤ng bß║¡t Test Signing, gß╗í sß║ích driver can thiß╗çp sau khi mß╗ƒ kh├│a. ─Éß║úm bß║úo 100% t├¡nh to├án vß║╣n hß╗ç ─æiß╗üu h├ánh."
+      spec_driver_strategy: "Chiến lược Driver:",
+      lane_topology: "Cấu trúc 16 làn PCIe vật lý (Physical Lanes):",
+      hud_bandwidth_title: "Băng thông & Liên kết PCIe",
+      speed_locked: "Mặc định (Khóa eFuse)",
+      speed_unlocked: "Đã mở khóa tối đa",
+      btn_unlock_title: "Mở khóa PCIe Gen2 ngay",
+      btn_unlock_sub: "Kích hoạt tức thì phiên hiện tại (không cần khởi động lại máy)",
+      btn_full_title: "Cài đặt toàn bộ 1-chạm",
+      btn_full_sub: "Tự động cấu hình chuẩn: GSP + Driver + Tự khởi động + Nguồn",
+      btn_persist_title: "Mở khoá & Cài tự khởi động",
+      btn_persist_sub: "Đăng ký tác vụ tự chạy khi đăng nhập Windows",
+      audit_title: "Chẩn đoán Môi trường & Phần cứng",
+      audit_sub: "Kiểm tra tính tương thích trước khi kích hoạt",
+      audit_loading: "Đang nạp dữ liệu kiểm tra hệ thống...",
+      components_title: "Thành phần & Thiết lập hệ thống",
+      components_sub: "Chọn các mục cần cập nhật hoặc bấm [Cài đặt mục đã chọn]",
+      name_gsp: "Bật GSP (EnableGpuFirmware=1)",
+      name_drv: "Cài đặt Driver PCIe & Ngoại lệ Defender",
+      name_efi: "EFI Mở khoá + Khởi động BIOS (Chỉ 40HX)",
+      name_task: "Tự động mở khoá PCIe khi đăng nhập",
+      name_fast: "Nguồn: Tắt Fast Startup (Khởi động nhanh)",
+      name_aspm: "Nguồn: Tắt ASPM (Tiết kiệm điện PCIe)",
+      name_perf: "Nguồn: Bật chế độ High Performance",
+      name_defoff: "Tắt Defender Realtime Protection",
+      desc_gsp: "Bắt buộc để tránh mã lỗi Code 43 sau khi mở khoá",
+      desc_drv: "Nạp driver can thiệp thanh ghi & cấp quyền an toàn",
+      desc_efi: "Nạp payload vào phân vùng ESP (chỉ áp dụng cho chuẩn UEFI)",
+      desc_task: "Đăng ký tác vụ Task Scheduler SYSTEM và Run Key dự phòng",
+      desc_fast: "Tránh tình trạng Windows nạp sleep image bỏ qua UEFI hook",
+      desc_aspm: "Tránh PCIe tự động rớt về Gen1 x1 khi máy tính ở trạng thái rảnh",
+      desc_perf: "Đảm bảo cấp đủ năng lượng cho liên kết PCIe hoạt động tối đa",
+      desc_defoff: "Chỉ cần thiết khi phần mềm diệt virus chặn file sys can thiệp",
+      btn_install_selected: "Cài đặt mục đã chọn",
+      policy_title: "Chiến lược Driver & Tự phục hồi",
+      policy_sub: "Cấu hình hành vi sau khi hoàn tất mở khoá",
+      strat_0_name: "Dùng xong gỡ ngay (Khuyên dùng cho Game)",
+      strat_0_desc: "Sau khi nâng tốc độ, driver can thiệp được gỡ hoàn toàn. An toàn tuyệt đối với Riot Vanguard & Anti-Cheat.",
+      strat_1_name: "Tự động thử lại khi lỗi",
+      strat_1_desc: "Tự động thử lại nếu lần đầu khởi tạo GPU chưa đạt tốc độ Gen2.",
+      strat_2_name: "Thường trú (Canh giữ tốc độ PCIe)",
+      strat_2_desc: "Driver chạy nền thường trực, định kỳ kiểm tra và ép xung PCIe trở lại nếu bị tụt xung.",
+      desc_autohard: "Tự động kích hoạt Stage 2 (Link Disable + Reset PnP) khi mở khoá thường không đạt",
+      retry_count_label: "Số lần thử lại:",
+      retry_count_unit: "lần",
+      retry_interval_label: "Giãn cách:",
+      retry_interval_unit: "phút",
+      btn_save_policy: "Lưu cấu hình chính sách",
+      terminal_title: "Nhật ký Chẩn đoán thời gian thực",
+      log_lines: "dòng log",
+      btn_clear_log: "Xóa",
+      btn_copy_log: "Sao chép",
+      safety_title: "An toàn cho Game & Anti-Cheat (Riot Vanguard, EasyAntiCheat, BattlEye)",
+      safety_desc: "Giải pháp v3.0 không flash VBIOS, không bật Test Signing, gỡ sạch driver can thiệp sau khi mở khoá. Đảm bảo 100% tính toàn vẹn hệ điều hành."
     },
     en: {
       brand_desc: "NVIDIA CMP 40HX & 30HX PCIe Gen2 x16 Bandwidth & Compute Enablement Suite",
@@ -68,25 +79,34 @@
       status_disconnected: "Disconnected",
       btn_refresh: "Refresh",
       refresh_tooltip: "Re-scan system environment",
-      hud_silicon_title: "SILICON & BUS ARCHITECTURE",
-      spec_bus_id: "PCIe Bus:",
+      hud_silicon_title: "Silicon & PCIe Bus Architecture",
+      spec_bus_id: "PCIe Bus Device:",
       spec_gsp: "GSP-RM Firmware:",
       spec_vanguard: "Riot Vanguard / Game:",
       spec_driver_strategy: "Driver Strategy:",
       lane_topology: "PCIe x16 Physical Lanes Topology:",
-      hud_bandwidth_title: "BANDWIDTH & PCIE LINK",
-      speed_locked: "STOCK (EFUSE LOCKED)",
-      speed_unlocked: "FULLY UNLOCKED",
-      btn_unlock_title: "UNLOCK PCIE GEN2 NOW",
+      hud_bandwidth_title: "PCIe Link & Bandwidth",
+      speed_locked: "Stock (eFuse Locked)",
+      speed_unlocked: "Fully Unlocked",
+      btn_unlock_title: "Unlock PCIe Gen2 Now",
       btn_unlock_sub: "Instantly retrain PCIe link for current session (no reboot needed)",
-      btn_full_title: "1-CLICK FULL DEPLOY",
+      btn_full_title: "1-Click Complete Setup",
       btn_full_sub: "Auto configure all: GSP + Drivers + Auto-Start + Power tuning",
       btn_persist_title: "Unlock & Install Autostart",
       btn_persist_sub: "Register persistent startup task on Windows user logon",
       audit_title: "System & Hardware Diagnostic",
       audit_sub: "Environment validation before link enablement",
+      audit_loading: "Loading system diagnostic data...",
       components_title: "Components & System Setup",
       components_sub: "Select components to update or click [Apply Selected]",
+      name_gsp: "Enable GSP (EnableGpuFirmware=1)",
+      name_drv: "Install PCIe Drivers & Defender Exclusion",
+      name_efi: "EFI Unlock + BIOS Boot Entry (40HX Only)",
+      name_task: "Auto-Unlock PCIe at Windows Logon",
+      name_fast: "Power: Disable Fast Startup",
+      name_aspm: "Power: Disable PCIe ASPM",
+      name_perf: "Power: Enable High Performance Profile",
+      name_defoff: "Disable Defender Real-time Protection",
       desc_gsp: "Mandatory to prevent Code 43 error after PCIe unlock",
       desc_drv: "Deploy kernel MMIO driver & configure Defender security exclusions",
       desc_efi: "Deploy EFI payload to ESP partition (UEFI boot mode required)",
@@ -106,9 +126,11 @@
       strat_2_desc: "Keeps driver loaded; polls link speed every 60s and re-injects if downgraded.",
       desc_autohard: "Auto-trigger Stage 2 (Link Disable + PnP Reset) if standard retrain fails",
       retry_count_label: "Retry Count:",
+      retry_count_unit: "times",
       retry_interval_label: "Interval:",
+      retry_interval_unit: "minutes",
       btn_save_policy: "Save Policy Configuration",
-      terminal_title: "DIAGNOSTIC & LOG STREAM (REAL-TIME)",
+      terminal_title: "Real-Time Diagnostic & Event Log",
       log_lines: "log lines",
       btn_clear_log: "Clear",
       btn_copy_log: "Copy",
@@ -195,12 +217,16 @@
     });
   }
 
-  elBtnLangToggle.addEventListener('click', () => {
-    applyLanguage(currentLang === 'vi' ? 'en' : 'vi');
-  });
+  if (elBtnLangToggle) {
+    elBtnLangToggle.addEventListener('click', () => {
+      applyLanguage(currentLang === 'vi' ? 'en' : 'vi');
+      fetchStatus();
+    });
+  }
 
   // --- Log Streaming via SSE ---
   function initLogStream() {
+    if (!elStreamIndicator || !elStreamStatusText) return;
     elStreamIndicator.className = 'status-indicator';
     elStreamStatusText.textContent = i18n[currentLang].status_connecting;
 
@@ -241,13 +267,12 @@
     const timeStr = `[${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}]`;
     
     let category = 'sys';
-    let cleanLine = line;
 
-    if (line.includes('[PCIe]') || line.includes('PCIe') || line.includes('Gen2') || line.includes('Gen1')) {
+    if (line.includes('[PCIe]') || line.includes('PCIe') || line.includes('Gen2') || line.includes('Gen1') || line.includes('Lanes')) {
       category = 'pcie';
-    } else if (line.includes('[!]') || line.includes('lß╗ùi') || line.includes('thß║Ñt bß║íi') || line.includes('Error') || line.includes('Fail')) {
+    } else if (line.includes('[!]') || line.includes('Lỗi') || line.includes('thất bại') || line.includes('Error') || line.includes('Fail') || line.includes('cảnh báo')) {
       category = 'warn';
-    } else if (line.includes('Γ£ô') || line.includes('th├ánh c├┤ng') || line.includes('OK') || line.includes('Success')) {
+    } else if (line.includes('✓') || line.includes('thành công') || line.includes('OK') || line.includes('Success')) {
       category = 'ok';
     }
 
@@ -255,6 +280,7 @@
   }
 
   function renderLogLine(logObj) {
+    if (!elTerminalLogBody) return;
     if (currentFilter !== 'all' && currentFilter !== logObj.category) {
       return;
     }
@@ -283,6 +309,7 @@
   });
 
   function reRenderLogs() {
+    if (!elTerminalLogBody) return;
     elTerminalLogBody.innerHTML = '';
     logHistory.forEach(logObj => {
       if (currentFilter === 'all' || currentFilter === logObj.category) {
@@ -292,29 +319,33 @@
   }
 
   // Clear & Copy Log
-  elBtnClearLog.addEventListener('click', () => {
-    logHistory = [];
-    elTerminalLogBody.innerHTML = '';
-    elLogLineCount.textContent = '0';
-  });
-
-  elBtnCopyLog.addEventListener('click', () => {
-    const allText = logHistory.map(l => `${l.timeStr} ${l.raw}`).join('\n');
-    navigator.clipboard.writeText(allText).then(() => {
-      appendLogLine("[SYSTEM] ─É├ú sao ch├⌐p to├án bß╗Ö nhß║¡t k├╜ v├áo clipboard.");
+  if (elBtnClearLog) {
+    elBtnClearLog.addEventListener('click', () => {
+      logHistory = [];
+      if (elTerminalLogBody) elTerminalLogBody.innerHTML = '';
+      if (elLogLineCount) elLogLineCount.textContent = '0';
     });
-  });
+  }
+
+  if (elBtnCopyLog) {
+    elBtnCopyLog.addEventListener('click', () => {
+      const allText = logHistory.map(l => `${l.timeStr} ${l.raw}`).join('\n');
+      navigator.clipboard.writeText(allText).then(() => {
+        appendLogLine(currentLang === 'vi' ? "[SYSTEM] Đã sao chép toàn bộ nhật ký vào clipboard." : "[SYSTEM] Copied all logs to clipboard.");
+      });
+    });
+  }
 
   // --- Fetch System Status ---
   async function fetchStatus() {
     try {
-      elAuditSummaryChip.textContent = "─Éang qu├⌐t...";
+      if (elAuditSummaryChip) elAuditSummaryChip.textContent = currentLang === 'vi' ? "Đang quét..." : "Scanning...";
       const res = await fetch('/api/status');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       renderStatus(data);
     } catch (err) {
-      console.warn("API status error:", err);
+      console.warn("API status fallback:", err);
       // Fallback mock rendering for dev preview if server is not yet returning JSON
       renderStatus(getMockStatus());
     }
@@ -322,64 +353,73 @@
 
   function renderStatus(data) {
     // 1. Audit List
-    elAuditList.innerHTML = '';
-    let warningCount = 0;
+    if (elAuditList) {
+      elAuditList.innerHTML = '';
+      let warningCount = 0;
 
-    data.items.forEach(item => {
-      const row = document.createElement('div');
-      row.className = 'audit-item';
-      if (!item.ok) warningCount++;
+      (data.items || []).forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'audit-item';
+        if (!item.ok) warningCount++;
 
-      row.innerHTML = `
-        <div class="audit-left">
-          <div class="audit-icon ${item.ok ? 'ok' : 'warn'}">${item.ok ? 'Γ£ô' : '!'}</div>
-          <span class="audit-name">${escapeHtml(item.name)}</span>
-        </div>
-        <div class="audit-note">${escapeHtml(item.note)}</div>
-      `;
-      elAuditList.appendChild(row);
-    });
+        row.innerHTML = `
+          <div class="audit-left">
+            <div class="audit-icon ${item.ok ? 'ok' : 'warn'}">${item.ok ? '✓' : '!'}</div>
+            <span class="audit-name">${escapeHtml(item.name)}</span>
+          </div>
+          <div class="audit-note">${escapeHtml(item.note)}</div>
+        `;
+        elAuditList.appendChild(row);
+      });
 
-    elAuditSummaryChip.textContent = warningCount === 0 
-      ? (currentLang === 'vi' ? 'Γ£ô M├┤i tr╞░ß╗¥ng tß╗æi ╞░u' : 'Γ£ô System Ready')
-      : (currentLang === 'vi' ? `ΓÜá ${warningCount} cß║únh b├ío cß║ºn xß╗¡ l├╜` : `ΓÜá ${warningCount} warnings`);
-    
-    elAuditSummaryChip.style.borderColor = warningCount === 0 ? 'var(--accent-emerald)' : 'var(--accent-amber)';
-    elAuditSummaryChip.style.color = warningCount === 0 ? 'var(--accent-emerald)' : 'var(--accent-amber)';
-
-    // 2. Hardware specs & Throughput
-    if (data.gpuDetected) {
-      elGpuDetectedBadge.textContent = data.gpuName || "CMP 40HX (TU106)";
-      elGpuDetectedBadge.className = "badge badge-emerald";
-    } else {
-      elGpuDetectedBadge.textContent = currentLang === 'vi' ? "Ch╞░a ph├ít hiß╗çn GPU" : "No GPU Detected";
-      elGpuDetectedBadge.className = "badge";
-      elGpuDetectedBadge.style.color = "var(--accent-crimson)";
+      if (elAuditSummaryChip) {
+        elAuditSummaryChip.textContent = warningCount === 0 
+          ? (currentLang === 'vi' ? '✓ Môi trường tối ưu' : '✓ System Ready')
+          : (currentLang === 'vi' ? `⚠ ${warningCount} cảnh báo cần xử lý` : `⚠ ${warningCount} warnings`);
+        
+        elAuditSummaryChip.style.borderColor = warningCount === 0 ? 'var(--accent-phosphor)' : 'var(--accent-amber)';
+        elAuditSummaryChip.style.color = warningCount === 0 ? 'var(--accent-phosphor)' : 'var(--accent-amber)';
+      }
     }
 
-    if (data.pciBusId) {
+    // 2. Hardware specs & Throughput
+    if (elGpuDetectedBadge) {
+      if (data.gpuDetected) {
+        elGpuDetectedBadge.textContent = data.gpuName || "CMP 40HX (TU106)";
+        elGpuDetectedBadge.className = "badge badge-emerald mono";
+      } else {
+        elGpuDetectedBadge.textContent = currentLang === 'vi' ? "Chưa phát hiện GPU" : "No GPU Detected";
+        elGpuDetectedBadge.className = "badge mono";
+        elGpuDetectedBadge.style.color = "var(--accent-crimson)";
+        elGpuDetectedBadge.style.borderColor = "var(--accent-crimson)";
+      }
+    }
+
+    if (elSpecBusId && data.pciBusId) {
       elSpecBusId.textContent = data.pciBusId;
     }
 
-    if (data.gspActive) {
-      elSpecGsp.textContent = currentLang === 'vi' ? "─É├ú bß║¡t (GSP-RM Mode)" : "Enabled (GSP Mode)";
-      elSpecGsp.className = "spec-value highlight-cyan";
-    } else {
-      elSpecGsp.textContent = currentLang === 'vi' ? "Ch╞░a bß║¡t (C├│ thß╗â lß╗ùi 43)" : "Disabled (Risk Code 43)";
-      elSpecGsp.className = "spec-value";
-      elSpecGsp.style.color = "var(--accent-amber)";
+    if (elSpecGsp) {
+      if (data.gspActive) {
+        elSpecGsp.textContent = currentLang === 'vi' ? "Đã bật (GSP-RM Mode)" : "Enabled (GSP Mode)";
+        elSpecGsp.className = "spec-value highlight-cyan";
+      } else {
+        elSpecGsp.textContent = currentLang === 'vi' ? "Chưa bật (Nguy cơ lỗi 43)" : "Disabled (Risk Code 43)";
+        elSpecGsp.className = "spec-value";
+        elSpecGsp.style.color = "var(--accent-amber)";
+      }
     }
 
     // Smart default pre-selections
     if (data.recommendations) {
-      if (typeof data.recommendations.gsp !== 'undefined') elCkGsp.checked = data.recommendations.gsp;
-      if (typeof data.recommendations.drv !== 'undefined') elCkDrv.checked = data.recommendations.drv;
-      if (typeof data.recommendations.efi !== 'undefined') elCkEfi.checked = data.recommendations.efi;
-      if (typeof data.recommendations.task !== 'undefined') elCkTask.checked = data.recommendations.task;
-      if (typeof data.recommendations.fast !== 'undefined') elCkFast.checked = data.recommendations.fast;
-      if (typeof data.recommendations.aspm !== 'undefined') elCkAspm.checked = data.recommendations.aspm;
-      if (typeof data.recommendations.perf !== 'undefined') elCkPerf.checked = data.recommendations.perf;
-      if (typeof data.recommendations.defoff !== 'undefined') elCkDefOff.checked = data.recommendations.defoff;
+      if (elCkGsp && typeof data.recommendations.gsp !== 'undefined') elCkGsp.checked = data.recommendations.gsp;
+      if (elCkDrv && typeof data.recommendations.drv !== 'undefined') elCkDrv.checked = data.recommendations.drv;
+      if (elCkEfi && typeof data.recommendations.efi !== 'undefined') elCkEfi.checked = data.recommendations.efi;
+      if (elCkTask && typeof data.recommendations.task !== 'undefined') elCkTask.checked = data.recommendations.task;
+      if (elCkFast && typeof data.recommendations.fast !== 'undefined') elCkFast.checked = data.recommendations.fast;
+      if (elCkAspm && typeof data.recommendations.aspm !== 'undefined') elCkAspm.checked = data.recommendations.aspm;
+      if (elCkPerf && typeof data.recommendations.perf !== 'undefined') elCkPerf.checked = data.recommendations.perf;
+      if (elCkDefOff && typeof data.recommendations.defoff !== 'undefined') elCkDefOff.checked = data.recommendations.defoff;
     }
 
     // Driver Strategy Radios
@@ -387,33 +427,38 @@
     const stratRadio = document.querySelector(`input[name="driverStrategy"][value="${stratVal}"]`);
     if (stratRadio) stratRadio.checked = true;
 
-    const stratNames = [
-      (currentLang === 'vi' ? 'D├╣ng xong gß╗í ngay (Clean)' : 'Clean Exit'),
-      (currentLang === 'vi' ? 'Tß╗▒ ─æß╗Öng thß╗¡ lß║íi khi lß╗ùi' : 'Auto Retry'),
-      (currentLang === 'vi' ? 'Th╞░ß╗¥ng tr├║ (Resident Guard)' : 'Resident Guard')
-    ];
-    elSpecDriverStrategy.textContent = stratNames[stratVal] || stratNames[0];
+    if (elSpecDriverStrategy) {
+      const stratNames = [
+        (currentLang === 'vi' ? 'Dùng xong gỡ ngay (Clean)' : 'Clean Exit'),
+        (currentLang === 'vi' ? 'Tự động thử lại khi lỗi' : 'Auto Retry'),
+        (currentLang === 'vi' ? 'Thường trú (Resident Guard)' : 'Resident Guard')
+      ];
+      elSpecDriverStrategy.textContent = stratNames[stratVal] || stratNames[0];
+    }
 
-    if (typeof data.autoHard !== 'undefined') elCkAutoHard.checked = data.autoHard;
-    if (typeof data.retryCount !== 'undefined') elNeRetryCnt.value = data.retryCount;
-    if (typeof data.retryInterval !== 'undefined') elNeRetryMin.value = data.retryInterval;
+    if (elCkAutoHard && typeof data.autoHard !== 'undefined') elCkAutoHard.checked = data.autoHard;
+    if (elNeRetryCnt && typeof data.retryCount !== 'undefined') elNeRetryCnt.value = data.retryCount;
+    if (elNeRetryMin && typeof data.retryInterval !== 'undefined') elNeRetryMin.value = data.retryInterval;
 
     // PCIe Link status & gauge
     const isGen2 = data.isGen2 || false;
     if (isGen2) {
       initLaneMatrix(16);
-      elCurrentThroughput.innerHTML = `~6.4 <span class="unit">GB/s</span>`;
-      elGaugeBarFill.style.width = '100%';
+      if (elCurrentThroughput) elCurrentThroughput.innerHTML = `~6.4 <span class="unit">GB/s</span>`;
+      if (elGaugeBarFill) elGaugeBarFill.style.width = '100%';
     } else {
       initLaneMatrix(1);
-      elCurrentThroughput.innerHTML = `250 <span class="unit">MB/s</span>`;
-      elGaugeBarFill.style.width = '4%';
+      if (elCurrentThroughput) elCurrentThroughput.innerHTML = `250 <span class="unit">MB/s</span>`;
+      if (elGaugeBarFill) elGaugeBarFill.style.width = '4%';
     }
   }
 
   // --- API Action Triggers ---
   async function sendAction(url, payload = null, btn = null) {
-    if (btn) btn.disabled = true;
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add('loading');
+    }
     try {
       const res = await fetch(url, {
         method: 'POST',
@@ -422,68 +467,83 @@
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.message || `Lß╗ùi ${res.status}`);
+        throw new Error(data.message || `HTTP ${res.status}`);
       }
     } catch (err) {
-      appendLogLine(`[!] Thao t├íc thß║Ñt bß║íi: ${err.message}`);
+      appendLogLine(`[!] Thao tác thất bại: ${err.message}`);
     } finally {
-      if (btn) btn.disabled = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.classList.remove('loading');
+      }
       fetchStatus();
     }
   }
 
-  // 1. Mß╗ƒ kh├│a Gen2 ngay
-  elBtnUnlockNow.addEventListener('click', () => {
-    appendLogLine("[PCIe] Bß║»t ─æß║ºu k├¡ch hoß║ít mß╗ƒ kh├│a Gen2 ngay lß║¡p tß╗⌐c...");
-    sendAction('/api/unlock-now', null, elBtnUnlockNow);
-  });
+  // 1. Mở khoá Gen2 ngay
+  if (elBtnUnlockNow) {
+    elBtnUnlockNow.addEventListener('click', () => {
+      appendLogLine("[PCIe] Bắt đầu kích hoạt mở khóa Gen2 ngay lập tức...");
+      sendAction('/api/unlock-now', null, elBtnUnlockNow);
+    });
+  }
 
-  // 2. C├ái ─æß║╖t to├án bß╗Ö 1-chß║ím
-  elBtnFullInstall.addEventListener('click', () => {
-    appendLogLine("[INSTALL] Bß║»t ─æß║ºu quy tr├¼nh triß╗ân khai to├án diß╗çn mß╗Öt chß║ím...");
-    sendAction('/api/full-install', null, elBtnFullInstall);
-  });
+  // 2. Cài đặt toàn bộ 1-chạm
+  if (elBtnFullInstall) {
+    elBtnFullInstall.addEventListener('click', () => {
+      appendLogLine("[INSTALL] Bắt đầu quy trình triển khai toàn diện một chạm...");
+      sendAction('/api/full-install', null, elBtnFullInstall);
+    });
+  }
 
-  // 3. Mß╗ƒ kh├│a + C├ái tß╗▒ khß╗ƒi ─æß╗Öng
-  elBtnGen2AndTask.addEventListener('click', () => {
-    appendLogLine("[PCIe] Mß╗ƒ kh├│a v├á ─æ─âng k├╜ t├íc vß╗Ñ tß╗▒ khß╗ƒi ─æß╗Öng...");
-    sendAction('/api/gen2-and-task', null, elBtnGen2AndTask);
-  });
+  // 3. Mở khoá + Cài tự khởi động
+  if (elBtnGen2AndTask) {
+    elBtnGen2AndTask.addEventListener('click', () => {
+      appendLogLine("[PCIe] Mở khoá và đăng ký tác vụ tự khởi động...");
+      sendAction('/api/gen2-and-task', null, elBtnGen2AndTask);
+    });
+  }
 
-  // 4. C├ái ─æß║╖t mß╗Ñc ─æ├ú chß╗ìn
-  elBtnInstallSelected.addEventListener('click', () => {
-    const sel = {
-      gsp: elCkGsp.checked,
-      drv: elCkDrv.checked,
-      efi: elCkEfi.checked,
-      task: elCkTask.checked,
-      fast: elCkFast.checked,
-      aspm: elCkAspm.checked,
-      perf: elCkPerf.checked,
-      defoff: elCkDefOff.checked
-    };
-    appendLogLine("[INSTALL] ├üp dß╗Ñng c├íc mß╗Ñc ─æ├ú chß╗ìn...");
-    sendAction('/api/install', sel, elBtnInstallSelected);
-  });
+  // 4. Cài đặt mục đã chọn
+  if (elBtnInstallSelected) {
+    elBtnInstallSelected.addEventListener('click', () => {
+      const sel = {
+        gsp: elCkGsp ? elCkGsp.checked : true,
+        drv: elCkDrv ? elCkDrv.checked : true,
+        efi: elCkEfi ? elCkEfi.checked : false,
+        task: elCkTask ? elCkTask.checked : true,
+        fast: elCkFast ? elCkFast.checked : false,
+        aspm: elCkAspm ? elCkAspm.checked : false,
+        perf: elCkPerf ? elCkPerf.checked : false,
+        defoff: elCkDefOff ? elCkDefOff.checked : false
+      };
+      appendLogLine("[INSTALL] Áp dụng các mục đã chọn...");
+      sendAction('/api/install', sel, elBtnInstallSelected);
+    });
+  }
 
-  // 5. L╞░u cß║Ñu h├¼nh ch├¡nh s├ích
-  elBtnSavePolicy.addEventListener('click', () => {
-    const stratEl = document.querySelector('input[name="driverStrategy"]:checked');
-    const strat = stratEl ? parseInt(stratEl.value, 10) : 0;
-    const payload = {
-      strategy: strat,
-      autoHard: elCkAutoHard.checked ? 1 : 0,
-      retryCount: parseInt(elNeRetryCnt.value, 10) || 3,
-      retryInterval: parseInt(elNeRetryMin.value, 10) || 5
-    };
-    appendLogLine(`[CONFIG] L╞░u cß║Ñu h├¼nh ch├¡nh s├ích: Chiß║┐n l╞░ß╗úc=${strat}, Stage2=${payload.autoHard}...`);
-    sendAction('/api/save-policy', payload, elBtnSavePolicy);
-  });
+  // 5. Lưu cấu hình chính sách
+  if (elBtnSavePolicy) {
+    elBtnSavePolicy.addEventListener('click', () => {
+      const stratEl = document.querySelector('input[name="driverStrategy"]:checked');
+      const strat = stratEl ? parseInt(stratEl.value, 10) : 0;
+      const payload = {
+        strategy: strat,
+        autoHard: elCkAutoHard && elCkAutoHard.checked ? 1 : 0,
+        retryCount: elNeRetryCnt ? (parseInt(elNeRetryCnt.value, 10) || 3) : 3,
+        retryInterval: elNeRetryMin ? (parseInt(elNeRetryMin.value, 10) || 5) : 5
+      };
+      appendLogLine(`[CONFIG] Lưu cấu hình chính sách: Chiến lược=${strat}, Stage2=${payload.autoHard}...`);
+      sendAction('/api/save-policy', payload, elBtnSavePolicy);
+    });
+  }
 
-  elBtnRefresh.addEventListener('click', () => {
-    appendLogLine("[SYS] Qu├⌐t lß║íi m├┤i tr╞░ß╗¥ng hß╗ç thß╗æng...");
-    fetchStatus();
-  });
+  if (elBtnRefresh) {
+    elBtnRefresh.addEventListener('click', () => {
+      appendLogLine("[SYS] Quét lại môi trường hệ thống...");
+      fetchStatus();
+    });
+  }
 
   // --- Fallback Mock Data ---
   function getMockStatus() {
@@ -498,17 +558,17 @@
       retryCount: 3,
       retryInterval: 5,
       items: [
-        { name: "Chß║┐ ─æß╗Ö Boot", ok: true, note: "UEFI (OK)" },
-        { name: "Secure Boot", ok: true, note: "─É├ú Tß║»t (OK)" },
-        { name: "Card ─æß╗ô hoß║í", ok: true, note: "─É├ú ph├ít hiß╗çn NVIDIA CMP 40HX" },
-        { name: "GSP (EnableGpuFirmware)", ok: true, note: "─É├ú bß║¡t (OK)" },
-        { name: "ESP EFI Mß╗ƒ kho├í", ok: true, note: "\\EFI\\40HX\\40HXUNLK.EFI ─æ├ú nß║íp" },
-        { name: "Mß╗Ñc khß╗ƒi ─æß╗Öng BIOS", ok: true, note: "Tß╗ôn tß║íi v├á nß║▒m ─æß║ºu ti├¬n (displayorder)" },
-        { name: "T├íc vß╗Ñ tß╗▒ khß╗ƒi ─æß╗Öng", ok: true, note: "Trß║íng th├íi: Ready" },
-        { name: "Driver PCIe", ok: true, note: "─É├ú c├ái; Tß╗▒ dß╗ìn dß║╣p sau khi chß║íy (Game safe)" },
-        { name: "Loß║íi trß╗½ Windows Defender", ok: true, note: "─É├ú th├¬m loß║íi trß╗½ cho file .sys" },
-        { name: "Khß╗ƒi ─æß╗Öng nhanh (Fast Startup)", ok: true, note: "─É├ú Tß║»t (OK)" },
-        { name: "Tiß║┐t kiß╗çm ─æiß╗çn PCIe (ASPM)", ok: true, note: "─É├ú Tß║»t (OK)" }
+        { name: "Chế độ Boot", ok: true, note: "UEFI (OK)" },
+        { name: "Secure Boot", ok: true, note: "Đã Tắt (OK)" },
+        { name: "Card đồ hoạ", ok: true, note: "Đã phát hiện NVIDIA CMP 40HX" },
+        { name: "GSP (EnableGpuFirmware)", ok: true, note: "Đã bật (OK)" },
+        { name: "ESP EFI Mở khoá", ok: true, note: "\\EFI\\40HX\\40HXUNLK.EFI đã nạp" },
+        { name: "Mục khởi động BIOS", ok: true, note: "Tồn tại và nằm đầu tiên (displayorder)" },
+        { name: "Tác vụ tự khởi động", ok: true, note: "Trạng thái: Ready" },
+        { name: "Driver PCIe", ok: true, note: "Đã cài; Tự dọn dẹp sau khi chạy (Game safe)" },
+        { name: "Loại trừ Windows Defender", ok: true, note: "Đã thêm loại trừ cho file .sys" },
+        { name: "Khởi động nhanh (Fast Startup)", ok: true, note: "Đã Tắt (OK)" },
+        { name: "Tiết kiệm điện PCIe (ASPM)", ok: true, note: "Đã Tắt (OK)" }
       ],
       recommendations: {
         gsp: false,
