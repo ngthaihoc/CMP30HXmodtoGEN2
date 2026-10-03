@@ -452,7 +452,7 @@ func (st *guiState) applySmartDefaults() {
 }
 
 // printDefErr: Hiển thị lỗi Defender ngắn gọn.
-func (st *guiState) printDefErr(prefix string, err error) {
+func printDefErr(prefix string, err error) {
 	if err == nil {
 		return
 	}
@@ -638,7 +638,7 @@ func runGUI() {
 									fmt.Println("[PCIe] Bước 2/2: Cài đặt tự khởi động khi đăng nhập Windows...")
 									installDrivers()
 									if err := hxcore.AddDefenderExclusions(); err != nil {
-										st.printDefErr("  [Defender] ", err)
+										printDefErr("  [Defender] ", err)
 									} else {
 										fmt.Println("  [Defender] Đã thêm loại trừ cho file driver và ProgramData")
 									}
@@ -687,11 +687,8 @@ func runGUI() {
 	st.mw.Run()
 }
 
-// installSelected: Cài đặt các thành phần và thiết lập đã chọn (thực hiện tuần tự, đưa vào bảng log).
-func (st *guiState) installSelected(sel map[string]bool) {
-	defer st.end()
-	st.sync(func() { st.pbInstall.SetEnabled(false) })
-	defer st.sync(func() { st.pbInstall.SetEnabled(true) })
+// executeInstallSelected: Thực hiện cài đặt các thành phần đã chọn
+func executeInstallSelected(sel map[string]bool) {
 	nameOf := map[string]string{
 		"gsp": "Bật GSP", "drv": "Cài đặt Driver PCIe", "efi": "EFI Mở khoá + Khởi động",
 		"task": "Tự mở khoá khi đăng nhập", "fast": "Tắt Khởi động nhanh", "aspm": "Tắt ASPM",
@@ -720,7 +717,7 @@ func (st *guiState) installSelected(sel map[string]bool) {
 		fmt.Println("──── Cài đặt Driver PCIe + Thêm loại trừ Defender ────")
 		installDrivers()
 		if err := hxcore.AddDefenderExclusions(); err != nil {
-			st.printDefErr("  [Defender] ", err)
+			printDefErr("  [Defender] ", err)
 		} else {
 			fmt.Println("  [Defender] Đã thêm thư mục driver và ProgramData vào danh sách loại trừ")
 		}
@@ -777,11 +774,11 @@ func (st *guiState) installSelected(sel map[string]bool) {
 		fmt.Println("──── Bảo vệ thời gian thực Windows Defender ────")
 		on, err := hxcore.DefenderRealtimeProtectionOn()
 		if err != nil {
-			st.printDefErr("  [!] ", err)
+			printDefErr("  [!] ", err)
 		} else if !on {
 			fmt.Println("  [Defender] Bảo vệ thời gian thực hiện đang Tắt (Không cần thao tác)")
 		} else if err := hxcore.SetDefenderRealtimeProtection(false); err != nil {
-			st.printDefErr("  [!] ", err)
+			printDefErr("  [!] ", err)
 			if !errors.Is(err, hxcore.ErrMpUnavailable) {
 				fmt.Println("  [!] Nguyên nhân thường gặp: Tính năng 'Tamper Protection' đang bật — Vui lòng tắt trong Windows Security rồi thử lại")
 			}
@@ -790,6 +787,14 @@ func (st *guiState) installSelected(sel map[string]bool) {
 			fmt.Println("  [Defender] Bật lại: Chạy PowerShell Admin: Set-MpPreference -DisableRealtimeMonitoring $False")
 		}
 	}
+}
+
+// installSelected: Cài đặt các thành phần và thiết lập đã chọn (thực hiện tuần tự, đưa vào bảng log).
+func (st *guiState) installSelected(sel map[string]bool) {
+	defer st.end()
+	st.sync(func() { st.pbInstall.SetEnabled(false) })
+	defer st.sync(func() { st.pbInstall.SetEnabled(true) })
+	executeInstallSelected(sel)
 	fmt.Println("== Hoàn tất thực hiện, tự động quét lại trạng thái ==")
 	st.scanOnce()
 	st.applySmartDefaults()

@@ -93,10 +93,14 @@ func main() {
 	}
 	// GUI 无窗口版(v1.1): 输出全部镜像到日志(默认 %TEMP%\40HX_installer.log, 可 -log 指定)
 	setupLog("40HX_installer.log")
-	// v2.6.0: 双击(无参数)或 UAC 提权重启(-elevated)默认进入 GUI 管理界面;
-	// 命令行参数(-gen2/-task/-uninstall/-status/-silent/-hard)语义保持不变。
-	if len(os.Args) <= 1 || (len(os.Args) == 2 && os.Args[1] == "-elevated") {
+	// v3.0.0: Mặc định khởi chạy giao diện Web Control Center hiện đại (runWebGUI).
+	// Người dùng có thể chỉ định cờ -gui-classic nếu muốn mở giao diện Win32 cũ (walk).
+	if hasArg("-gui-classic") {
 		runGUI()
+		return
+	}
+	if hasArg("-web") || len(os.Args) <= 1 || (len(os.Args) == 2 && os.Args[1] == "-elevated") {
+		runWebGUI()
 		return
 	}
 	// install/-uninstall 需管理员: 非提升时自动 ShellExecute runas 弹 UAC 重启
@@ -293,7 +297,9 @@ func argIndex(name string) int {
 
 func printHelp() {
 	fmt.Println("Trình Mở Khoá & Kích Hoạt PCIe CMP 40HX / 30HX trên Windows")
-	fmt.Println("  Cách dùng: 40HXInstaller.exe                  # Cài đặt giao diện / toàn bộ (cần Admin)")
+	fmt.Println("  Cách dùng: 40HXInstaller.exe                  # Khởi chạy Modern Web Control Center (mặc định)")
+	fmt.Println("             40HXInstaller.exe -web             # Khởi chạy Modern Web Control Center")
+	fmt.Println("             40HXInstaller.exe -gui-classic     # Khởi chạy giao diện Win32 cổ điển (walk)")
 	fmt.Println("             40HXInstaller.exe -gen2            # Mở khoá Gen2 ngay lập tức")
 	fmt.Println("             40HXInstaller.exe -gen3            # (CMP 30HX) Mở khoá Gen3 ngay lập tức")
 	fmt.Println("             40HXInstaller.exe -force-root-gen2 # (CMP 30HX) Ép Root Port huấn luyện lại Gen2")
