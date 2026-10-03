@@ -12,3 +12,14 @@ Test_Mock_CMP30HX_Linux.sh
 *.zip
 commits.txt
 diff.txt
+
+# Ignore agent-generated .md files everywhere
+*.md
+# Whitelist tracked documentation
+!README*.md
+!CONTEXT.md
+!IDEA.md
+!docs/specs/**
+!docs/agents/**
+!windows-v3.0/*.md
+!windows-v3.0/release/*.md
