@@ -27,9 +27,9 @@ import (
 // ---- 环境扫描(只读; 结果喂 tip 与预勾选, 不展示明细表) ----
 
 type statusItem struct {
-	name string
-	ok   bool
-	note string
+	Name string `json:"name"`
+	Ok   bool   `json:"ok"`
+	Note string `json:"note"`
 }
 
 func scanStatus() []statusItem {
@@ -225,28 +225,28 @@ func (st *guiState) setActionsEnabled(on bool) {
 func (st *guiState) summaryText(items []statusItem) string {
 	m := map[string]statusItem{}
 	for _, it := range items {
-		m[it.name] = it
+		m[it.Name] = it
 	}
-	if it, ok := m["Card đồ hoạ"]; ok && !it.ok {
+	if it, ok := m["Card đồ hoạ"]; ok && !it.Ok {
 		return "⚠ Chưa phát hiện GPU hỗ trợ — Kiểm tra khe cắm & driver trước khi cài đặt"
 	}
 	var warns []string
-	if it, ok := m["Secure Boot"]; ok && !it.ok {
+	if it, ok := m["Secure Boot"]; ok && !it.Ok {
 		warns = append(warns, "Secure Boot đang bật (cần vào BIOS tắt)")
 	}
-	if it, ok := m["Chế độ Boot"]; ok && !it.ok {
+	if it, ok := m["Chế độ Boot"]; ok && !it.Ok {
 		warns = append(warns, "Khởi động Legacy+MBR (cần dùng mbr2gpt chuyển sang GPT)")
 	}
-	if it, ok := m["Driver PCIe (Chưa cài)"]; ok && !it.ok {
+	if it, ok := m["Driver PCIe (Chưa cài)"]; ok && !it.Ok {
 		warns = append(warns, "Driver PCIe chưa được cài đặt")
 	}
-	if it, ok := m["Tác vụ tự khởi động"]; ok && !it.ok {
+	if it, ok := m["Tác vụ tự khởi động"]; ok && !it.Ok {
 		warns = append(warns, "Tác vụ tự khởi động PCIe chưa đăng ký")
 	}
 	// 启动项: 仅 UEFI 下检查
-	if it, ok := m["Mục khởi động BIOS"]; ok && !it.ok {
-		if bl, ok2 := m["Chế độ Boot"]; !ok2 || bl.ok {
-			if strings.Contains(it.note, "chưa đặt") {
+	if it, ok := m["Mục khởi động BIOS"]; ok && !it.Ok {
+		if bl, ok2 := m["Chế độ Boot"]; !ok2 || bl.Ok {
+			if strings.Contains(it.Note, "chưa đặt") {
 				warns = append(warns, "Mục khởi động tồn tại nhưng chưa đặt đầu tiên")
 			} else {
 				warns = append(warns, "Chưa tạo mục khởi động UEFI")
@@ -267,35 +267,35 @@ func (st *guiState) summaryText(items []statusItem) string {
 func (st *guiState) envGuide(items []statusItem) string {
 	m := map[string]statusItem{}
 	for _, it := range items {
-		m[it.name] = it
+		m[it.Name] = it
 	}
 	var g []string
-	if it, ok := m["Card đồ hoạ"]; ok && !it.ok {
+	if it, ok := m["Card đồ hoạ"]; ok && !it.Ok {
 		g = append(g, "· Chưa phát hiện GPU: ① Kiểm tra nguồn phụ & cắm chắc khe PCIe; ② Xem Device Manager có Code 43 không; ③ Tắt CSM trong BIOS (chọn UEFI thuần)")
 	}
-	if it, ok := m["Secure Boot"]; ok && !it.ok {
+	if it, ok := m["Secure Boot"]; ok && !it.Ok {
 		g = append(g, "· Secure Boot đang bật: Khởi động lại bấm Del/F2 vào BIOS → Security/Boot → Secure Boot=Disabled → F10 lưu và khởi động lại")
 	}
-	if it, ok := m["Chế độ Boot"]; ok && !it.ok {
+	if it, ok := m["Chế độ Boot"]; ok && !it.Ok {
 		g = append(g, "· Khởi động Legacy+MBR: Không có phân vùng EFI → Mở CMD Admin chạy: mbr2gpt /validate /allowfullos → mbr2gpt /convert /allowfullos → Vào BIOS tắt CSM")
 	}
-	if it, ok := m["Mục khởi động BIOS"]; ok && !it.ok {
-		if bl, ok2 := m["Chế độ Boot"]; !ok2 || bl.ok {
-			if strings.Contains(it.note, "chưa đặt") {
+	if it, ok := m["Mục khởi động BIOS"]; ok && !it.Ok {
+		if bl, ok2 := m["Chế độ Boot"]; !ok2 || bl.Ok {
+			if strings.Contains(it.Note, "chưa đặt") {
 				g = append(g, "· Mục khởi động chưa ưu tiên: Vào BIOS đặt '40HX Unlock' lên vị trí đầu tiên (Boot Option #1)")
 			} else {
 				g = append(g, "· Chưa tạo mục khởi động: Tích chọn [EFI Mở khoá + Mục khởi động BIOS] để tạo tự động")
 			}
 		}
 	}
-	if it, ok := m["Driver PCIe (Chưa cài)"]; ok && !it.ok {
+	if it, ok := m["Driver PCIe (Chưa cài)"]; ok && !it.Ok {
 		g = append(g, "· Driver PCIe chưa cài: Tích chọn [Cài đặt Driver PCIe + Thêm loại trừ Defender] để cài đặt")
 	}
-	if it, ok := m["Tác vụ tự khởi động"]; ok && !it.ok {
+	if it, ok := m["Tác vụ tự khởi động"]; ok && !it.Ok {
 		g = append(g, "· Tác vụ tự mở khoá chưa đăng ký: Tích chọn [Tự khởi động mở khoá PCIe khi đăng nhập]")
 	}
-	if it, ok := m["ESP EFI Mở khoá"]; ok && !it.ok {
-		if bl, ok2 := m["Chế độ Boot"]; !ok2 || bl.ok {
+	if it, ok := m["ESP EFI Mở khoá"]; ok && !it.Ok {
+		if bl, ok2 := m["Chế độ Boot"]; !ok2 || bl.Ok {
 			g = append(g, "· EFI mở khoá chưa nạp: Tích chọn [EFI Mở khoá + Mục khởi động BIOS] (chỉ dành cho CMP 40HX)")
 		}
 	}
@@ -335,7 +335,7 @@ func (st *guiState) applySmartDefaults() {
 	}
 	flags := map[string]bool{}
 	for _, it := range items {
-		flags[it.name] = it.ok
+		flags[it.Name] = it.Ok
 	}
 	if !flags["Card đồ hoạ"] {
 		fmt.Println("[i] Chưa phát hiện card đồ hoạ hỗ trợ — Giữ nguyên không chọn mục nào (vui lòng kiểm tra GPU/driver)")

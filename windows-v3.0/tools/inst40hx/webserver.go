@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"40hxcore"
@@ -164,30 +165,27 @@ func runWebGUI() {
 
 		flags := make(map[string]bool)
 		for _, it := range items {
-			flags[it.name] = it.ok
+			flags[it.Name] = it.Ok
 		}
 
 		strat := hxcore.DriverStrategy()
 		autoHard := hxcore.ConfigInt("Gen2AutoHard", 1) != 0
 		cnt, interval := hxcore.Gen2RetryPolicy()
 
-		gpuProf, gpuFound := hxcore.FindGPUWithProfile()
+		gpuFound := flags["Card đồ hoạ"]
+		gspActive := flags["GSP (EnableGpuFirmware)"]
+
 		gpuName := "Chưa phát hiện GPU CMP"
-		pciBusId := "Không phát hiện"
-		isGen2 := false
-		if gpuFound {
-			gpuName = gpuProf.Name + " (" + gpuProf.Family + ")"
-			pciBusId = gpuProf.HardwareID
-			isGen2 = gen2Succeeded
-			if !isGen2 {
-				st := hxcore.ReadUnlockStateV2(0, 0)
-				if st.Speed >= 2 || st.TLS >= 2 {
-					isGen2 = true
-				}
-			}
+		pciBusId := "Không khả dụng"
+		if prof, ok := hxcore.FindGPUWithProfile(); ok {
+			gpuName = fmt.Sprintf("%s (%s)", prof.Name, prof.Family)
+			pciBusId = prof.HardwareID
 		}
 
-		gspActive := flags["GSP (EnableGpuFirmware)"]
+		isGen2 := false
+		if gpuFound {
+			isGen2 = gen2Succeeded || flags["Tác vụ tự khởi động"]
+		}
 
 		aspmOK := true
 		if v, ok := flags["Tiết kiệm điện PCIe (ASPM)"]; ok {
@@ -377,10 +375,9 @@ func runWebGUI() {
 }
 
 func openBrowser(url string) {
-	// Try rundll32 url.dll,FileProtocolHandler on Windows
-	cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	cmd := exec.Command("cmd", "/c", "start", "", url)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := cmd.Start(); err != nil {
-		// Fallback to powershell Start-Process
-		exec.Command("powershell", "-NoProfile", "-Command", "Start-Process", url).Start()
+		exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 	}
 }

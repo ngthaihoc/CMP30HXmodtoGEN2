@@ -40,7 +40,7 @@ const (
 	TaskStateQueued   TaskStateString = "Queued"
 	TaskStateReady    TaskStateString = "Ready"
 	TaskStateRunning  TaskStateString = "Running"
-	TaskStateUnknown  TaskStateString = "Đã đăng ký"
+	TaskStateUnknown  TaskStateString = "已注册"
 )
 
 // withService opens the Windows Service Manager, opens the named service,

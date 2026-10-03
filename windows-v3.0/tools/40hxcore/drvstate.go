@@ -36,13 +36,13 @@ const (
 func (s DrvState) String() string {
 	switch s {
 	case DrvZero:
-		return "0 byte (nghi vấn bị diệt virus cách ly)"
+		return "0字节(疑似杀软隔离)"
 	case DrvOk:
 		return "OK"
 	case DrvSizeMismatch:
-		return "Kích thước không khớp file sao lưu"
+		return "大小与备份不一致"
 	default:
-		return "Thiếu file"
+		return "缺失"
 	}
 }
 

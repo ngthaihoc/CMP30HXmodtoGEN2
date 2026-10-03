@@ -137,8 +137,6 @@
   const elSpecGsp = document.getElementById('specGsp');
   const elSpecAnticheat = document.getElementById('specAnticheat');
   const elSpecDriverStrategy = document.getElementById('specDriverStrategy');
-  const elBoostRatio = document.getElementById('boostRatio');
-  const elCurrentSpeedSub = document.getElementById('currentSpeedSub');
 
   const elBtnUnlockNow = document.getElementById('btnUnlockNow');
   const elBtnFullInstall = document.getElementById('btnFullInstall');
@@ -165,22 +163,18 @@
   const elBtnCopyLog = document.getElementById('btnCopyLog');
 
   // --- 16 Physical Lane Matrix Setup ---
-  function initLaneMatrix(activeCount = 0) {
+  function initLaneMatrix(activeCount = 16) {
     if (!elLanePinsGrid) return;
     elLanePinsGrid.innerHTML = '';
     for (let i = 1; i <= 16; i++) {
       const pin = document.createElement('div');
       pin.className = 'lane-pin' + (i <= activeCount ? ' active' : '');
       pin.textContent = i;
-      pin.title = `PCIe Physical Lane #${i}: ${i <= activeCount ? 'Active (Negotiated)' : 'Inactive / Parked'}`;
+      pin.title = `PCIe Physical Lane #${i}: ${i <= activeCount ? 'Active (Negotiated)' : 'Inactive'}`;
       elLanePinsGrid.appendChild(pin);
     }
     if (elLaneSummaryText) {
-      if (activeCount === 0) {
-        elLaneSummaryText.textContent = currentLang === 'vi' ? '0/16 Làn (Chưa phát hiện GPU CMP)' : '0/16 Lanes (No CMP GPU Detected)';
-      } else {
-        elLaneSummaryText.textContent = `${activeCount}/16 Lanes Negotiated`;
-      }
+      elLaneSummaryText.textContent = `${activeCount}/16 Lanes Negotiated`;
     }
   }
 
@@ -357,50 +351,23 @@
     if (data.gpuDetected) {
       elGpuDetectedBadge.textContent = data.gpuName || "CMP 40HX (TU106)";
       elGpuDetectedBadge.className = "badge badge-emerald";
-      elGpuDetectedBadge.style.color = "";
-      if (data.pciBusId) elSpecBusId.textContent = data.pciBusId;
-      elSpecAnticheat.textContent = currentLang === 'vi' ? "Tương thích 100%" : "100% Compatible";
-
-      if (data.gspActive) {
-        elSpecGsp.textContent = currentLang === 'vi' ? "Đã bật (GSP-RM Mode)" : "Enabled (GSP Mode)";
-        elSpecGsp.className = "spec-value highlight-cyan";
-        elSpecGsp.style.color = "";
-      } else {
-        elSpecGsp.textContent = currentLang === 'vi' ? "Chưa bật (Có thể lỗi 43)" : "Disabled (Risk Code 43)";
-        elSpecGsp.className = "spec-value";
-        elSpecGsp.style.color = "var(--accent-amber)";
-      }
-
-      // PCIe Link status & gauge
-      const isGen2 = data.isGen2 || false;
-      if (isGen2) {
-        initLaneMatrix(16);
-        elCurrentThroughput.innerHTML = `~6.4 <span class="unit">GB/s</span>`;
-        if (elCurrentSpeedSub) elCurrentSpeedSub.textContent = "Gen2 x16 @ 5.0 GT/s";
-        elGaugeBarFill.style.width = '100%';
-        if (elBoostRatio) elBoostRatio.textContent = "~25.6x BOOST";
-      } else {
-        initLaneMatrix(1);
-        elCurrentThroughput.innerHTML = `250 <span class="unit">MB/s</span>`;
-        if (elCurrentSpeedSub) elCurrentSpeedSub.textContent = "Gen1 x1 @ 2.5 GT/s (Khóa)";
-        elGaugeBarFill.style.width = '4%';
-        if (elBoostRatio) elBoostRatio.textContent = "1.0x (Khoá eFuse)";
-      }
     } else {
-      elGpuDetectedBadge.textContent = currentLang === 'vi' ? "Chưa phát hiện GPU CMP" : "No CMP GPU Detected";
+      elGpuDetectedBadge.textContent = currentLang === 'vi' ? "Chưa phát hiện GPU" : "No GPU Detected";
       elGpuDetectedBadge.className = "badge";
       elGpuDetectedBadge.style.color = "var(--accent-crimson)";
-      elSpecBusId.textContent = currentLang === 'vi' ? "Không phát hiện" : "Not Found";
-      elSpecGsp.textContent = "N/A";
-      elSpecGsp.className = "spec-value";
-      elSpecGsp.style.color = "var(--text-muted)";
-      elSpecAnticheat.textContent = "N/A";
+    }
 
-      initLaneMatrix(0);
-      elCurrentThroughput.innerHTML = `0 <span class="unit">MB/s</span>`;
-      if (elCurrentSpeedSub) elCurrentSpeedSub.textContent = currentLang === 'vi' ? "Không phát hiện GPU CMP" : "No CMP GPU";
-      elGaugeBarFill.style.width = '0%';
-      if (elBoostRatio) elBoostRatio.textContent = "-- BOOST";
+    if (data.pciBusId) {
+      elSpecBusId.textContent = data.pciBusId;
+    }
+
+    if (data.gspActive) {
+      elSpecGsp.textContent = currentLang === 'vi' ? "Đã bật (GSP-RM Mode)" : "Enabled (GSP Mode)";
+      elSpecGsp.className = "spec-value highlight-cyan";
+    } else {
+      elSpecGsp.textContent = currentLang === 'vi' ? "Chưa bật (Có thể lỗi 43)" : "Disabled (Risk Code 43)";
+      elSpecGsp.className = "spec-value";
+      elSpecGsp.style.color = "var(--accent-amber)";
     }
 
     // Smart default pre-selections
@@ -430,6 +397,18 @@
     if (typeof data.autoHard !== 'undefined') elCkAutoHard.checked = data.autoHard;
     if (typeof data.retryCount !== 'undefined') elNeRetryCnt.value = data.retryCount;
     if (typeof data.retryInterval !== 'undefined') elNeRetryMin.value = data.retryInterval;
+
+    // PCIe Link status & gauge
+    const isGen2 = data.isGen2 || false;
+    if (isGen2) {
+      initLaneMatrix(16);
+      elCurrentThroughput.innerHTML = `~6.4 <span class="unit">GB/s</span>`;
+      elGaugeBarFill.style.width = '100%';
+    } else {
+      initLaneMatrix(1);
+      elCurrentThroughput.innerHTML = `250 <span class="unit">MB/s</span>`;
+      elGaugeBarFill.style.width = '4%';
+    }
   }
 
   // --- API Action Triggers ---
@@ -509,11 +488,11 @@
   // --- Fallback Mock Data ---
   function getMockStatus() {
     return {
-      gpuDetected: false,
-      gpuName: currentLang === 'vi' ? "Chưa phát hiện GPU CMP" : "No CMP GPU Detected",
-      pciBusId: currentLang === 'vi' ? "Không phát hiện" : "Not Found",
-      gspActive: false,
-      isGen2: false,
+      gpuDetected: true,
+      gpuName: "CMP 40HX (Turing TU106)",
+      pciBusId: "VEN_10DE & DEV_1F0B",
+      gspActive: true,
+      isGen2: true,
       driverStrategy: 0,
       autoHard: true,
       retryCount: 3,
@@ -521,12 +500,13 @@
       items: [
         { name: "Chế độ Boot", ok: true, note: "UEFI (OK)" },
         { name: "Secure Boot", ok: true, note: "Đã Tắt (OK)" },
-        { name: "Card đồ hoạ", ok: false, note: "Chưa phát hiện card CMP 40HX hoặc CMP 30HX" },
-        { name: "GSP (EnableGpuFirmware)", ok: false, note: "Chưa nạp hoặc chưa cần thiết" },
-        { name: "ESP EFI Mở khoá", ok: false, note: "Chưa triển khai" },
-        { name: "Mục khởi động BIOS", ok: false, note: "Chưa tạo" },
-        { name: "Tác vụ tự khởi động", ok: false, note: "Chưa đăng ký" },
-        { name: "Driver PCIe", ok: false, note: "Chưa cài đặt" },
+        { name: "Card đồ hoạ", ok: true, note: "Đã phát hiện NVIDIA CMP 40HX" },
+        { name: "GSP (EnableGpuFirmware)", ok: true, note: "Đã bật (OK)" },
+        { name: "ESP EFI Mở khoá", ok: true, note: "\\EFI\\40HX\\40HXUNLK.EFI đã nạp" },
+        { name: "Mục khởi động BIOS", ok: true, note: "Tồn tại và nằm đầu tiên (displayorder)" },
+        { name: "Tác vụ tự khởi động", ok: true, note: "Trạng thái: Ready" },
+        { name: "Driver PCIe", ok: true, note: "Đã cài; Tự dọn dẹp sau khi chạy (Game safe)" },
+        { name: "Loại trừ Windows Defender", ok: true, note: "Đã thêm loại trừ cho file .sys" },
         { name: "Khởi động nhanh (Fast Startup)", ok: true, note: "Đã Tắt (OK)" },
         { name: "Tiết kiệm điện PCIe (ASPM)", ok: true, note: "Đã Tắt (OK)" }
       ],
@@ -544,7 +524,7 @@
   }
 
   // --- Initialization ---
-  initLaneMatrix(0);
+  initLaneMatrix(16);
   initLogStream();
   fetchStatus();
 

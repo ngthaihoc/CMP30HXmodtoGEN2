@@ -17,58 +17,64 @@ import (
 func AnalyzeEfiLog() string {
 	esp := MountESP()
 	if esp == "" {
-		return "  [Nhật ký EFI] Không thể gắn phân vùng ESP (cần quyền Admin) — Không đọc được nhật ký mở khoá"
+		return "  [EFI日志] 无法挂载 ESP(需管理员) — 无法读取解锁日志"
 	}
 	defer UnmountESP(esp)
+	// v3.0.0: 先确认解锁 EFI 本体是否还在 —— 卸载 EFI 后 ESP 根目录的
+	// 40hx_log.txt 是历史残留, 不能再拿去套"booter 失败/换槽/Above4G"这类
+	// 分析(会给没装 EFI 的用户派无关引导, 社区实机踩过)。
 	efiPath := esp + `:\EFI\40HX\40HXUNLK.EFI`
 	_, efiErr := os.Stat(efiPath)
 	p := esp + ":\\40hx_log.txt"
 	data, err := os.ReadFile(p)
 	if err != nil {
 		if efiErr != nil {
-			return "  [Nhật ký EFI] EFI mở khoá chưa cài đặt / đã gỡ bỏ (trên ESP không có \\EFI\\40HX\\40HXUNLK.EFI, cũng không có 40hx_log.txt)\n  Hiệu năng giữ khoá là bình thường; Để mở khoá hiệu năng: Mở 40HXInstaller.exe chọn [Cài đặt EFI hiệu năng + Mục khởi động firmware]"
+			return "  [EFI日志] 解锁 EFI 未部署/已卸载(ESP 上无 \\EFI\\40HX\\40HXUNLK.EFI, 也无 40hx_log.txt)\n  算力保持锁定属预期; 想解锁算力: 40HXInstaller.exe 勾选[算力 EFI 部署+固件启动项]安装"
 		}
-		return "  [Nhật ký EFI] Trên ESP không có 40hx_log.txt — EFI có thể chưa từng được thực thi\n  Vui lòng vào BIOS: Đặt '40HX Unlock' làm mục khởi động đầu tiên hoặc tắt Secure Boot"
+		return "  [EFI日志] ESP 上无 40hx_log.txt — EFI 可能没执行\n  请进 BIOS: 将 '40HX Unlock' 置为第一启动项 或 关 Secure Boot"
 	}
 	if efiErr != nil {
-		return "  [Nhật ký EFI] Lưu ý: 40hx_log.txt tại gốc ESP là dữ liệu cũ còn sót lại — EFI mở khoá không còn tồn tại\n  Nhật ký cũ không đại diện cho trạng thái hiện tại; Muốn khôi phục hãy cài lại [Cài đặt EFI hiệu năng + Mục khởi động firmware]"
+		return "  [EFI日志] 注: ESP 根目录的 40hx_log.txt 是历史残留 — 解锁 EFI 已不在(已卸载/未安装)\n  旧日志不代表当前状态; 算力锁定属预期, 想恢复请重装[算力 EFI 部署+固件启动项]"
 	}
 	low := strings.ToLower(string(data))
 	hit := func(s string) bool { return strings.Contains(low, strings.ToLower(s)) }
 
+	// 解锁成功标志优先 (注意: "SEC2 unlocked" 仅指核可注入, 非算力解锁!
+	// 必须匹配算力解锁特征 "*** UNLOCKED ***" 或 SS0 实际值)
 	if hit("*** unlocked ***") || hit("already unlocked (ss0/ss1 exact)") {
-		return "  [Nhật ký EFI] Quá trình mở khoá EFI thực tế ĐÃ THÀNH CÔNG — Trạng thái bị driver ghi đè\n  Vui lòng chạy lại bộ cài (thiết lập lại GSP) rồi khởi động lại, hoặc dùng phiên bản driver tương thích"
+		return "  [EFI日志] 解锁链实际已 UNLOCKED — 是驱动层覆盖了状态\n  请重跑一次安装器(重设 GSP)后重启, 或换回作者实测驱动版本"
 	}
-	// Lỗi A: Không truy cập được DMA >4GB (Chưa bật Above 4G)
+	// 失败模式 A: DMA 够不到 >4GB (Above 4G 未开)
 	if hit("wpr2 not up") || (hit("imem[0]=0xffffffff") && hit("fwsec40")) {
-		r := "  [Nhật ký EFI] Không bật được WPR2 + Đọc DMA trả về toàn F\n"
-		r += "  → GPU không truy cập được vùng nhớ >4GB chứa payload mở khoá. Đây là do cài đặt BIOS, vui lòng kiểm tra:\n"
-		r += "  1. Above 4G Decoding / Giải mã trên 4G → Enabled ← Nguyên nhân phổ biến nhất!\n"
-		r += "  2. Resizable BAR / Re-BAR → Auto/Enabled (nếu có tuỳ chọn)\n"
-		r += "  3. Chuyển card sang khe PCIe x16 đầu tiên (kết nối trực tiếp CPU)\n"
-		r += "  4. Fast Boot trong BIOS → Disabled\n"
-		r += "  (Bo mạch X99: Tìm Above 4G trong mục Advanced/PCI Subsystem)"
+		r := "  [EFI日志] WPR2 拉不起 + DMA 读返回全F\n"
+		r += "  → GPU 访问不到 >4GB 解锁载荷。这是 BIOS 设置问题, 请逐项检查:\n"
+		r += "  1. Above 4G Decoding / 4G以上解码 → Enabled ← 最常见!\n"
+		r += "  2. Resizable BAR / 大BAR → Auto/Enabled (若选项存在)\n"
+		r += "  3. 40HX 换到第一个 PCIe x16 槽(CPU直连)\n"
+		r += "  4. Fast Boot → Disabled\n"
+		r += "  (X99: Advanced/PCI Subsystem 里找 Above 4G)"
 		return r
 	}
-	// Lỗi B: booter HALT
+	// 失败模式 B: booter HALT 且最终未解锁 (成功日志也有 attempt not-OK 但会续试成功)
 	if hit("final]: plm=") && hit("ss0=0x00000000") && (hit("halted") || hit("not-ok")) {
-		r := "  [Nhật ký EFI] Inject booter thất bại (nhiều lần HALT, SS0 cuối cùng vẫn là 0)\n"
-		r += "  → Vấn đề thời gian khởi động hoặc khe cắm phụ/cắm qua chip cầu PLX, vui lòng kiểm tra:\n"
-		r += "  1. Chuyển card sang khe PCIe x16 đầu tiên (tránh qua chip cầu PLX)\n"
+		r := "  [EFI日志] booter 注入失败(多次 HALT, 最终 SS0 仍为 0)\n"
+		r += "  → 双卡/非第一槽时序问题, 请逐项检查:\n"
+		r += "  1. 40HX 换到第一个 PCIe x16 槽(避开 PLX/桥接)\n"
 		r += "  2. Above 4G Decoding → Enabled\n"
 		r += "  3. Fast Boot → Disabled\n"
-		r += "  4. Nếu chạy nhiều GPU: Tạm thời tháo các card khác, chỉ giữ lại card CMP để kiểm tra"
+		r += "  4. 若为多卡: 暂时拔掉其它卡只留 40HX 测一次"
 		return r
 	}
-	// Lỗi C: EFI không tìm thấy card
+	// 失败模式 C (v3.0): EFI 找不到卡 — 旧版只扫 bus 0-7/0-16, AGESA/桥接
+	// 板把独显编到高总线 (微星 B450 实测 bus 0x10=16) 时必然 miss。
 	if hit("gpu not found; abort") || hit("not found (both encodings)") {
-		r := "  [Nhật ký EFI] EFI không tìm thấy card: Thường do số hiệu Bus PCI nằm ngoài phạm vi quét cũ\n"
-		r += "  (Các dòng bo mạch AGESA / MSI B450 thường đánh số GPU rời vào bus ≥ 16, hoặc qua cầu PLX)\n"
-		r += "  → Vui lòng dùng bộ cài v3.0 cài lại EFI mở khoá (đã hỗ trợ quét toàn bộ 256 bus CF8),\n"
-		r += "    sau đó tắt nguồn hẳn rồi bật lại máy"
+		r := "  [EFI日志] EFI 找不到卡: 多为 PCI 总线编号超出旧版扫描范围\n"
+		r += "  (AGESA/微星 B450 等板型把独显编到 bus≥16, 或走 PLX/多级桥接)\n"
+		r += "  → 请用 v3.0 安装器重装解锁 EFI (已支持 CF8 全 256 总线扫描) 后\n"
+		r += "    完全关机再开机一次; 仍失败请把本日志全文贴回 issue"
 		return r
 	}
-	// Lỗi không xác định: Trích xuất dòng chính
+	// 未知失败: 摘录关键行给用户贴
 	var key []string
 	for _, ln := range strings.Split(string(data), "\n") {
 		l := strings.ToLower(ln)
@@ -81,5 +87,5 @@ func AnalyzeEfiLog() string {
 			}
 		}
 	}
-	return "  [Nhật ký EFI] Chưa tự động phân loại, các dòng đáng chú ý:\n  " + strings.Join(key, "\n  ")
+	return "  [EFI日志] 未能自动归类, 关键行:\n  " + strings.Join(key, "\n  ")
 }

@@ -144,12 +144,12 @@ func GspDiag() (string, string, int64) {
 				}
 			}
 		}
-		return "", "(Không khớp card CMP 40HX / 30HX! Các subkey thực tế: " + sb.String() + ")", -1
+		return "", "(无 40HX 匹配! 实际子键: " + sb.String() + ")", -1
 	}
 	sub := key[strings.LastIndex(key, `\`)+1:]
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, key, registry.QUERY_VALUE)
 	if err != nil {
-		return sub, "(Đọc thất bại)", -1
+		return sub, "(读取失败)", -1
 	}
 	defer k.Close()
 	adapter, _, _ := k.GetStringValue(GpuAdapterStr)

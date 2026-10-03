@@ -55,6 +55,12 @@ for %%a in (%*) do (
     if /i "%%~a"=="/fix-nvcpl" set "DO_FIX_NVCPL=1"
     if /i "%%~a"=="-fixnvcpl" set "DO_FIX_NVCPL=1"
     if /i "%%~a"=="/fixnvcpl" set "DO_FIX_NVCPL=1"
+    if /i "%%~a"=="-ui" set "DO_OPEN_UI=1"
+    if /i "%%~a"=="/ui" set "DO_OPEN_UI=1"
+    if /i "%%~a"=="-web" set "DO_OPEN_UI=1"
+    if /i "%%~a"=="/web" set "DO_OPEN_UI=1"
+    if /i "%%~a"=="-gui" set "DO_OPEN_UI=1"
+    if /i "%%~a"=="/gui" set "DO_OPEN_UI=1"
 )
 
 set "HAS_CLI_FLAG=0"
@@ -105,6 +111,7 @@ if "%IS_ADMIN%"=="0" (
 
 cd /d "%~dp0"
 
+if "%DO_OPEN_UI%"=="1" goto :open_web_ui
 if "%DO_CLEAN_TASKS%"=="1" goto :clean_tasks
 if "%DO_UNINSTALL%"=="1" goto :uninstall
 if "%DO_FIX_NVCPL%"=="1" goto :FixNvidiaControlPanel
@@ -126,23 +133,42 @@ echo       - Mo khoa Gen2 x16 [5.0 GT/s], toi uu DEVCTL MRRS 512B
 echo       - TU DONG tich hop toi uu Riot Games (Valorant/LMHT)
 echo       - Don dep sach driver BYOVD tranh loi VAN 1067
 echo.
-echo   [2] Go bo cai dat (Tu dong xoa Scheduled Task va Don dep)
+echo   [2] Mo giao dien dieu khien Control Center (Web UI Dashboard)
+echo       - Truc quan hoa 16 lan PCIe, bang thong thoi gian thuc tren trinh duyet
+echo       - Quan ly chien luoc driver, cai dat thanh phan tuy chon
+echo.
+echo   [3] Go bo cai dat (Tu dong xoa Scheduled Task va Don dep)
 echo       - Tu dong xoa sach Scheduled Task, Registry Run key cua script
 echo       - Go bo hoan toan khoi he thong
 echo.
-echo   [3] Khoi phuc va Sua loi mat NVIDIA Control Panel
+echo   [4] Khoi phuc va Sua loi mat NVIDIA Control Panel
 echo       - Dat lai service NVDisplay.ContainerLocalSystem ve tu dong [Auto] va khoi dong
 echo       - Phuc hoi dang ky Desktop Context Menu handler
 echo.
-echo   [4] Thoat
+echo   [5] Thoat
 echo.
 echo ================================================================
-%SystemRoot%\System32\choice.exe /c 1234 /t 8 /d 1 /m "Nhap lua chon cua ban [1-4] (Tu dong chon [1] sau 8 giay): "
-if errorlevel 4 exit /b 0
-if errorlevel 3 goto :FixNvidiaControlPanel
-if errorlevel 2 goto :clean_tasks
+%SystemRoot%\System32\choice.exe /c 12345 /t 10 /d 1 /m "Nhap lua chon cua ban [1-5] (Tu dong chon [1] sau 10 giay): "
+if errorlevel 5 exit /b 0
+if errorlevel 4 goto :FixNvidiaControlPanel
+if errorlevel 3 goto :clean_tasks
+if errorlevel 2 goto :open_web_ui
 if errorlevel 1 goto :start_aio
 goto :start_aio
+
+:open_web_ui
+echo.
+echo ================================================================
+echo [✓] Dang khoi chay CMP Control Center (Web UI Dashboard)...
+echo ================================================================
+if exist "%~dp0windows-v3.0\release\40HXInstaller.exe" (
+    start "" "%~dp0windows-v3.0\release\40HXInstaller.exe" -web
+    echo Da khoi chay Control Center tren trinh duyet.
+) else (
+    echo [!] Khong tim thay file windows-v3.0\release\40HXInstaller.exe
+)
+timeout /t 3 >nul
+exit /b 0
 
 :: ================================================================
 :: 4. DIEU PHOI TIEN TRINH CHINH (MAIN ORCHESTRATION PIPELINE)

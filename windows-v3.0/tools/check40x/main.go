@@ -347,7 +347,7 @@ func drvLogEvidence() (bool, string) {
 	if gs := hxcore.ReadGen2Status(); gs != "" {
 		for _, ln := range strings.Split(gs, "\n") {
 			t := strings.TrimSpace(ln)
-			if strings.Contains(t, "Gen2") || strings.Contains(t, "Gen3") || strings.Contains(t, "无需操作") || strings.Contains(t, "ACHIEVED") {
+			if strings.Contains(t, "Gen2") || strings.Contains(t, "Gen3") || strings.Contains(t, "无需操作") || strings.Contains(t, "không cần thao tác") || strings.Contains(t, "ACHIEVED") {
 				parts = append(parts, "Lịch sử tác vụ: "+t)
 				break
 			}
@@ -357,10 +357,10 @@ func drvLogEvidence() (bool, string) {
 	logPath := filepath.Join(os.TempDir(), "40HX_installer.log")
 	if b, err := os.ReadFile(logPath); err == nil {
 		s := string(b)
-		if strings.Contains(s, "GEN2 ACHIEVED") || strings.Contains(s, "GEN3 ACHIEVED") || strings.Contains(s, "BAR0 校验通过") {
+		if strings.Contains(s, "GEN2 ACHIEVED") || strings.Contains(s, "GEN3 ACHIEVED") || strings.Contains(s, "BAR0 校验通过") || strings.Contains(s, "xác minh BAR0 thành công") {
 			parts = append(parts, "installer.log: Driver từng nạp thành công và đạt tốc độ cao")
 		}
-		if strings.Contains(s, "启动服务") && strings.Contains(s, "失败") {
+		if (strings.Contains(s, "启动服务") && strings.Contains(s, "失败")) || (strings.Contains(s, "khởi động dịch vụ") && strings.Contains(s, "thất bại")) {
 			parts = append(parts, "installer.log: Từng xuất hiện lỗi khởi động driver (có thể do diệt virus/tồn đọng 1072)")
 		}
 	}

@@ -105,24 +105,25 @@ func TestSigningOn() bool {
 	return false
 }
 
-// SetTestsigning: Bật test signing và đọc lại xác minh.
+// SetTestsigning: 开启测试签名并读回验证。返回 (最终是否开启, 错误说明)。
 func SetTestsigning() (bool, string) {
 	out, err := RunOut("bcdedit.exe", "/set", "testsigning", "on")
 	if err != nil {
-		return false, fmt.Sprintf("bcdedit /set testsigning on thất bại: %v\n%s", err, strings.TrimSpace(out))
+		return false, fmt.Sprintf("bcdedit /set testsigning on 失败: %v\n%s", err, strings.TrimSpace(out))
 	}
 	if TestSigningOn() {
 		return true, ""
 	}
-	return false, "bcdedit báo thành công nhưng đọc lại vẫn là No\nNguyên nhân có thể: Secure Boot đang bật ngăn testsigning có hiệu lực\nVui lòng vào BIOS tắt Secure Boot rồi thử lại"
+	return false, "bcdedit 返回成功但读回仍为 No\n可能原因: Secure Boot 开启时 testsigning 无法生效\n请进 BIOS 关闭 Secure Boot 后重试"
 }
 
-// MountESP: Gắn phân vùng ESP vào ký tự ổ đĩa trống, trả về ký tự (ví dụ 'S') hoặc ''.
+// MountESP: 挂 ESP 到空闲盘符, 返回盘符字母(如 "S")或 ""。
+// 非管理员下 mountvol /S 失败 → 返回空(安全, 不弹 UAC)。
 func MountESP() string {
 	for _, c := range []string{"Y", "X", "W", "V", "U", "T", "S"} {
 		letter := c + ":"
 		out, _ := RunOut("mountvol.exe", letter, "/S")
-		if strings.Contains(out, "错误") || strings.Contains(out, "error") || strings.Contains(out, "denied") {
+		if strings.Contains(out, "错误") || strings.Contains(out, "denied") {
 			continue
 		}
 		if _, err := os.Stat(letter + "\\EFI"); err == nil {
