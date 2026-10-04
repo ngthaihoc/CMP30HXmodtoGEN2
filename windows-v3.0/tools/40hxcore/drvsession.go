@@ -18,6 +18,7 @@ var (
 	openThrottleStop         = func() (syscall.Handle, error) { return OpenThrottleStop() }
 	driverCloseHandle        = CloseHandle
 	isThrottleStopAppRunning = ThrottleStopAppRunning
+	driverStrategyGetter     = DriverStrategy
 )
 
 // ThrottleStopAppRunning kiểm tra xem phần mềm ThrottleStop.exe của người dùng có đang chạy không
@@ -80,7 +81,7 @@ func EnsureDriverLoaded(svcName, fileName string) error {
 // CleanupByovd dừng và xoá dịch vụ driver BYOVD cùng file .sys trong System32
 // nhằm đảm bảo an toàn tuyệt đối trước các hệ thống Anti-Cheat
 func CleanupByovd() {
-	if DriverStrategy() == DriverStrategyResident {
+	if driverStrategyGetter() == DriverStrategyResident {
 		return
 	}
 	appRunning := isThrottleStopAppRunning()

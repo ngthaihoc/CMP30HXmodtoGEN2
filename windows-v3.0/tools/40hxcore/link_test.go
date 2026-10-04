@@ -402,3 +402,45 @@ func TestLinkNegotiator_RootLinkDisable_Sequencing(t *testing.T) {
 		t.Fatalf("violation: MMIO shadow registers NOT re-injected after root link was re-enabled (bit 4=0)")
 	}
 }
+
+func TestLinkNegotiator_EnsuresMemorySpaceEnable(t *testing.T) {
+	bus := NewMockHardwareBus()
+	bdf := uint32(0x0100)
+	prof := GPUProfile{
+		Name:            "CMP 30HX",
+		VendorID:        0x10DE,
+		DeviceID:        0x2189,
+		Family:          "TU116",
+		RequiresMMIO:    true,
+		MaxSupportedGen: 2,
+	}
+
+	bus.SetPCIConfig(bdf, 0x00, 0x218910DE)
+	// Đặt Command register (0x04) = 0x0000 (MSE và BME đều tắt)
+	bus.SetPCIConfig(bdf, 0x04, 0x00000000)
+	bus.SetPCICap(bdf, 0x40)
+	bus.SetPCIConfig(bdf, 0x10, 0xDE000000) // BAR0 = 0xDE000000
+	bus.SetPCIConfig(bdf, 0x40+0x0C, 0x00000001) // LNKCAP Gen1
+	bus.SetPCIConfig(bdf, 0x40+0x10, 0x00000000) // LNKCTL
+	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000011) // LNKSTA Gen1 x16
+	bus.SetPCIConfig(bdf, 0x40+0x30, 0x00000001) // LNKCTL2 TLS=1
+
+	bus.SetMMIO(0xDE000000, 0x16800000) // BOOT_0 TU116
+
+	negotiator := NewLinkNegotiator(bus)
+	res, err := negotiator.Negotiate(bdf, prof, 0xFFFFFFFF, 2, false)
+	if err != nil {
+		t.Fatalf("Negotiate failed: %v", err)
+	}
+
+	// Xác nhận thanh ghi PCI Command 0x04 đã được bật bit 1 (MSE 0x02) và bit 2 (BME 0x04)
+	cmdVal, _ := bus.ReadPCIConfig(bdf, 0x04)
+	if (cmdVal & 0x06) != 0x06 {
+		t.Errorf("expected PCI Command register (0x04) to have MSE and BME set (0x06), got 0x%04X", cmdVal)
+	}
+
+	if res.TargetTLS < 2 {
+		t.Errorf("expected TargetTLS to be at least Gen2, got Gen%d", res.TargetTLS)
+	}
+}
+

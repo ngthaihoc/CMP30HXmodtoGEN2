@@ -134,15 +134,46 @@ echo   [3] Khoi phuc va Sua loi mat NVIDIA Control Panel
 echo       - Dat lai service NVDisplay.ContainerLocalSystem ve tu dong [Auto] va khoi dong
 echo       - Phuc hoi dang ky Desktop Context Menu handler
 echo.
-echo   [4] Thoat
+echo   [4] Toi uu Riot Games & Game Unity (LoL DX11 Borderless, Valorant, Unity D3D12)
+echo       - Chay cong cu UnlockRiotGame va cau hinh D3D12 cho Unity engine
+echo.
+echo   [5] Thoat
 echo.
 echo ================================================================
-%SystemRoot%\System32\choice.exe /c 1234 /t 8 /d 1 /m "Nhap lua chon cua ban [1-4] (Tu dong chon [1] sau 8 giay): "
-if errorlevel 4 exit /b 0
+%SystemRoot%\System32\choice.exe /c 12345 /t 8 /d 1 /m "Nhap lua chon cua ban [1-5] (Tu dong chon [1] sau 8 giay): "
+if errorlevel 5 exit /b 0
+if errorlevel 4 goto :OptimizeRiotAndUnity
 if errorlevel 3 goto :FixNvidiaControlPanel
 if errorlevel 2 goto :clean_tasks
 if errorlevel 1 goto :start_aio
 goto :start_aio
+
+:OptimizeRiotAndUnity
+cls
+echo ================================================================
+echo    TOI UU RIOT GAMES [VALORANT, LMHT DX11] VA GAME UNITY
+echo ================================================================
+echo.
+echo [*] Dang thuc thi cau hinh GPU High Performance va Borderless Windowed...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Set-GpuPreference.ps1"
+echo.
+echo [*] Dang quet va cau hinh Direct3D 12 (-force-d3d12) cho Game Unity...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Set-UnityD3D12.ps1"
+echo.
+echo [*] Khoi chay cong cu UnlockRiotGame...
+if exist "%~dp0windows-v3.0\release\UnlockRiotGame.exe" (
+    start "" "%~dp0windows-v3.0\release\UnlockRiotGame.exe"
+) else if exist "%ProgramFiles%\40HXUnlock\UnlockRiotGame.exe" (
+    start "" "%ProgramFiles%\40HXUnlock\UnlockRiotGame.exe"
+) else if exist "%~dp0release\UnlockRiotGame.exe" (
+    start "" "%~dp0release\UnlockRiotGame.exe"
+) else (
+    echo [!] Khong tim thay UnlockRiotGame.exe.
+)
+echo.
+echo [V] Hoan tat! Nhan phim bat ky de quay lai menu...
+pause >nul
+goto :aio_menu
 
 :: ================================================================
 :: 4. DIEU PHOI TIEN TRINH CHINH (MAIN ORCHESTRATION PIPELINE)
@@ -256,15 +287,26 @@ if exist "%~dp0windows-v3.0\release\40HXCheck.exe" (
     set "SRC_CHECK=%~dp040HXCheck.exe"
 )
 
+set "SRC_RIOT="
+if exist "%~dp0windows-v3.0\release\UnlockRiotGame.exe" (
+    set "SRC_RIOT=%~dp0windows-v3.0\release\UnlockRiotGame.exe"
+) else if exist "%~dp0release\UnlockRiotGame.exe" (
+    set "SRC_RIOT=%~dp0release\UnlockRiotGame.exe"
+) else if exist "%~dp0UnlockRiotGame.exe" (
+    set "SRC_RIOT=%~dp0UnlockRiotGame.exe"
+)
+
 echo [*] Tim thay bo cai nguon: "%SRC_INSTALLER%"
 
 set "TARGET_DIR=%ProgramFiles%\40HXUnlock"
 set "TARGET_INSTALLER=%TARGET_DIR%\40HXInstaller.exe"
 set "TARGET_CHECK=%TARGET_DIR%\40HXCheck.exe"
+set "TARGET_RIOT=%TARGET_DIR%\UnlockRiotGame.exe"
 
 if not exist "%TARGET_DIR%" mkdir "%TARGET_DIR%" >nul 2>&1
 copy /y "%SRC_INSTALLER%" "%TARGET_INSTALLER%" >nul 2>&1
 if defined SRC_CHECK copy /y "%SRC_CHECK%" "%TARGET_CHECK%" >nul 2>&1
+if defined SRC_RIOT copy /y "%SRC_RIOT%" "%TARGET_RIOT%" >nul 2>&1
 
 set "SRC_DRV="
 if exist "%~dp0windows-v3.0\release\gen2\drivers" (
@@ -428,7 +470,8 @@ if not errorlevel 1 set "TASK_OK=1"
 if "%TASK_OK%"=="1" schtasks /query /tn "CMP30HX_Gen2_Unlock" >nul 2>&1 || set "TASK_OK=0"
 
 if "%TASK_OK%"=="0" (
-    schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "%comspec% /c \"%FINAL_RUNNER%\"" /sc onstart /delay 0000:15 /rl highest /ru "NT AUTHORITY\SYSTEM" /f >nul 2>&1
+    schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "%comspec% /c \"%FINAL_RUNNER%\"" /sc onstart /delay 0000:45 /rl highest /ru "NT AUTHORITY\SYSTEM" /f >nul 2>&1
+    schtasks /create /tn "CMP30HX_Gen2_Unlock_User" /tr "%comspec% /c \"%FINAL_RUNNER%\"" /sc onlogon /delay 0000:10 /rl highest /ru "NT AUTHORITY\SYSTEM" /f >nul 2>&1
     if not errorlevel 1 set "TASK_OK=1"
 )
 
@@ -438,8 +481,8 @@ reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "40HXGen2" /t RE
 
 if "%TASK_OK%"=="1" (
     echo       [OK] Scheduled Task SYSTEM da duoc kich hoat thanh cong.
-    echo           - Kich hoat khi he thong khoi dong [AtStartup: delay 15 giay].
-    echo           - Kich hoat khi nguoi dung dang nhap [AtLogOn: delay 5 giay].
+    echo           - Kich hoat khi he thong khoi dong [AtStartup: delay 45 giay cho secondary GPU].
+    echo           - Kich hoat khi nguoi dung dang nhap [AtLogOn: delay 10 giay sau khi DWM on dinh].
     echo           - Kich hoat khi thuc giac tu che do ngu [Wake from Sleep: delay 3 giay].
     echo           - Tich hop them Run Key du phong tai Registry HKLM va HKCU.
 ) else (
@@ -455,7 +498,22 @@ if "%HAS_VANGUARD%"=="1" (
     echo       [*] Phat hien Riot Vanguard tren he thong. Che do tuong thich Anti-Cheat da san sang.
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Set-GpuPreference.ps1" >nul 2>&1
+:: Khoa co che chong ngu sau RTD3 tren Windows va kich hoat DriverStrategy=2 de giu on dinh link PCIe
+reg add "HKLM\SOFTWARE\40HXUnlock" /v "DriverStrategy" /t REG_DWORD /d 2 /f >nul 2>&1
+
+:: Thuc thi script PowerShell toi uu CASO theo Driver Class Index dong, Borderless LoL va DirectX Riot
+if exist "%FINAL_DIR%\scripts\Set-GpuPreference.ps1" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%FINAL_DIR%\scripts\Set-GpuPreference.ps1" >nul 2>&1
+) else if exist "%~dp0scripts\Set-GpuPreference.ps1" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Set-GpuPreference.ps1" >nul 2>&1
+)
+
+:: Goi UnlockRiotGame che do im lang de don dep driver BYOVD tranh loi Vanguard 1067
+if exist "%FINAL_DIR%\UnlockRiotGame.exe" (
+    "%FINAL_DIR%\UnlockRiotGame.exe" -silent -optimize >nul 2>&1
+) else if defined SRC_RIOT (
+    "%SRC_RIOT%" -silent -optimize >nul 2>&1
+)
 exit /b 0
 
 

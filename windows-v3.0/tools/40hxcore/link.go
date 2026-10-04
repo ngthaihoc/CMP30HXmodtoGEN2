@@ -118,6 +118,15 @@ func (n *LinkNegotiator) Negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint3
 		}
 	}
 
+	// 2.5. Đảm bảo PCI Command Register bật Memory Space Enable (bit 1) & Bus Master Enable (bit 2)
+	// Tránh trường hợp GPU phụ đang ở D3/ngủ sâu làm vô hiệu hóa bộ giải mã BAR0 MMIO
+	if cmd, err := n.bus.ReadPCIConfig(gpuBDF, 0x04); err == nil {
+		if (cmd & 0x06) != 0x06 {
+			newCmd := uint16(cmd | 0x06)
+			_ = n.bus.WritePCIConfig(gpuBDF, 0x04, []byte{byte(newCmd), byte(newCmd >> 8)})
+		}
+	}
+
 	// 3. BAR0 MMIO Injection (Shadow Registers)
 	bar0Phys, err := n.resolveBAR0(gpuBDF)
 	if err == nil && bar0Phys != 0 {

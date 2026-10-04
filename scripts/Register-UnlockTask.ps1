@@ -10,17 +10,17 @@ if (-not [IO.Path]::IsPathRooted($ExePath)) {
 $action = if ($ExePath -match '\.bat$') {
     New-ScheduledTaskAction -Execute $env:ComSpec -Argument ("/c `"$ExePath`"") -WorkingDirectory $WorkingDirectory
 } else {
-    New-ScheduledTaskAction -Execute $ExePath -Argument '-gen2-30hx -silent' -WorkingDirectory $WorkingDirectory
+    New-ScheduledTaskAction -Execute $ExePath -Argument '-gen2-30hx -silent -guard' -WorkingDirectory $WorkingDirectory
 }
 
 $t1 = New-ScheduledTaskTrigger -AtStartup
-$t1.Delay = 'PT15S'
+$t1.Delay = 'PT45S'
 
 $t2 = New-ScheduledTaskTrigger -AtLogOn
-$t2.Delay = 'PT5S'
+$t2.Delay = 'PT10S'
 
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable -MultipleInstances IgnoreNew `
+    -StartWhenAvailable -MultipleInstances Parallel `
     -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
 

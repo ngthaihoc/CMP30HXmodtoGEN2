@@ -147,6 +147,17 @@ func main() {
 		return
 	}
 
+	// Xử lý chế độ dòng lệnh (CLI flags) nếu có truyền tham số
+	if len(os.Args) > 1 {
+		opts, err := ParseFlags(os.Args[1:])
+		if err == nil && (opts.Silent || opts.Optimize || opts.AutoSign || opts.CheckSig || opts.Gen2Warning) {
+			if err := RunCLI(opts, os.Stdout, &DefaultUEFIManager{}); err != nil {
+				os.Exit(1)
+			}
+			return
+		}
+	}
+
 	prof, _ := hxcore.FindGPUWithProfile()
 	sbOn := hxcore.SecureBootOn()
 	isWin11 := isWindows11()
@@ -217,6 +228,12 @@ func main() {
 				Text: "📖 Hướng Dẫn Giữ Cả Gen 2 & Tensor Core (Win 10 & Win 11)",
 				OnClicked: func() {
 					showTensorGuide(mw, isWin11, is40HX)
+				},
+			},
+			PushButton{
+				Text: "⚡ Kiểm Tra PCIe Gen 2.0 & Render Test (ASPM)",
+				OnClicked: func() {
+					walk.MsgBox(mw, "GIẢI THÍCH PCIE GEN 2.0 / ASPM", GetGen2AspmExplanation(), walk.MsgBoxIconInformation)
 				},
 			},
 			TextEdit{
@@ -315,7 +332,18 @@ func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) {
 		fmt.Fprintln(log, "[V] Đã đảm bảo Testsigning = OFF (đáp ứng tiêu chuẩn Riot Vanguard).")
 	}
 
-	fmt.Fprintln(log, "\n[*] BƯỚC 3: Cấu hình Registry ưu tiên GPU hiệu năng cao cho Riot Games...")
+	fmt.Fprintln(log, "\n[*] BƯỚC 3: Cấu hình Registry Driver Class MSHybrid & CASO (Zero-Driver-Reinstall)...")
+	var model GPUModel = GPUModelUnknown
+	if is40HX {
+		model = GPUModelCMP40HX
+	} else if is30HX {
+		model = GPUModelCMP30HX
+	}
+	if _, err := ConfigureDriverClassRegistry(log, model); err != nil {
+		fmt.Fprintf(log, "[!] Cảnh báo cấu hình Driver Class Registry: %v\n", err)
+	}
+
+	fmt.Fprintln(log, "\n[*] BƯỚC 4: Cấu hình Registry DirectX ưu tiên GPU hiệu năng cao cho Riot Games...")
 	k, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\DirectX\UserGpuPreferences`, registry.SET_VALUE)
 	if err != nil {
 		fmt.Fprintf(log, "[!] Không thể mở Registry: %v\n", err)
@@ -328,6 +356,8 @@ func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) {
 		targets := []string{
 			`Riot Games\VALORANT\live\ShooterGame\Binaries\Win64\VALORANT-Win64-Shipping.exe`,
 			`Riot Games\League of Legends\Game\League of Legends.exe`,
+			`Riot Games\League of Legends\LeagueClient.exe`,
+			`Riot Games\Riot Client\RiotClientServices.exe`,
 		}
 
 		for _, drive := range drives {
@@ -348,6 +378,17 @@ func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) {
 		}
 
 		fmt.Fprintln(log, "[V] Hoàn tất cấu hình Registry DirectX.")
+	}
+
+	fmt.Fprintln(log, "\n[*] BƯỚC 5: Cấu hình Borderless Windowed cho League of Legends...")
+	modifiedCfgs, err := FindAndConfigureLeagueConfigs(getLogicalDrives())
+	if err != nil || len(modifiedCfgs) == 0 {
+		fmt.Fprintln(log, "  -> Không tìm thấy file game.cfg nào trên các ổ đĩa để sửa tự động.")
+	} else {
+		for _, cfg := range modifiedCfgs {
+			fmt.Fprintf(log, "  -> Đã thiết lập WindowMode=2 (Borderless) cho: %s\n", cfg)
+		}
+		fmt.Fprintln(log, "  [V] Đã tối ưu swapchain DWM/CASO cho League of Legends không cổng xuất hình.")
 	}
 
 	fmt.Fprintln(log, "\n==============================================")

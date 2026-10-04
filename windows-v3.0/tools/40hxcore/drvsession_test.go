@@ -35,11 +35,14 @@ func TestDriverFileProvider_HookCanBeRegistered(t *testing.T) {
 func TestCleanupByovd_AlwaysPurgesWinRing0EvenIfThrottleStopRunning(t *testing.T) {
 	origRunner := driverCmdRunner
 	origAppRunning := isThrottleStopAppRunning
+	origStrategy := driverStrategyGetter
 	defer func() {
 		driverCmdRunner = origRunner
 		isThrottleStopAppRunning = origAppRunning
+		driverStrategyGetter = origStrategy
 	}()
 
+	driverStrategyGetter = func() int { return DriverStrategyTransient }
 	isThrottleStopAppRunning = func() bool { return true }
 	var stoppedServices []string
 	var deletedServices []string
@@ -83,15 +86,17 @@ func TestCleanupByovd_AlwaysPurgesWinRing0EvenIfThrottleStopRunning(t *testing.T
 func TestCleanupByovd_PurgesBothWhenThrottleStopNotRunning(t *testing.T) {
 	origRunner := driverCmdRunner
 	origAppRunning := isThrottleStopAppRunning
+	origStrategy := driverStrategyGetter
 	defer func() {
 		driverCmdRunner = origRunner
 		isThrottleStopAppRunning = origAppRunning
+		driverStrategyGetter = origStrategy
 	}()
 
+	driverStrategyGetter = func() int { return DriverStrategyTransient }
 	isThrottleStopAppRunning = func() bool { return false }
 	var stoppedServices []string
 	var deletedServices []string
-
 	driverCmdRunner = func(name string, args ...string) (string, error) {
 		if name == "sc.exe" && len(args) >= 2 {
 			if args[0] == "stop" {
@@ -125,6 +130,28 @@ func TestCleanupByovd_PurgesBothWhenThrottleStopNotRunning(t *testing.T) {
 	}
 	if !hasTSStop || !hasWRStop || !hasTSDelete || !hasWRDelete {
 		t.Fatalf("expected both drivers purged, got TS(stop=%v, del=%v), WR(stop=%v, del=%v)", hasTSStop, hasTSDelete, hasWRStop, hasWRDelete)
+	}
+}
+
+func TestCleanupByovd_PreservesDriversWhenResidentStrategy(t *testing.T) {
+	origRunner := driverCmdRunner
+	origStrategy := driverStrategyGetter
+	defer func() {
+		driverCmdRunner = origRunner
+		driverStrategyGetter = origStrategy
+	}()
+
+	driverStrategyGetter = func() int { return DriverStrategyResident }
+	called := false
+	driverCmdRunner = func(name string, args ...string) (string, error) {
+		called = true
+		return "", nil
+	}
+
+	CleanupByovd()
+
+	if called {
+		t.Fatalf("expected CleanupByovd to return immediately when DriverStrategy is Resident, but driverCmdRunner was called")
 	}
 }
 

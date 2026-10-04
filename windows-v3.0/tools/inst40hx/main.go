@@ -1042,7 +1042,7 @@ func setupGen2Task() error {
 	for attempt := 1; attempt <= 3; attempt++ {
 		out, cerr := hxcore.RunOut("schtasks.exe", "/create", "/tn", tn,
 			"/tr", fmt.Sprintf("\"%s\" -gen2 -silent -guard", abs),
-			"/sc", "onlogon", "/ru", "SYSTEM", "/delay", "0000:30", "/f")
+			"/sc", "onlogon", "/ru", "SYSTEM", "/delay", "0000:10", "/f")
 		if cerr == nil {
 			fmt.Println("  Tác vụ Gen2 đã đăng ký (SYSTEM, độ trễ đăng nhập 30s, chạy ngầm): " + abs)
 			return nil
@@ -1471,6 +1471,8 @@ func waitForNvDriver(timeout time.Duration) bool {
 			return true
 		}
 		if strings.Contains(out, "RUNNING") {
+			// Thêm độ trễ 3 giây sau khi service khởi động để GPU phụ trên hệ thống APU kịp nạp ngữ cảnh PnP
+			time.Sleep(3 * time.Second)
 			return true
 		}
 		if time.Now().After(deadline) {
