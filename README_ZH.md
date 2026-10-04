@@ -50,7 +50,17 @@
 
 ## <img src="https://api.iconify.design/lucide/terminal.svg?color=%2310b981" width="22" height="22" align="center" /> 2. 详细安装指南
 
-### 方法一：一键自动安装（推荐绝大多数用户使用）
+### 方法一：现代 Web 控制中心（最直观推荐）
+
+在解压后的目录中，直接双击运行 **`Launch_WebUI.bat`**（脚本会自动请求管理员权限）。
+系统默认浏览器将自动打开现代化 Web 控制中心界面：
+- **硬件座舱仪表盘**：实时展示 GPU 架构型号、驱动版本、总线接口、PCIe 链路、ASPM 节能与 GSP 状态。
+- **Riot 游戏一键优化**：深度集成 Vanguard 免重装模块、MSHybrid CASO 跨适配器呈现调优与 EFI 证书签名。
+- **实时日志流（SSE）**：透明查看底层内核驱动注入与 PCIe 协商完整过程。
+
+---
+
+### 方法二：一键脚本自动化安装（Setup_CMP30HX_WindowsAIO.bat）
 
 在解压后的目录中，右键点击 **`Setup_CMP30HX_WindowsAIO.bat`** 并选择 **以管理员身份运行**（也可以直接双击，脚本会自动请求管理员权限）。
 
@@ -80,7 +90,7 @@
 
 ---
 
-### 方法二：命令行手动安装（适合高级用户）
+### 方法三：命令行手动安装（适合高级用户）
 
 如果您希望在终端（CMD / PowerShell 管理员窗口）中手动执行每一步：
 
@@ -135,7 +145,7 @@
 
 ---
 
-### 方法三：Linux 系统全自动安装（Ubuntu, Debian, HiveOS, RaveOS, Fedora, Arch Linux）
+### 方法四：Linux 系统全自动安装（Ubuntu, Debian, HiveOS, RaveOS, Fedora, Arch Linux）
 
 适用于 Linux 操作系统、矿机系统或 AI 计算节点。脚本 **`Setup_CMP30HX_LinuxAIO.sh`** 为独立的一体化脚本，无需额外依赖即可直接执行：
 

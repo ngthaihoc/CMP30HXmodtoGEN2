@@ -50,7 +50,17 @@ A complete solution to unlock **PCIe Gen2 x16 (~6.4 GB/s)** bandwidth for **NVID
 
 ## <img src="https://api.iconify.design/lucide/terminal.svg?color=%2310b981" width="22" height="22" align="center" /> 2. Step-by-Step Installation Guide
 
-### Method 1: 1-Click Automated Setup (Recommended for all users)
+### Method 1: Modern Web Control Center (Most Intuitive Experience)
+
+In the extracted folder, double-click **`Launch_WebUI.bat`** (the script will automatically request Administrator elevation).
+Your default browser will launch the Modern Web Control Center interface:
+- **Hardware Cockpit**: Real-time status for GPU architecture, Driver version, Bus Interface, PCIe Link, ASPM, and GSP.
+- **Riot Games 1-Click Tuning**: Integrated Zero-Reinstall Vanguard module, MSHybrid CASO configuration, and EFI Authenticode key signing.
+- **Real-Time Logs (SSE)**: Live streaming of kernel driver injection and PCIe link negotiation.
+
+---
+
+### Method 2: Automated 1-Click Batch Setup (Setup_CMP30HX_WindowsAIO.bat)
 
 In the extracted folder, right-click **`Setup_CMP30HX_WindowsAIO.bat`** and select **Run as administrator** (or double-click; the script will automatically prompt for elevated admin privileges if needed).
 
@@ -80,7 +90,7 @@ The script will automatically execute a 6-step system optimization pipeline:
 
 ---
 
-### Method 2: Manual Command Line Setup (For advanced users)
+### Method 3: Manual Command Line Setup (For advanced users)
 
 If you prefer manual control via Terminal / Command Prompt / PowerShell (Admin):
 
@@ -135,7 +145,7 @@ If you prefer manual control via Terminal / Command Prompt / PowerShell (Admin):
 
 ---
 
-### Method 3: Automated Installation on Linux (Ubuntu, Debian, HiveOS, RaveOS, Fedora, Arch Linux)
+### Method 4: Automated Installation on Linux (Ubuntu, Debian, HiveOS, RaveOS, Fedora, Arch Linux)
 
 For Linux workstations, mining rigs, or AI servers. The script **`Setup_CMP30HX_LinuxAIO.sh`** is a standalone All-In-One tool that runs directly without external dependencies:
 

@@ -50,7 +50,17 @@ Giải pháp mở khoá băng thông **PCIe Gen2 x16 (~6.4 GB/s)** cho card đ�
 
 ## <img src="https://api.iconify.design/lucide/terminal.svg?color=%2310b981" width="22" height="22" align="center" /> 2. Hướng Dẫn Cài Đặt Chi Tiết
 
-### Cách 1: Cài đặt tự động 1-chạm (Khuyến nghị cho mọi người dùng)
+### Cách 1: Bảng Điều Khiển Web Hiện Đại (Khuyến nghị trực quan nhất)
+
+Trong thư mục vừa giải nén, nhấp đúp vào tệp **`Launch_WebUI.bat`** (script tự động yêu cầu quyền Administrator).
+Trình duyệt sẽ tự động khởi chạy giao diện Web Control Center:
+- **Cockpit Phần Cứng**: Hiển thị trạng thái GPU, phiên bản Driver, Bus Interface, PCIe Link, ASPM và GSP theo thời gian thực.
+- **Tối ưu 1-chạm Riot Games**: Tích hợp module Vanguard Zero-Reinstall, cấu hình MSHybrid CASO và xuất chứng chỉ EFI Signing.
+- **Nhật ký thời gian thực (SSE)**: Xem trực tiếp quá trình nạp driver và đàm phán link PCIe.
+
+---
+
+### Cách 2: Cài đặt tự động 1-chạm qua Batch (Setup_CMP30HX_WindowsAIO.bat)
 
 Trong thư mục vừa giải nén, nhấp chuột phải vào tệp **`Setup_CMP30HX_WindowsAIO.bat`** và chọn **Run as administrator** (hoặc nhấp đúp chuột, script sẽ tự động yêu cầu quyền Admin nếu cần).
 
@@ -80,7 +90,7 @@ Script sẽ tự động thực hiện tuần tự 6 bước tối ưu hệ th�
 
 ---
 
-### Cách 2: Cài đặt thủ công bằng dòng lệnh (Dành cho người dùng nâng cao)
+### Cách 3: Cài đặt thủ công bằng dòng lệnh (Dành cho người dùng nâng cao)
 
 Nếu muốn tự kiểm soát từng bước qua cửa sổ dòng lệnh (Terminal / Command Prompt / PowerShell Admin):
 
@@ -135,7 +145,7 @@ Nếu muốn tự kiểm soát từng bước qua cửa sổ dòng lệnh (Termi
 
 ---
 
-### Cách 3: Cài đặt tự động trên Linux (Ubuntu, Debian, HiveOS, RaveOS, Fedora, Arch Linux)
+### Cách 4: Cài đặt tự động trên Linux (Ubuntu, Debian, HiveOS, RaveOS, Fedora, Arch Linux)
 
 Dành cho các máy chạy Linux hoặc trâu cày/AI server dùng Linux. Tệp **`Setup_CMP30HX_LinuxAIO.sh`** là bộ công cụ All-In-One riêng biệt, chạy trực tiếp không cần cài thêm driver bên ngoài:
 
