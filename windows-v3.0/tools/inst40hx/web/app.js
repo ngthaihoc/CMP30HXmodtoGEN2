@@ -70,7 +70,23 @@
       btn_clear_log: "Xóa",
       btn_copy_log: "Sao chép",
       safety_title: "An toàn cho Game & Anti-Cheat (Riot Vanguard, EasyAntiCheat, BattlEye)",
-      safety_desc: "Giải pháp v3.0 không flash VBIOS, không bật Test Signing, gỡ sạch driver can thiệp sau khi mở khoá. Đảm bảo 100% tính toàn vẹn hệ điều hành."
+      safety_desc: "Giải pháp v3.0 không flash VBIOS, không bật Test Signing, gỡ sạch driver can thiệp sau khi mở khoá. Đảm bảo 100% tính toàn vẹn hệ điều hành.",
+      btn_riot_title: "Tối ưu hóa Riot Games (1-Chạm)",
+      btn_riot_sub: "Dọn sạch driver can thiệp, kích hoạt MSHybrid CASO cho LoL / Valorant",
+      riot_panel_title: "Tương Thích Riot Games (MSHybrid & Vanguard)",
+      riot_panel_sub: "Hỗ trợ không cần cài lại driver, tối ưu LoL/TFT & Valorant",
+      riot_lol_detail: "MSHybrid CASO + Tự động cấu hình Borderless Windowed (WindowMode=2) mượt mà không cổng xuất hình.",
+      riot_valorant_detail: "Dọn dẹp driver can thiệp, tắt Testsigning đáp ứng tiêu chuẩn Riot Vanguard.",
+      riot_rec_title: "KHUYẾN NGHỊ TỐI ƯU:",
+      btn_riot_opt_inner: "⚡ Tối Ưu Hóa 1-Chạm",
+      btn_riot_sign_inner: "🔐 Ký EFI (Valorant Win 11)",
+      btn_riot_guide_inner: "📖 Hướng Dẫn BIOS",
+      btn_launch_app: "Mở App Riêng",
+      modal_bios_title: "Hướng Dẫn Nạp Key BIOS & Giữ Tensor Core",
+      modal_bios_warning: "Hãy dùng điện thoại chụp lại hướng dẫn này trước khi khởi động lại máy tính!",
+      modal_cert_locs: "Vị trí file chứng chỉ (CMP40HX_Key.cer):",
+      modal_btn_close: "Đóng",
+      modal_btn_reboot: "Khởi Động Lại Vào BIOS Ngay"
     },
     en: {
       brand_desc: "NVIDIA CMP 40HX & 30HX PCIe Gen2 x16 Bandwidth & Compute Enablement Suite",
@@ -135,7 +151,23 @@
       btn_clear_log: "Clear",
       btn_copy_log: "Copy",
       safety_title: "Game & Anti-Cheat Safe (Riot Vanguard, EasyAntiCheat, BattlEye)",
-      safety_desc: "v3.0 architecture requires no VBIOS flashing, no Test Signing, and unloads kernel drivers after negotiation. 100% OS integrity."
+      safety_desc: "v3.0 architecture requires no VBIOS flashing, no Test Signing, and unloads kernel drivers after negotiation. 100% OS integrity.",
+      btn_riot_title: "1-Click Riot Games Optimization",
+      btn_riot_sub: "Purge BYOVD drivers, enable MSHybrid CASO for LoL & Valorant",
+      riot_panel_title: "Riot Games & Vanguard Compatibility",
+      riot_panel_sub: "Zero driver reinstall, high-performance LoL/TFT & Valorant tuning",
+      riot_lol_detail: "MSHybrid CASO + Auto Borderless Windowed (WindowMode=2) for headless display.",
+      riot_valorant_detail: "Purge unlock drivers, enforce Testsigning OFF compliant with Riot Vanguard.",
+      riot_rec_title: "RECOMMENDED ACTION:",
+      btn_riot_opt_inner: "⚡ 1-Click Optimize",
+      btn_riot_sign_inner: "🔐 Sign EFI (Valorant Win 11)",
+      btn_riot_guide_inner: "📖 BIOS Setup Guide",
+      btn_launch_app: "Launch App",
+      modal_bios_title: "BIOS Key Enrollment & Tensor Core Guide",
+      modal_bios_warning: "Take a photo of this screen with your phone before restarting your computer!",
+      modal_cert_locs: "Certificate File Locations (CMP40HX_Key.cer):",
+      modal_btn_close: "Close",
+      modal_btn_reboot: "Reboot into BIOS Setup Now"
     }
   };
 
@@ -163,8 +195,26 @@
   const elBtnUnlockNow = document.getElementById('btnUnlockNow');
   const elBtnFullInstall = document.getElementById('btnFullInstall');
   const elBtnGen2AndTask = document.getElementById('btnGen2AndTask');
+  const elBtnRiotOptimize = document.getElementById('btnRiotOptimize');
+  const elBtnRiotOptimizeInner = document.getElementById('btnRiotOptimizeInner');
+  const elBtnRiotSignEfi = document.getElementById('btnRiotSignEfi');
+  const elBtnRiotGuide = document.getElementById('btnRiotGuide');
+  const elBtnLaunchUnlockRiotExe = document.getElementById('btnLaunchUnlockRiotExe');
   const elBtnInstallSelected = document.getElementById('btnInstallSelected');
   const elBtnSavePolicy = document.getElementById('btnSavePolicy');
+
+  const elRiotSummaryChip = document.getElementById('riotSummaryChip');
+  const elRiotLolStatus = document.getElementById('riotLolStatus');
+  const elRiotLolDetail = document.getElementById('riotLolDetail');
+  const elRiotValorantStatus = document.getElementById('riotValorantStatus');
+  const elRiotValorantDetail = document.getElementById('riotValorantDetail');
+  const elRiotRecBanner = document.getElementById('riotRecBanner');
+  const elRiotRecText = document.getElementById('riotRecText');
+
+  const elModalBiosGuide = document.getElementById('modalBiosGuide');
+  const elBtnModalClose = document.getElementById('btnModalClose');
+  const elBtnModalDismiss = document.getElementById('btnModalDismiss');
+  const elBtnModalRebootBios = document.getElementById('btnModalRebootBios');
 
   const elCkGsp = document.getElementById('ckGsp');
   const elCkDrv = document.getElementById('ckDrv');
@@ -349,6 +399,7 @@
       // Fallback mock rendering for dev preview if server is not yet returning JSON
       renderStatus(getMockStatus());
     }
+    fetchRiotStatus();
   }
 
   function renderStatus(data) {
@@ -542,6 +593,136 @@
     elBtnRefresh.addEventListener('click', () => {
       appendLogLine("[SYS] Quét lại môi trường hệ thống...");
       fetchStatus();
+    });
+  }
+
+  // --- Fetch Riot Vanguard & MSHybrid Status ---
+  async function fetchRiotStatus() {
+    try {
+      const res = await fetch('/api/riot/status');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      renderRiotStatus(data);
+    } catch (err) {
+      console.warn("Riot status API fallback:", err);
+    }
+  }
+
+  function renderRiotStatus(data) {
+    if (!data) return;
+    if (elRiotSummaryChip) {
+      if (data.canPlayValorant && data.canPlayLeagueOfLegends) {
+        elRiotSummaryChip.textContent = currentLang === 'vi' ? "Hoàn Hảo (100%)" : "Perfect (100%)";
+        elRiotSummaryChip.className = "riot-summary-chip chip-ok";
+      } else if (data.canPlayLeagueOfLegends) {
+        elRiotSummaryChip.textContent = currentLang === 'vi' ? "Sẵn sàng (LMHT)" : "Ready (LoL)";
+        elRiotSummaryChip.className = "riot-summary-chip chip-ready";
+      } else {
+        elRiotSummaryChip.textContent = currentLang === 'vi' ? "Cần thiết lập" : "Setup Needed";
+        elRiotSummaryChip.className = "riot-summary-chip chip-warn";
+      }
+    }
+
+    if (elRiotLolStatus) {
+      elRiotLolStatus.textContent = currentLang === 'vi' ? "✓ TƯƠNG THÍCH 100%" : "✓ 100% COMPATIBLE";
+    }
+    if (elRiotLolDetail && data.lolDesc) {
+      elRiotLolDetail.textContent = data.lolDesc;
+    }
+
+    if (elRiotValorantStatus) {
+      if (data.canPlayValorant) {
+        elRiotValorantStatus.textContent = currentLang === 'vi' ? "✓ HOÀN TOÀN TƯƠNG THÍCH" : "✓ FULLY COMPATIBLE";
+        elRiotValorantStatus.style.color = "var(--color-success)";
+      } else {
+        elRiotValorantStatus.textContent = currentLang === 'vi' ? "⚠️ CẦN THIẾT LẬP BIOS" : "⚠️ BIOS SETUP NEEDED";
+        elRiotValorantStatus.style.color = "var(--color-amber)";
+      }
+    }
+    if (elRiotValorantDetail && data.valorantDesc) {
+      elRiotValorantDetail.textContent = data.valorantDesc;
+    }
+
+    if (elRiotRecText && data.recommendation) {
+      elRiotRecText.textContent = data.recommendation;
+    }
+
+    if (elBtnRiotSignEfi) {
+      const is40HX = data.model === "CMP 40HX" || data.hasTensorCore;
+      elBtnRiotSignEfi.style.display = is40HX ? "inline-flex" : "none";
+    }
+  }
+
+  // --- Modal Helpers ---
+  function openBiosModal() {
+    if (elModalBiosGuide) {
+      elModalBiosGuide.removeAttribute('hidden');
+      elModalBiosGuide.classList.add('active');
+    }
+  }
+
+  function closeBiosModal() {
+    if (elModalBiosGuide) {
+      elModalBiosGuide.setAttribute('hidden', '');
+      elModalBiosGuide.classList.remove('active');
+    }
+  }
+
+  if (elBtnRiotGuide) {
+    elBtnRiotGuide.addEventListener('click', openBiosModal);
+  }
+  if (elBtnModalClose) {
+    elBtnModalClose.addEventListener('click', closeBiosModal);
+  }
+  if (elBtnModalDismiss) {
+    elBtnModalDismiss.addEventListener('click', closeBiosModal);
+  }
+  if (elModalBiosGuide) {
+    elModalBiosGuide.addEventListener('click', (e) => {
+      if (e.target === elModalBiosGuide) closeBiosModal();
+    });
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && elModalBiosGuide && !elModalBiosGuide.hidden) {
+      closeBiosModal();
+    }
+  });
+
+  if (elBtnModalRebootBios) {
+    elBtnModalRebootBios.addEventListener('click', () => {
+      appendLogLine(currentLang === 'vi' ? "[BIOS] Đang khởi động lại vào BIOS Setup..." : "[BIOS] Rebooting into BIOS Firmware Setup...");
+      sendAction('/api/riot/reboot-bios', null, elBtnModalRebootBios);
+    });
+  }
+
+  // 6. Riot Games 1-Click Optimize
+  if (elBtnRiotOptimize) {
+    elBtnRiotOptimize.addEventListener('click', () => {
+      appendLogLine("[RIOT] Bắt đầu tối ưu hóa hệ thống cho Riot Games & dọn dẹp driver...");
+      sendAction('/api/riot/optimize', null, elBtnRiotOptimize);
+    });
+  }
+  if (elBtnRiotOptimizeInner) {
+    elBtnRiotOptimizeInner.addEventListener('click', () => {
+      appendLogLine("[RIOT] Bắt đầu tối ưu hóa hệ thống cho Riot Games & dọn dẹp driver...");
+      sendAction('/api/riot/optimize', null, elBtnRiotOptimizeInner);
+    });
+  }
+
+  // 7. Riot EFI Signing
+  if (elBtnRiotSignEfi) {
+    elBtnRiotSignEfi.addEventListener('click', async () => {
+      appendLogLine("[UEFI] Bắt đầu tạo chứng chỉ cá nhân và ký Authenticode cho 40HXUNLK.EFI...");
+      await sendAction('/api/riot/sign-efi', null, elBtnRiotSignEfi);
+      openBiosModal();
+    });
+  }
+
+  // 8. Launch Native GUI
+  if (elBtnLaunchUnlockRiotExe) {
+    elBtnLaunchUnlockRiotExe.addEventListener('click', () => {
+      appendLogLine("[EXE] Khởi chạy ứng dụng chuyên sâu UnlockRiotGame.exe...");
+      sendAction('/api/riot/launch-gui', null, elBtnLaunchUnlockRiotExe);
     });
   }
 

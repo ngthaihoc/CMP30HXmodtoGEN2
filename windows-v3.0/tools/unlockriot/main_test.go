@@ -82,4 +82,20 @@ func TestRunCLI_Gen2Warning(t *testing.T) {
 	}
 }
 
+func TestRunCLI_JSONStatus(t *testing.T) {
+	var buf bytes.Buffer
+	opts := CLIOptions{
+		Silent:     true,
+		JSONStatus: true,
+	}
+	err := RunCLI(opts, &buf, nil)
+	if err != nil {
+		t.Fatalf("RunCLI failed: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"model"`) || !strings.Contains(out, `"gpuDesc"`) || !strings.Contains(out, `"valorantDesc"`) {
+		t.Errorf("Log missing expected JSON status fields: %s", out)
+	}
+}
+
 

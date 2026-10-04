@@ -16,17 +16,23 @@ const (
 
 // RiotStatus chứa kết quả đánh giá tính tương thích và khuyến nghị bảo mật
 type RiotStatus struct {
-	Model                  GPUModel
-	IsWin11                bool
-	SecureBootOn           bool
-	HasTensorCore          bool
-	CanPlayValorant        bool
-	CanPlayLeagueOfLegends bool
-	NeedsEFISigning        bool
-	RecommendedSecureBoot  string
-	BannerText             string
-	CompletionTitle        string
-	CompletionDetail       string
+	Model                  GPUModel `json:"model"`
+	IsWin11                bool     `json:"isWin11"`
+	SecureBootOn           bool     `json:"secureBootOn"`
+	HasTensorCore          bool     `json:"hasTensorCore"`
+	CanPlayValorant        bool     `json:"canPlayValorant"`
+	CanPlayLeagueOfLegends bool     `json:"canPlayLeagueOfLegends"`
+	NeedsEFISigning        bool     `json:"needsEFISigning"`
+	RecommendedSecureBoot  string   `json:"recommendedSecureBoot"`
+	BannerText             string   `json:"bannerText"`
+	CompletionTitle        string   `json:"completionTitle"`
+	CompletionDetail       string   `json:"completionDetail"`
+	GpuDesc                string   `json:"gpuDesc"`
+	OsDesc                 string   `json:"osDesc"`
+	SecureBootDesc         string   `json:"secureBootDesc"`
+	ValorantDesc           string   `json:"valorantDesc"`
+	LoLDesc                string   `json:"lolDesc"`
+	Recommendation         string   `json:"recommendation"`
 }
 
 // DetectGPUModel nhận diện dòng GPU dựa trên Device ID và tên thiết bị
@@ -61,16 +67,22 @@ func EvaluateRiotStatus(deviceID uint16, gpuName string, sbOn, isWin11 bool) Rio
 		IsWin11:                isWin11,
 		SecureBootOn:           sbOn,
 		CanPlayLeagueOfLegends: true,
+		OsDesc:                 osName,
+		SecureBootDesc:         sbText,
+		LoLDesc:                "✓ Sẵn sàng 100% (MSHybrid CASO + Borderless Windowed)",
 	}
 
 	switch model {
 	case GPUModelCMP40HX:
 		status.HasTensorCore = true
+		status.GpuDesc = "NVIDIA CMP 40HX [TU106] (Gen 2 & Tensor Core)"
 		banner += "🔴 PHÁT HIỆN: NVIDIA CMP 40HX [TU106] (Gen 2 & Tensor Core)\n\n"
 		if !isWin11 {
 			status.CanPlayValorant = true
 			status.NeedsEFISigning = false
 			status.RecommendedSecureBoot = "DISABLED"
+			status.ValorantDesc = "✓ Sẵn sàng (Secure Boot Tắt + Tensor Core 100%)"
+			status.Recommendation = "👉 Khuyến nghị: Giữ Secure Boot TẮT (Disabled) trong BIOS. Bấm [⚡ 1-CHẠM] để tối ưu hệ thống!"
 			status.CompletionTitle = "Hoàn tất Tối Ưu (CMP 40HX - Windows 10)"
 			status.CompletionDetail = "Đã dọn dẹp driver mở khóa và tối ưu Registry thành công!\n\n" +
 				"✅ VỚI WINDOWS 10 (LÝ TƯỞNG NHẤT):\n" +
@@ -95,11 +107,15 @@ func EvaluateRiotStatus(deviceID uint16, gpuName string, sbOn, isWin11 bool) Rio
 
 			if sbOn {
 				status.CanPlayValorant = true
+				status.ValorantDesc = "⚠️ Secure Boot BẬT: Cần ký Key vào BIOS db để nạp Tensor Core"
+				status.Recommendation = "👉 Khuyến nghị: Bấm nút [🔐 Tự Động Ký Chữ Ký Số EFI] bên dưới để nạp Key cá nhân vào BIOS db!"
 				banner += "⚠️ Bạn đang ở Windows 11 và Secure Boot ĐANG BẬT:\n" +
 					"👉 Valorant chạy được, NHƯNG file 40HXUNLK.EFI bị BIOS chặn (mất Tensor Core).\n" +
 					"👉 Hãy dùng nút [🔐 Tự Động Ký Chữ Ký Số EFI & Chuẩn Bị Key BIOS] bên dưới để nạp Key cá nhân!\n"
 			} else {
 				status.CanPlayValorant = false
+				status.ValorantDesc = "ℹ️ Secure Boot TẮT: Chơi được LMHT. Cần nạp Key & Bật SB để chơi Valorant"
+				status.Recommendation = "👉 Khuyến nghị: Bấm nút [🔐 Tự Động Ký Chữ Ký Số EFI] để chuẩn bị nạp Key và BẬT Secure Boot!"
 				banner += "ℹ️ Bạn đang ở Windows 11 và Secure Boot ĐÃ TẮT:\n" +
 					"👉 Gen 2 và Tensor Core (40HXUNLK.EFI) hoạt động 100%!\n" +
 					"👉 Chơi tốt Liên Minh Huyền Thoại (LMHT / TFT).\n" +
@@ -113,6 +129,14 @@ func EvaluateRiotStatus(deviceID uint16, gpuName string, sbOn, isWin11 bool) Rio
 		status.RecommendedSecureBoot = "ENABLED"
 		status.CanPlayLeagueOfLegends = true
 		status.CanPlayValorant = (!isWin11 || sbOn)
+		status.GpuDesc = "NVIDIA CMP 30HX [TU116] (Gen 2 Hardware Lock)"
+		if !isWin11 || sbOn {
+			status.ValorantDesc = "✓ Sẵn sàng (Secure Boot BẬT bình thường)"
+			status.Recommendation = "👉 Khuyến nghị: CMP 30HX giữ Secure Boot BẬT bình thường. Bấm [⚡ 1-CHẠM] để tối ưu ngay!"
+		} else {
+			status.ValorantDesc = "ℹ️ Cần BẬT Secure Boot trong BIOS để chơi Valorant trên Win 11"
+			status.Recommendation = "👉 Khuyến nghị: Vào BIOS BẬT Secure Boot để chơi Valorant. Bấm [⚡ 1-CHẠM] để tối ưu ngay!"
+		}
 		status.CompletionTitle = "Hoàn tất Tối Ưu (CMP 30HX)"
 		status.CompletionDetail = "Đã dọn dẹp driver mở khóa và tối ưu Registry cho Riot Games thành công!\n\n" +
 			"✅ Với CMP 30HX:\n" +
@@ -126,6 +150,14 @@ func EvaluateRiotStatus(deviceID uint16, gpuName string, sbOn, isWin11 bool) Rio
 		status.NeedsEFISigning = false
 		status.RecommendedSecureBoot = "ENABLED"
 		status.CanPlayValorant = (!isWin11 || sbOn)
+		status.GpuDesc = fmt.Sprintf("%s (GPU Không Xác Định)", gpuName)
+		if !isWin11 || sbOn {
+			status.ValorantDesc = "✓ Sẵn sàng"
+			status.Recommendation = "👉 Khuyến nghị: Đảm bảo GPU đã cài driver và bấm [⚡ 1-CHẠM] để tối ưu."
+		} else {
+			status.ValorantDesc = "ℹ️ Cần BẬT Secure Boot trên Win 11 để chơi Valorant"
+			status.Recommendation = "👉 Khuyến nghị: Bật Secure Boot nếu muốn chơi Valorant trên Win 11. Bấm [⚡ 1-CHẠM] để tối ưu."
+		}
 		status.CompletionTitle = "Hoàn tất Tối Ưu"
 		status.CompletionDetail = "Đã dọn dẹp driver mở khóa và tối ưu Registry thành công!\n\n" +
 			"⚠️ LƯU Ý CHO CMP 40HX:\n" +

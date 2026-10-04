@@ -165,15 +165,25 @@
               <span class="btn-sub" data-i18n="btn_persist_sub">Đăng ký tác vụ tự chạy khi đăng nhập Windows</span>
             </div>
           </button>
+
+          <button class="btn btn-riot" id="btnRiotOptimize">
+            <svg class="btn-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+            </svg>
+            <div class="btn-content">
+              <span class="btn-title" data-i18n="btn_riot_title">Tối ưu hóa Riot Games (1-Chạm)</span>
+              <span class="btn-sub" data-i18n="btn_riot_sub">Dọn sạch driver can thiệp, kích hoạt MSHybrid CASO cho LoL / Valorant</span>
+            </div>
+          </button>
         </div>
       </section>
 
       <!-- Main Operational Grid: Controls & Diagnostics vs Live Logs -->
       <section class="two-col-grid">
-        
+
         <!-- Left Column: Environment Audit & Component Controls -->
         <div class="col-controls">
-          
+
           <!-- Environment Audit -->
           <div class="panel-box">
             <div class="panel-header">
@@ -188,9 +198,73 @@
               </div>
               <span class="summary-chip mono" id="auditSummaryChip">Đang kiểm tra...</span>
             </div>
-            
+
             <div class="audit-list" id="auditList">
               <div class="audit-skeleton" data-i18n="audit_loading">Đang nạp dữ liệu kiểm tra hệ thống...</div>
+            </div>
+          </div>
+
+          <!-- Riot Games & Vanguard Cockpit Panel -->
+          <div class="panel-box riot-panel">
+            <div class="panel-header">
+              <div class="panel-title-wrap">
+                <div class="panel-icon-badge riot-icon-badge">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3 class="panel-title" data-i18n="riot_panel_title">Tương Thích Riot Games (MSHybrid & Vanguard)</h3>
+                  <div class="panel-subtitle" data-i18n="riot_panel_sub">Hỗ trợ không cần cài lại driver, tối ưu LoL/TFT & Valorant</div>
+                </div>
+              </div>
+              <span class="summary-chip mono" id="riotSummaryChip">Đang quét...</span>
+            </div>
+
+            <div class="riot-status-matrix">
+              <div class="riot-game-card">
+                <div class="riot-game-header">
+                  <span class="riot-game-badge mono">LEAGUE / TFT</span>
+                  <span class="riot-game-status highlight-emerald" id="riotLolStatus">✓ Sẵn sàng</span>
+                </div>
+                <div class="riot-game-name">Liên Minh Huyền Thoại</div>
+                <div class="riot-game-detail" id="riotLolDetail" data-i18n="riot_lol_detail">MSHybrid CASO + Tự động cấu hình Borderless Windowed (WindowMode=2) mượt mà không cổng xuất hình.</div>
+              </div>
+
+              <div class="riot-game-card">
+                <div class="riot-game-header">
+                  <span class="riot-game-badge mono">VALORANT</span>
+                  <span class="riot-game-status" id="riotValorantStatus">Đang quét...</span>
+                </div>
+                <div class="riot-game-name">Riot Vanguard (VALORANT)</div>
+                <div class="riot-game-detail" id="riotValorantDetail" data-i18n="riot_valorant_detail">Dọn dẹp driver can thiệp, tắt Testsigning đáp ứng tiêu chuẩn Riot Vanguard.</div>
+              </div>
+            </div>
+
+            <!-- Dynamic Recommendation Box -->
+            <div class="riot-recommendation-banner" id="riotRecBanner">
+              <div class="rec-title mono" data-i18n="riot_rec_title">KHUYẾN NGHỊ TỐI ƯU:</div>
+              <div class="rec-body" id="riotRecText">Đang phân tích cấu hình phần cứng và hệ điều hành...</div>
+            </div>
+
+            <!-- Action Toolbar inside Riot Panel -->
+            <div class="riot-actions-toolbar">
+              <button class="btn btn-primary btn-sm" id="btnRiotOptimizeInner">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                <span data-i18n="btn_riot_opt_inner">⚡ Tối Ưu Hóa 1-Chạm</span>
+              </button>
+              <button class="btn btn-outline btn-sm" id="btnRiotSignEfi">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                <span data-i18n="btn_riot_sign_inner">🔐 Ký EFI (Valorant Win 11)</span>
+              </button>
+              <button class="btn btn-ghost btn-sm" id="btnRiotGuide">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                <span data-i18n="btn_riot_guide_inner">📖 Hướng Dẫn BIOS</span>
+              </button>
+              <button class="btn btn-ghost btn-sm" id="btnLaunchUnlockRiotExe" title="Mở giao diện ứng dụng UnlockRiotGame riêng">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                <span data-i18n="btn_launch_app">Mở App Riêng</span>
+              </button>
             </div>
           </div>
 
@@ -432,6 +506,67 @@
         <a href="https://github.com/nvdv-vn/CMP40HX-Unlock" target="_blank" rel="noopener noreferrer" class="footer-link mono">GitHub Repository</a>
       </div>
     </footer>
+  </div>
+
+  <!-- BIOS Setup Guide Modal -->
+  <div class="modal-backdrop" id="modalBiosGuide" hidden>
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-tag mono">BIOS SETUP GUIDE</span>
+          <h3 class="modal-title" data-i18n="modal_bios_title">Hướng Dẫn Nạp Key BIOS & Giữ Tensor Core</h3>
+        </div>
+        <button class="modal-close" id="btnModalClose">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="modal-alert-box">
+          <span class="alert-icon">⚠️</span>
+          <span data-i18n="modal_bios_warning">Hãy dùng điện thoại chụp lại hướng dẫn này trước khi khởi động lại máy tính!</span>
+        </div>
+
+        <div class="cert-locations-box">
+          <div class="cert-loc-label mono" data-i18n="modal_cert_locs">Vị trí file chứng chỉ (CMP40HX_Key.cer):</div>
+          <div class="cert-path mono">1. Ổ hệ thống: C:\CMP40HX_Key.cer</div>
+          <div class="cert-path mono">2. Màn hình Desktop: Desktop\CMP40HX_Key.cer</div>
+        </div>
+
+        <div class="bios-steps-timeline">
+          <div class="timeline-step">
+            <div class="step-num mono">BƯỚC 1</div>
+            <div class="step-content">
+              <strong>Vào BIOS Setup:</strong> Tìm tab <code>Security</code> hoặc <code>Boot</code> &rarr; Chọn <code>Key Management</code> (Nếu đang ở Standard Mode, đổi sang Custom Mode).
+            </div>
+          </div>
+          <div class="timeline-step">
+            <div class="step-num mono">BƯỚC 2</div>
+            <div class="step-content">
+              <strong>Nạp chứng chỉ vào db:</strong> Tìm <code>Authorized Signatures (db)</code> hoặc <code>Append db</code> &rarr; Chọn file <code>CMP40HX_Key.cer</code> từ ổ C hoặc Desktop &rarr; Nhấn Add/Append (Giữ nguyên các key Microsoft).
+            </div>
+          </div>
+          <div class="timeline-step">
+            <div class="step-num mono">BƯỚC 3</div>
+            <div class="step-content">
+              <strong>Bật Secure Boot:</strong> Đặt mục <code>Secure Boot</code> thành <code>ENABLED</code>.
+            </div>
+          </div>
+          <div class="timeline-step">
+            <div class="step-num mono">BƯỚC 4</div>
+            <div class="step-content">
+              <strong>Lưu cấu hình:</strong> Nhấn <code>F10</code> &rarr; Chọn Yes để Khởi động lại vào Windows.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btnModalDismiss" data-i18n="modal_btn_close">Đóng</button>
+        <button class="btn btn-emerald" id="btnModalRebootBios">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          <span data-i18n="modal_btn_reboot">Khởi Động Lại Vào BIOS Ngay</span>
+        </button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

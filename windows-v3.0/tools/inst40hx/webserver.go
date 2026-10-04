@@ -8,13 +8,17 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"40hxcore"
+
+	"golang.org/x/sys/windows/registry"
 )
 
 //go:embed web/*
@@ -353,6 +357,172 @@ func runWebGUI() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
 	})
 
+	// 9. Riot Games & Vanguard Status Query
+	mux.HandleFunc("/api/riot/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		exePath := findUnlockRiotExe()
+		if exePath != "" {
+			cmd := exec.Command(exePath, "-json-status")
+			out, err := cmd.Output()
+			if err == nil && len(out) > 0 {
+				w.Write(out)
+				return
+			}
+		}
+
+		// Fallback: direct evaluation
+		prof, _ := hxcore.FindGPUWithProfile()
+		sbOn := hxcore.SecureBootOn()
+		isWin11 := isWindows11()
+		is40HX := (prof.DeviceID == 0x1F0B || strings.Contains(strings.ToUpper(prof.Name), "40HX"))
+		is30HX := (prof.DeviceID == 0x2189 || strings.Contains(strings.ToUpper(prof.Name), "30HX"))
+
+		model := "Unknown"
+		if is40HX {
+			model = "CMP 40HX"
+		} else if is30HX {
+			model = "CMP 30HX"
+		}
+
+		osName := "Windows 10"
+		if isWin11 {
+			osName = "Windows 11"
+		}
+		sbDesc := "ĐÃ TẮT (Disabled)"
+		if sbOn {
+			sbDesc = "ĐANG BẬT (Enabled)"
+		}
+
+		st := RiotStatusJSON{
+			Model:                  model,
+			IsWin11:                isWin11,
+			SecureBootOn:           sbOn,
+			CanPlayLeagueOfLegends: true,
+			OsDesc:                 osName,
+			SecureBootDesc:         sbDesc,
+			LoLDesc:                "✓ Sẵn sàng 100% (MSHybrid CASO + Borderless Windowed)",
+		}
+
+		if is40HX {
+			st.HasTensorCore = true
+			st.GpuDesc = "NVIDIA CMP 40HX [TU106] (Gen 2 & Tensor Core)"
+			if !isWin11 {
+				st.CanPlayValorant = true
+				st.ValorantDesc = "✓ Sẵn sàng (Secure Boot Tắt + Tensor Core 100%)"
+				st.Recommendation = "👉 Khuyến nghị: Giữ Secure Boot TẮT (Disabled) trong BIOS. Bấm [⚡ 1-CHẠM] để tối ưu hệ thống!"
+			} else {
+				st.NeedsEFISigning = true
+				if sbOn {
+					st.CanPlayValorant = true
+					st.ValorantDesc = "⚠️ Secure Boot BẬT: Cần ký Key vào BIOS db để nạp Tensor Core"
+					st.Recommendation = "👉 Khuyến nghị: Bấm nút [🔐 Tự Động Ký Chữ Ký Số EFI] bên dưới để nạp Key cá nhân vào BIOS db!"
+				} else {
+					st.CanPlayValorant = false
+					st.ValorantDesc = "ℹ️ Secure Boot TẮT: Chơi được LMHT. Cần nạp Key & Bật SB để chơi Valorant"
+					st.Recommendation = "👉 Khuyến nghị: Bấm nút [🔐 Tự Động Ký Chữ Ký Số EFI] để chuẩn bị nạp Key và BẬT Secure Boot!"
+				}
+			}
+		} else if is30HX {
+			st.GpuDesc = "NVIDIA CMP 30HX [TU116] (Gen 2 Hardware Lock)"
+			st.CanPlayValorant = (!isWin11 || sbOn)
+			if !isWin11 || sbOn {
+				st.ValorantDesc = "✓ Sẵn sàng (Secure Boot BẬT bình thường)"
+				st.Recommendation = "👉 Khuyến nghị: CMP 30HX giữ Secure Boot BẬT bình thường. Bấm [⚡ 1-CHẠM] để tối ưu ngay!"
+			} else {
+				st.ValorantDesc = "ℹ️ Cần BẬT Secure Boot trong BIOS để chơi Valorant trên Win 11"
+				st.Recommendation = "👉 Khuyến nghị: Vào BIOS BẬT Secure Boot để chơi Valorant. Bấm [⚡ 1-CHẠM] để tối ưu ngay!"
+			}
+		} else {
+			st.GpuDesc = prof.Name
+			st.CanPlayValorant = (!isWin11 || sbOn)
+			st.ValorantDesc = "✓ Sẵn sàng"
+			st.Recommendation = "👉 Khuyến nghị: Bấm [⚡ 1-CHẠM] để tối ưu Registry và MSHybrid CASO cho Riot Games."
+		}
+
+		json.NewEncoder(w).Encode(st)
+	})
+
+	// 10. Riot Games 1-Click Optimize
+	mux.HandleFunc("/api/riot/optimize", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		if !tryAcquireOp("Tối ưu hóa Riot Games (1-Chạm)") {
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{"message": "Hệ thống đang bận thao tác khác."})
+			return
+		}
+		go func() {
+			defer releaseOp()
+			fmt.Println("== [Riot Vanguard] Bắt đầu tối ưu hóa hệ thống và dọn dẹp driver ==")
+			exePath := findUnlockRiotExe()
+			if exePath != "" {
+				cmd := exec.Command(exePath, "-silent", "-optimize")
+				cmd.Stdout = hub
+				cmd.Stderr = hub
+				if err := cmd.Run(); err != nil {
+					fmt.Fprintf(hub, "[!] Lỗi khi chạy UnlockRiotGame: %v\n", err)
+				}
+			} else {
+				fmt.Fprintf(hub, "[!] Không tìm thấy UnlockRiotGame.exe để thực thi tối ưu.\n")
+			}
+		}()
+		json.NewEncoder(w).Encode(map[string]string{"status": "started"})
+	})
+
+	// 11. Riot EFI Signing (Authenticode)
+	mux.HandleFunc("/api/riot/sign-efi", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		if !tryAcquireOp("Ký chữ ký số EFI cá nhân") {
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{"message": "Hệ thống đang bận thao tác khác."})
+			return
+		}
+		go func() {
+			defer releaseOp()
+			fmt.Println("== [UEFI Key] Bắt đầu tự động tạo chứng chỉ và ký Authenticode cho 40HXUNLK.EFI ==")
+			exePath := findUnlockRiotExe()
+			if exePath != "" {
+				cmd := exec.Command(exePath, "-silent", "-auto-sign")
+				cmd.Stdout = hub
+				cmd.Stderr = hub
+				if err := cmd.Run(); err != nil {
+					fmt.Fprintf(hub, "[!] Lỗi khi chạy tự động ký EFI: %v\n", err)
+				}
+			} else {
+				fmt.Fprintf(hub, "[!] Không tìm thấy UnlockRiotGame.exe để thực thi ký EFI.\n")
+			}
+		}()
+		json.NewEncoder(w).Encode(map[string]string{"status": "started"})
+	})
+
+	// 12. Reboot to BIOS Firmware Setup
+	mux.HandleFunc("/api/riot/reboot-bios", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		fmt.Println("[BIOS] Nhận yêu cầu khởi động lại máy tính vào BIOS Setup...")
+		cmd := exec.Command("shutdown", "/r", "/fw", "/t", "2")
+		if err := cmd.Run(); err != nil {
+			exec.Command("shutdown", "/r", "/t", "2").Run()
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "rebooting"})
+	})
+
+	// 13. Launch standalone UnlockRiotGame.exe GUI
+	mux.HandleFunc("/api/riot/launch-gui", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		exePath := findUnlockRiotExe()
+		if exePath == "" {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"message": "Không tìm thấy UnlockRiotGame.exe"})
+			return
+		}
+		cmd := exec.Command(exePath)
+		if err := cmd.Start(); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"message": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "launched"})
+	})
+
 	// Bind to localhost port
 	port := 40100
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
@@ -391,4 +561,60 @@ func openBrowser(url string) {
 	if err := cmd.Start(); err != nil {
 		exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 	}
+}
+
+type RiotStatusJSON struct {
+	Model                  string `json:"model"`
+	IsWin11                bool   `json:"isWin11"`
+	SecureBootOn           bool   `json:"secureBootOn"`
+	HasTensorCore          bool   `json:"hasTensorCore"`
+	CanPlayValorant        bool   `json:"canPlayValorant"`
+	CanPlayLeagueOfLegends bool   `json:"canPlayLeagueOfLegends"`
+	NeedsEFISigning        bool   `json:"needsEFISigning"`
+	RecommendedSecureBoot  string `json:"recommendedSecureBoot"`
+	GpuDesc                string `json:"gpuDesc"`
+	OsDesc                 string `json:"osDesc"`
+	SecureBootDesc         string `json:"secureBootDesc"`
+	ValorantDesc           string `json:"valorantDesc"`
+	LoLDesc                string `json:"lolDesc"`
+	Recommendation         string `json:"recommendation"`
+}
+
+func findUnlockRiotExe() string {
+	exe, err := os.Executable()
+	var dir string
+	if err == nil {
+		dir = filepath.Dir(exe)
+	}
+	candidates := []string{
+		filepath.Join(dir, "UnlockRiotGame.exe"),
+		filepath.Join(dir, "..", "release", "UnlockRiotGame.exe"),
+		filepath.Join(dir, "windows-v3.0", "release", "UnlockRiotGame.exe"),
+		`D:\ClodeGithub\CMP40HX-Unlock-main\windows-v3.0\release\UnlockRiotGame.exe`,
+		"UnlockRiotGame.exe",
+	}
+	for _, c := range candidates {
+		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+			return c
+		}
+	}
+	return ""
+}
+
+func isWindows11() bool {
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows NT\CurrentVersion`, registry.QUERY_VALUE)
+	if err != nil {
+		return false
+	}
+	defer k.Close()
+	buildStr, _, err := k.GetStringValue("CurrentBuild")
+	if err != nil {
+		buildStr, _, err = k.GetStringValue("CurrentBuildNumber")
+	}
+	if err != nil {
+		return false
+	}
+	var b int
+	fmt.Sscanf(buildStr, "%d", &b)
+	return b >= 22000
 }

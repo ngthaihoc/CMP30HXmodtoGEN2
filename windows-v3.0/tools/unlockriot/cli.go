@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ type CLIOptions struct {
 	AutoSign    bool
 	CheckSig    bool
 	Gen2Warning bool
+	JSONStatus  bool
 }
 
 // ParseFlags phân tích cờ dòng lệnh từ mảng chuỗi
@@ -31,6 +33,7 @@ func ParseFlags(args []string) (CLIOptions, error) {
 	fs.BoolVar(&opts.AutoSign, "auto-sign", false, "Tự động tạo cert và ký Authenticode cho 40HXUNLK.EFI")
 	fs.BoolVar(&opts.CheckSig, "check-sig", false, "Kiểm tra chữ ký số driver user-mode nvwgf2umx.dll")
 	fs.BoolVar(&opts.Gen2Warning, "gen2-warning", false, "Hiển thị thông tin kiểm tra PCIe Gen 2.0 ASPM")
+	fs.BoolVar(&opts.JSONStatus, "json-status", false, "Xuất thông tin trạng thái Riot dưới dạng JSON")
 
 	err := fs.Parse(args)
 	return opts, err
@@ -51,6 +54,10 @@ func RunCLI(opts CLIOptions, log io.Writer, uefiMgr UEFIManager) error {
 	status := EvaluateRiotStatus(prof.DeviceID, prof.Name, sbOn, isWin11)
 	is40HX := (status.Model == GPUModelCMP40HX)
 	is30HX := (status.Model == GPUModelCMP30HX)
+
+	if opts.JSONStatus {
+		return json.NewEncoder(log).Encode(status)
+	}
 
 	if opts.AutoSign {
 		fmt.Fprintln(log, "[*] Bắt đầu tự động tạo chứng chỉ và ký UEFI 40HXUNLK.EFI...")
