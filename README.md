@@ -207,15 +207,16 @@ Riot Vanguard trên Windows 11 yêu cầu Secure Boot = Enabled và TPM 2.0. Fir
 
 ---
 
-## <img src="https://api.iconify.design/lucide/help-circle.svg?color=%23f43f5e" width="22" height="22" align="center" /> 6. Xử lý sự cố
+## <img src="https://api.iconify.design/lucide/help-circle.svg?color=%23f43f5e" width="22" height="22" align="center" /> 6. Xử Lý Sự Cố Thường Gặp (Troubleshooting)
 
-| Vấn đề | Cách xử lý |
-|---|---|
-| **Kẹt ở Gen1** | Chạy lại `Setup_CMP30HX_WindowsAIO.bat` hoặc `40HXInstaller.exe -gen2-30hx`. Nếu HVCI đang bật → tắt rồi reboot. |
-| **Mất Gen2 sau khi reboot** | Script đã tạo Scheduled Task tự kích hoạt. Nếu vẫn lỗi → dùng **DDU** trong Safe Mode gỡ sạch driver cũ rồi cài lại. |
-| **Tụt Gen1 khi idle** | ASPM đang bật → chạy lại script (tự tắt ASPM) hoặc tắt thủ công trong Power Options → PCI Express → Link State Power Management: **Off**. |
-| **Băng thông chỉ ~2.5 GB/s** | MRRS đang ở 128B → chạy `40HXInstaller.exe -gen2-30hx` để nâng lên 512B. |
-| **Mã lỗi 43 / không nhận GPU** | Kiểm tra mối hàn mod lane x16 trên card. Cài lại driver NVIDIA (dùng DDU trước). |
+| Hiện tượng | Nguyên nhân | Hướng giải quyết |
+|---|---|---|
+| **Kẹt ở Gen1 (GPU TLS=Gen1, Root TLS=Gen2)** | - Hệ thống GPU kép (CMP 30HX + iGPU AMD/Intel) hoặc driver mod (RainCandy) khởi tạo lại, tự động reset GPU TLS về Gen1.<br>- Hoặc Windows bật Memory Integrity (HVCI), hoặc cáp Riser tiếp xúc kém | 1. **Tự động**: `Setup_CMP30HX_WindowsAIO.bat` bản mới kích hoạt chế độ **Thường trú (Resident Guard)** và tác vụ Logon (delay 10s) tự bù tốc Gen2.<br>2. **Thủ công**: Giữ card ở trạng thái **Enable** trong Device Manager (tuyệt đối **KHÔNG** Disable vì sẽ ngắt kết nối BAR0 MMIO) → Chạy `Setup_CMP30HX_WindowsAIO.bat` hoặc `40HXInstaller.exe -gen2-30hx` khi desktop đã ổn định.<br>3. Nếu HVCI đang bật: Tắt HVCI và **Khởi động lại máy tính (Reboot)**. |
+| **Mất kích hoạt Gen2 sau khi khởi động lại máy** | - Driver NVIDIA/RainCandy nạp trễ trên hệ thống APU hoặc ghi đè trạng thái vBIOS sau khi khởi động.<br>- Xung đột cấu hình driver cũ hoặc Fast Startup còn bật | 1. `Setup_CMP30HX_WindowsAIO.bat` đã tích hợp Scheduled Task đa tầng (Logon delay 10s + Startup delay 45s) kèm chế độ **DriverStrategy=2 (Resident Guard)** tự động kiểm tra mỗi phút và retrain lại khi mất Gen2.<br>2. **Khuyến cáo DDU**: Dùng **DDU (Display Driver Uninstaller)** trong chế độ Safe Mode gỡ sạch toàn bộ driver hiển thị cũ trước khi cài lại driver mod để tránh lỗi xung đột registry. |
+| **Bị tụt về Gen1 x16 khi card ở chế độ rảnh (Idle)** | Tính năng tiết kiệm điện PCIe ASPM của Windows đang bật | Chạy lại `Setup_CMP30HX_WindowsAIO.bat` (script tự động tắt ASPM) hoặc chỉnh trong Power Options → PCI Express → Link State Power Management: **Off**. |
+| **GPU-Z báo Gen2 x16 nhưng AIDA64 chỉ đạt ~2.5 GB/s** | Giá trị Max Read Request Size (MRRS) của card bị kẹp ở 128 Bytes mặc định | Chạy lệnh `40HXInstaller.exe -gen2-30hx` để nâng MRRS lên 512 Bytes và nạp lại hàng đợi DMA. |
+| **Không nhận diện được GPU / Mã lỗi 43** | Mối hàn trở mod lane x16 chưa tiếp xúc tốt hoặc card chưa nhận driver | 1. Kiểm tra lại mối hàn trở trên card.<br>2. Cài lại driver NVIDIA (dùng DDU gỡ sạch driver cũ rồi cài bản mới nhất). |
+| **Đã thử mọi cách fix vẫn không được** | Driver NVIDIA bị xung đột cấu hình, profile registry lưu đè hoặc service driver lỗi | Gỡ sạch driver cũ bằng **DDU (Display Driver Uninstaller)** trong Safe Mode rồi tiến hành cài đặt lại driver. |
 
 ---
 
