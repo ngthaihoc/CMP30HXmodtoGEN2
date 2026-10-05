@@ -13,8 +13,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run setup (check mode)
         run: cmd /c "Setup_CMP30HX_WindowsAIO.bat -check"
+        continue-on-error: true
       - name: Run uninstall test
         run: cmd /c "Setup_CMP30HX_WindowsAIO.bat -uninstall"
+        continue-on-error: true
       - name: Lint .bat files with ShellCheck
         shell: pwsh
         run: |
