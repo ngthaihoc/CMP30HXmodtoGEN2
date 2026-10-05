@@ -1,0 +1,33 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.20'
+      - name: Build Installer
+        run: |
+          cd windows-v3.0/tools/inst40hx
+          go build -ldflags "-s -w -H=windowsgui" -o "../../release/40HXInstaller.exe" .
+      - name: Build Diagnostic
+        run: |
+          cd windows-v3.0/tools/check40x
+          go build -ldflags "-s -w -H=windowsgui" -o "../../release/40HXCheck.exe" .
+      - name: Build Uninstaller
+        run: |
+          cd windows-v3.0/tools/uninstall40x
+          go build -ldflags "-s -w -H=windowsgui" -o "../../release/40HXUninstaller.exe" .
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries
+          path: release/*

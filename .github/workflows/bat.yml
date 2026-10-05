@@ -1,0 +1,22 @@
+name: BAT sanity check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  bat-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run setup (check mode)
+        run: cmd /c "Setup_CMP30HX_WindowsAIO.bat -check"
+      - name: Run uninstall test
+        run: cmd /c "Setup_CMP30HX_WindowsAIO.bat -uninstall"
+      - name: Lint .bat files with ShellCheck
+        shell: pwsh
+        run: |
+          choco install shellcheck -y
+          Get-ChildItem -Path . -Filter *.bat -Recurse | ForEach-Object { shellcheck $_.FullName }
