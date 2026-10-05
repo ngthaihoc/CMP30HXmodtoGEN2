@@ -52,7 +52,7 @@ func CheckDriverSignature(dllPath string) (bool, string, error) {
 	defer cancel()
 
 	escapedPath := strings.ReplaceAll(dllPath, `'`, `''`)
-	cmdStr := fmt.Sprintf(`$sig = Get-AuthenticodeSignature -FilePath '%s'; [PSCustomObject]@{Status=$sig.Status.ToString(); Subject=($sig.SignerCertificate.Subject -replace '[\r\n]',' ')} | ConvertTo-Json -Compress`, escapedPath)
+	cmdStr := fmt.Sprintf(`$st = 'NotSigned'; $sub = ''; try { $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 '%s'; if ($cert.Verify()) { $st = 'Valid' } else { $st = 'Invalid' }; $sub = ($cert.Subject -replace '[\r\n]',' ') } catch {}; [PSCustomObject]@{Status=$st; Subject=$sub} | ConvertTo-Json -Compress`, escapedPath)
 
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", cmdStr)
 	out, err := cmd.Output()

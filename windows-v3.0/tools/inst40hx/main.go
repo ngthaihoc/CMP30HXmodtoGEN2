@@ -222,6 +222,8 @@ func msgboxYesNo(title, text string) bool {
 	return hxcore.MsgBoxYesNo(title, text)
 }
 
+var logSyncCancel func()
+
 // setupLog: 输出镜像到日志文件(默认 %TEMP%/<name>, 命令行 -log <file> 优先)
 func setupLog(defName string) {
 	p := filepath.Join(os.TempDir(), defName)
@@ -232,6 +234,10 @@ func setupLog(defName string) {
 		os.Stdout = f
 		os.Stderr = f
 		fmt.Fprintf(f, "==== 40HX tool %s ====\n", time.Now().Format("2006-01-02 15:04:05"))
+		if logSyncCancel != nil {
+			logSyncCancel()
+		}
+		logSyncCancel = startLogSync(f, 100*time.Millisecond)
 	}
 }
 
@@ -253,6 +259,7 @@ func AttachLogSink(w io.Writer) {
 			n, rerr := r.Read(buf)
 			if n > 0 {
 				orig.Write(buf[:n]) // 落日志文件(GUI 模式下失败可忽略)
+				_ = orig.Sync()     // Đồng bộ ngay xuống đĩa để tránh mất dữ liệu pipe khi BSOD
 				w.Write(buf[:n])    // 喂 GUI 日志面板
 			}
 			if rerr != nil {
@@ -1720,4 +1727,36 @@ func status() {
 
 func pause() {
 	// GUI 版: 无需按 Enter; 输出已入日志, 交互收尾用消息框
+}
+
+// startLogSync định kỳ flush buffer tệp nhật ký để bảo toàn log trước BSOD.
+// Trả về hàm hủy closure để kiểm soát vòng đời goroutine sạch sẽ, tránh rò rỉ.
+func startLogSync(f *os.File, interval time.Duration) func() {
+	if f == nil {
+		return func() {}
+	}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				_ = f.Sync()
+			case <-stop:
+				_ = f.Sync()
+				return
+			}
+		}
+	}()
+	return func() {
+		select {
+		case <-stop:
+		default:
+			close(stop)
+			<-done
+		}
+	}
 }

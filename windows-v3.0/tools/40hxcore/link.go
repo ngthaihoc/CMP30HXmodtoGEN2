@@ -38,28 +38,48 @@ type HardwareBus interface {
 
 // MMIORegWrite: Bản ghi thiết lập thanh ghi MMIO chuẩn hoá
 type MMIORegWrite struct {
-	Offset uint64
-	Value  uint32
-	Name   string
+	Offset        uint64
+	Value         uint32
+	Name          string
+	RMW           bool
+	Mask          uint32
+	FallbackValue uint32
+}
+
+// ComputeValue tính toán giá trị cuối cùng cần ghi vào thanh ghi MMIO.
+// Nếu RMW=true, đọc giá trị hiện tại qua readFn rồi áp dụng bitmask.
+// Nếu đọc thất bại, sử dụng FallbackValue (hoặc Value nếu không có fallback).
+func (r MMIORegWrite) ComputeValue(readFn func(offset uint64) (uint32, error)) uint32 {
+	if !r.RMW {
+		return r.Value
+	}
+	old, err := readFn(r.Offset)
+	if err != nil {
+		if r.FallbackValue != 0 {
+			return r.FallbackValue
+		}
+		return r.Value
+	}
+	return (old &^ r.Mask) | r.Value
 }
 
 // TU116ShadowSequence: Đơn vị duy nhất định nghĩa chuỗi thanh ghi mở khoá shadow cho TU116
 var TU116ShadowSequence = []MMIORegWrite{
-	{0x0008841C, 0xE0B42D00, "PRIV_MISC_1"},
-	{0x0008872C, 6, "XVE_OVR"},
-	{0x0008C040, 0x80085800, "LINK_CONFIG_0"},
-	{0x0008C1C0, 0x00240036, "PL_LINK_RATE"},
-	{0x0008C2C0, 0x068731B3, "CYA_0"},
-	{0x0008872C, 6, "XVE_OVR_CONFIRM"},
+	{Offset: 0x0008841C, Value: 0xE0B42D00, Name: "PRIV_MISC_1"},
+	{Offset: 0x0008872C, Value: 6, Name: "XVE_OVR"},
+	{Offset: 0x0008C040, Value: 0x80085800, Name: "LINK_CONFIG_0"},
+	{Offset: 0x0008C1C0, Value: 0x00240036, Name: "PL_LINK_RATE"},
+	{Offset: 0x0008C2C0, Value: 0x068731B3, Name: "CYA_0"},
+	{Offset: 0x0008872C, Value: 6, Name: "XVE_OVR_CONFIRM"},
 }
 
 // TU106PL0Sequence: Chuỗi thanh ghi mở khoá cho TU106 (CMP 40HX)
 var TU106PL0Sequence = []MMIORegWrite{
-	{0x8872C, 0x6, "XVE_OVR=6"},
-	{0x8C040, 0x80085800, "LINK_CONFIG_0"},
-	{0x8841C, 0xE0B42D00, "PRIV_MISC_1"},
-	{0x8C1C0, 0x00240036, "PL_LINK_RATE"},
-	{0x8C2C0, 0x068731B3, "CYA_0"},
+	{Offset: 0x8872C, Value: 0x6, Name: "XVE_OVR=6"},
+	{Offset: 0x8C040, Value: 0x00080000, Name: "LINK_CONFIG_0", RMW: true, Mask: 0x000C0000, FallbackValue: 0x80085800},
+	{Offset: 0x8841C, Value: 0xE0B42D00, Name: "PRIV_MISC_1"},
+	{Offset: 0x8C1C0, Value: 0x00040000, Name: "PL_LINK_RATE", RMW: true, Mask: 0x00060000, FallbackValue: 0x00240036},
+	{Offset: 0x8C2C0, Value: 0x068731B3, Name: "CYA_0"},
 }
 
 // NegotiationResult: Kết quả thương lượng và huấn luyện lại PCIe
@@ -276,7 +296,10 @@ func (n *LinkNegotiator) injectMMIOShadowRegisters(bar0Phys uint64, prof GPUProf
 		seq = TU106PL0Sequence
 	}
 	for _, reg := range seq {
-		_ = n.bus.WriteMMIO(bar0Phys+reg.Offset, reg.Value)
+		val := reg.ComputeValue(func(off uint64) (uint32, error) {
+			return n.bus.ReadMMIO(bar0Phys + off)
+		})
+		_ = n.bus.WriteMMIO(bar0Phys+reg.Offset, val)
 	}
 
 	if prof.DeviceID == 0x2189 { // TU116

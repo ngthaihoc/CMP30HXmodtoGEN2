@@ -120,18 +120,27 @@ func SetTestsigning() (bool, string) {
 // MountESP: 挂 ESP 到空闲盘符, 返回盘符字母(如 "S")或 ""。
 // 非管理员下 mountvol /S 失败 → 返回空(安全, 不弹 UAC)。
 func MountESP() string {
-	for _, c := range []string{"Y", "X", "W", "V", "U", "T", "S"} {
+	candidates := []string{"Y", "X", "W", "V", "U", "T", "S"}
+
+	// Bước 1: Nếu ESP đã được mount ở một trong các ổ đĩa này từ trước, tái sử dụng ngay
+	for _, c := range candidates {
 		letter := c + ":"
-		out, _ := RunOut("mountvol.exe", letter, "/S")
-		if strings.Contains(out, "错误") || strings.Contains(out, "denied") {
-			continue
-		}
 		if _, err := os.Stat(letter + "\\EFI"); err == nil {
 			return c
 		}
+	}
+
+	// Bước 2: Tìm ổ đĩa chưa bị chiếm dụng để mount
+	for _, c := range candidates {
+		letter := c + ":"
 		if _, err := os.Stat(letter + "\\"); err == nil {
+			continue
+		}
+		RunOut("mountvol.exe", letter, "/S")
+		if _, err := os.Stat(letter + "\\EFI"); err == nil {
 			return c
 		}
+		UnmountESP(c)
 	}
 	return ""
 }

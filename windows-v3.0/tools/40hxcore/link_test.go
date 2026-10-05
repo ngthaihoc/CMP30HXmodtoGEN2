@@ -444,3 +444,80 @@ func TestLinkNegotiator_EnsuresMemorySpaceEnable(t *testing.T) {
 	}
 }
 
+func TestMMIORegWrite_ComputeValue(t *testing.T) {
+	// Case 1: RMW is false -> returns Value directly without calling readFn
+	regNonRMW := MMIORegWrite{Offset: 0x1000, Value: 0x12345678, RMW: false}
+	val := regNonRMW.ComputeValue(func(offset uint64) (uint32, error) {
+		t.Fatal("readFn should not be called when RMW is false")
+		return 0, nil
+	})
+	if val != 0x12345678 {
+		t.Errorf("expected 0x12345678, got 0x%08X", val)
+	}
+
+	// Case 2: RMW is true and read succeeds -> applies bitmask
+	// old has 0x80005800, mask 0x000C0000, value 0x00080000 -> (0x80005800 &^ 0x000C0000) | 0x00080000 = 0x80085800
+	regRMW := MMIORegWrite{
+		Offset: 0x8C040, Value: 0x00080000, RMW: true, Mask: 0x000C0000, FallbackValue: 0x80085800,
+	}
+	val = regRMW.ComputeValue(func(offset uint64) (uint32, error) {
+		return 0x80005800, nil
+	})
+	if val != 0x80085800 {
+		t.Errorf("expected 0x80085800 after RMW bitmask, got 0x%08X", val)
+	}
+
+	// Case 3: RMW is true and read fails -> returns FallbackValue
+	val = regRMW.ComputeValue(func(offset uint64) (uint32, error) {
+		return 0, errors.New("read error")
+	})
+	if val != 0x80085800 {
+		t.Errorf("expected fallback 0x80085800 on read error, got 0x%08X", val)
+	}
+}
+
+func TestLinkNegotiator_TU106_MMIO_RMWSequence(t *testing.T) {
+	// Arrange: CMP 40HX (TU106) with initial pre-existing MMIO register values
+	bus := NewMockHardwareBus()
+	bdf := uint32(0x0100)
+	prof := GPUProfile{
+		VendorID:        0x10DE,
+		DeviceID:        0x1F0B,
+		Name:            "CMP 40HX",
+		Family:          "TU106",
+		MaxSupportedGen: 2,
+		RequiresMMIO:    true,
+	}
+	bus.SetPCIConfig(bdf, 0x00, 0x1F0B10DE)
+	bus.SetPCICap(bdf, 0x40)
+	bus.SetPCIConfig(bdf, 0x10, 0xF6000000)
+	bar0 := uint64(0xF6000000)
+	bus.SetMMIO(bar0+0x00, 0x16000000) // BOOT_0 TU106 (0x16)
+
+	// Pre-seed LINK_CONFIG_0 with existing bits (e.g. 0x80005800, with rate bits 0)
+	bus.SetMMIO(bar0+0x8C040, 0x80005800)
+	// Pre-seed PL_LINK_RATE with existing bits (e.g. 0x00200036, with rate bits 0)
+	bus.SetMMIO(bar0+0x8C1C0, 0x00200036)
+
+	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000021) // Gen2 attained
+
+	negotiator := NewLinkNegotiator(bus)
+	res, err := negotiator.Negotiate(bdf, prof, 0xFFFFFFFF, 2, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+
+	// Assert that RMW preserved unmasked bits and inserted the new rate bits
+	linkCfg, _ := bus.ReadMMIO(bar0 + 0x8C040)
+	if linkCfg != 0x80085800 {
+		t.Errorf("LINK_CONFIG_0 RMW mismatch: expected 0x80085800, got 0x%08X", linkCfg)
+	}
+	plLinkRate, _ := bus.ReadMMIO(bar0 + 0x8C1C0)
+	if plLinkRate != 0x00240036 {
+		t.Errorf("PL_LINK_RATE RMW mismatch: expected 0x00240036, got 0x%08X", plLinkRate)
+	}
+}
+

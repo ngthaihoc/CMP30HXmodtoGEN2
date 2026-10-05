@@ -33,21 +33,21 @@ func TestCheckDriverSignature_NonExistent(t *testing.T) {
 }
 
 func TestCheckDriverSignature_SystemSigned(t *testing.T) {
-	sysRoot := os.Getenv("SystemRoot")
-	if sysRoot == "" {
-		sysRoot = `C:\Windows`
-	}
-	cmdExe := filepath.Join(sysRoot, "System32", "cmd.exe")
-	if _, err := os.Stat(cmdExe); err != nil {
-		t.Skip("cmd.exe not found")
+	target := findDriverDLL()
+	if _, err := os.Stat(target); err != nil {
+		sysRoot := os.Getenv("SystemRoot")
+		if sysRoot == "" {
+			sysRoot = `C:\Windows`
+		}
+		target = filepath.Join(sysRoot, "explorer.exe")
 	}
 
-	valid, status, err := CheckDriverSignature(cmdExe)
+	valid, status, err := CheckDriverSignature(target)
 	if err != nil {
-		t.Fatalf("CheckDriverSignature failed for cmd.exe: %v", err)
+		t.Fatalf("CheckDriverSignature failed for %s: %v", target, err)
 	}
 	if !valid {
-		t.Errorf("Expected cmd.exe to be signed and valid, got valid=false, status=%s", status)
+		t.Errorf("Expected %s to be signed and valid, got valid=false, status=%s", target, status)
 	}
 }
 
