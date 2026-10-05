@@ -1,5 +1,6 @@
 .claude/
 .local/
+.hermes/
 *.tmp
 *.log
 CLAUDE.md
