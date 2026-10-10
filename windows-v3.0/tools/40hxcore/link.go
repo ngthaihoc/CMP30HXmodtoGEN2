@@ -20,7 +20,7 @@ var (
 	ErrRootPortIncapable = errors.New("root port does not support target speed")
 )
 
-// HardwareBus: Điểm phân tách (seam) giao tiếp I/O phần cứng cấp thấp
+// HardwareBus: Điểm phân tách (seam) giao tiếp I/O phần cứng vật lý cấp thấp (6 phương thức cốt lõi)
 type HardwareBus interface {
 	ReadPCIConfig(bdf uint32, reg uint32) (uint32, error)
 	WritePCIConfig(bdf uint32, reg uint32, data []byte) error
@@ -28,12 +28,6 @@ type HardwareBus interface {
 	WriteMMIO(physAddr uint64, val uint32) error
 	PnpResetDevice(devID uint16) bool
 	RestartNVDisplay() error
-	Sleep(d time.Duration)
-	LinkSpeed(bdf uint32) uint32
-	LinkWidth(bdf uint32) uint32
-	PcieCap(bdf uint32) uint32
-	PcieMaxSpeed(bdf uint32) uint32
-	FindRootPort(gpuBus uint32) uint32
 }
 
 // MMIORegWrite: Bản ghi thiết lập thanh ghi MMIO chuẩn hoá
@@ -95,14 +89,57 @@ type NegotiationResult struct {
 	DiagnosticReport string
 }
 
+// NegotiationOptions thiết lập tham số cho quy trình đàm phán hoàn chỉnh
+type NegotiationOptions struct {
+	TargetGen    uint32
+	AllowGen3    bool
+	ForceRoot    bool
+	AllowStage2  bool
+	UserIsAdmin  bool
+}
+
+// NegotiationVerdict trả về kết quả đàm phán hoàn chỉnh kèm StatusContract và chỉ dẫn Retry
+type NegotiationVerdict struct {
+	Success          bool
+	CurrentSpeed     uint32
+	CurrentWidth     uint32
+	TargetGen        uint32
+	Verdict          string
+	StatusContract   StatusContract
+	NeedsRetry       bool
+	RetryAdvice      string
+	DiagnosticReport string
+}
+
 // LinkNegotiator: Deep Module điều khiển huấn luyện lại PCIe và tối ưu DMA
 type LinkNegotiator struct {
-	bus HardwareBus
+	bus     HardwareBus
+	sleepFn func(time.Duration)
 }
 
 // NewLinkNegotiator khởi tạo LinkNegotiator với HardwareBus adapter
 func NewLinkNegotiator(bus HardwareBus) *LinkNegotiator {
-	return &LinkNegotiator{bus: bus}
+	n := &LinkNegotiator{
+		bus:     bus,
+		sleepFn: time.Sleep,
+	}
+	if _, isMock := bus.(*MockHardwareBus); isMock {
+		n.sleepFn = func(time.Duration) {} // Fast simulation for unit tests
+	}
+	return n
+}
+
+// SetSleepFn cho phép tùy biến hàm delay (phục vụ mô phỏng test hoặc tốc độ cao)
+func (n *LinkNegotiator) SetSleepFn(fn func(time.Duration)) {
+	if fn != nil {
+		n.sleepFn = fn
+	}
+}
+
+func (n *LinkNegotiator) sleep(d time.Duration) {
+	if n.sleepFn != nil {
+		n.sleepFn(d)
+	}
 }
 
 // Negotiate thực thi quy trình huấn luyện PCIe sâu và tối ưu MRRS 512B
@@ -187,7 +224,7 @@ func (n *LinkNegotiator) Negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint3
 		}
 
 		if cur < targetGen && n.bus.PnpResetDevice(prof.DeviceID) {
-			n.bus.Sleep(2 * time.Second)
+			n.sleep(2 * time.Second)
 			if bar0Phys != 0 {
 				_ = n.injectMMIOShadowRegisters(bar0Phys, prof, targetGen)
 			}
@@ -243,7 +280,7 @@ func (n *LinkNegotiator) rootLinkDisable(rootBDF uint32, gpuBDF uint32, bar0Phys
 	lo := uint16(ctl & 0xFFFF)
 	set := lo | 0x10 // bit 4 = Link Disable
 	_ = n.bus.WritePCIConfig(rootBDF, rcap+0x10, []byte{byte(set), byte(set >> 8)})
-	n.bus.Sleep(500 * time.Millisecond)
+	n.sleep(500 * time.Millisecond)
 
 	// Cấu hình TLS phía Root Port trong khi link đang tạm ngắt
 	n.setTLS(rootBDF, rcap, uint16(targetGen))
@@ -254,7 +291,7 @@ func (n *LinkNegotiator) rootLinkDisable(rootBDF uint32, gpuBDF uint32, bar0Phys
 		clr := uint16(ctl2&0xFFFF) &^ 0x10
 		_ = n.bus.WritePCIConfig(rootBDF, rcap+0x10, []byte{byte(clr), byte(clr >> 8)})
 	}
-	n.bus.Sleep(2 * time.Second)
+	n.sleep(2 * time.Second)
 
 	// Sau khi link đã hoạt động trở lại, tiến hành nạp lại thanh ghi MMIO shadow và TLS cho GPU endpoint
 	if bar0Phys != 0 {
@@ -327,7 +364,7 @@ func (n *LinkNegotiator) pollRetrain(gpuBDF, rootBDF, cap, targetGen uint32) uin
 		}
 		_ = n.retrainPulse(targetBDF)
 		for poll := 0; poll < 25; poll++ {
-			n.bus.Sleep(75 * time.Millisecond)
+			n.sleep(75 * time.Millisecond)
 			cur = n.linkSpeed(gpuBDF, cap)
 			if cur >= targetGen {
 				break
@@ -430,13 +467,196 @@ func (n *LinkNegotiator) retrainPulse(bdf uint32) error {
 	if err := n.bus.WritePCIConfig(bdf, cap+0x10, clear); err != nil {
 		return err
 	}
-	n.bus.Sleep(50 * time.Millisecond)
+	n.sleep(50 * time.Millisecond)
 	ctl2, err := n.bus.ReadPCIConfig(bdf, cap+0x10)
 	if err != nil {
 		return err
 	}
 	set := uint16(ctl2&0xFFFF) | 0x20
 	return n.bus.WritePCIConfig(bdf, cap+0x10, []byte{byte(set), byte(set >> 8)})
+}
+
+func (n *LinkNegotiator) pcieMaxSpeed(bdf uint32) uint32 {
+	cap := n.findPcieCap(bdf)
+	if cap == 0 {
+		return 0
+	}
+	v, err := n.bus.ReadPCIConfig(bdf, cap+0x0C)
+	if err != nil {
+		return 0
+	}
+	return v & 0xF
+}
+
+func (n *LinkNegotiator) findRootPort(gpuBus uint32) uint32 {
+	for d := uint32(0); d < 32; d++ {
+		for f := uint32(0); f < 8; f++ {
+			bdf := (0 << 8) | (d << 3) | f
+			id, err := n.bus.ReadPCIConfig(bdf, 0x00)
+			if err != nil || id == 0xFFFFFFFF || (id&0xFFFF) == 0 {
+				continue
+			}
+			cls, _ := n.bus.ReadPCIConfig(bdf, 0x08)
+			if ((cls >> 16) & 0xFFFF) != 0x0604 {
+				continue
+			}
+			sec, _ := n.bus.ReadPCIConfig(bdf, 0x18)
+			if ((sec >> 8) & 0xFF) == gpuBus {
+				return bdf
+			}
+		}
+	}
+	return 0xFFFFFFFF
+}
+
+// ExecuteNegotiation: Deep API thực hiện toàn bộ quy trình từ kiểm tra năng lực,
+// đàm phán link, khôi phục Stage 2, đến xuất bản StatusContract hoàn chỉnh và tư vấn retry.
+func (n *LinkNegotiator) ExecuteNegotiation(gpuBDF uint32, prof GPUProfile, opts NegotiationOptions) (*NegotiationVerdict, error) {
+	targetGen := opts.TargetGen
+	if targetGen == 0 {
+		targetGen = 2
+	}
+	if prof.DeviceID == 0x2189 && targetGen > 2 {
+		targetGen = 2
+	}
+	if prof.MaxSupportedGen > 0 && targetGen > prof.MaxSupportedGen {
+		targetGen = prof.MaxSupportedGen
+	}
+
+	gpuBus := (gpuBDF >> 8) & 0xFF
+	cap := n.findPcieCap(gpuBDF)
+	if cap == 0 {
+		st := StatusContract{
+			StatusCode: StatusDrvFail,
+			ErrorCode:  "PCIE_CAP_MISSING",
+			Details:    []string{"Không tìm thấy PCIe Capability trên GPU"},
+		}
+		return &NegotiationVerdict{
+			Success:        false,
+			TargetGen:      targetGen,
+			Verdict:        "Không tìm thấy PCIe Capability",
+			StatusContract: st,
+			NeedsRetry:     false,
+		}, ErrPCIeCapMissing
+	}
+
+	cur := n.linkSpeed(gpuBDF, cap)
+	curWidth := n.linkWidth(gpuBDF, cap)
+
+	// 1. Kiểm tra trạng thái đã đạt sẵn (Fast-path)
+	if cur >= targetGen {
+		st := StatusContract{
+			StatusCode:   StatusGen2Success,
+			SpeedCurrent: cur,
+			WidthCurrent: curWidth,
+			TLSTarget:    targetGen,
+			ErrorCode:    "NONE",
+			Details: []string{
+				fmt.Sprintf("Kết luận: ✅ Gen%d không cần thao tác: Băng thông hiện tại đã là Gen%d", targetGen, cur),
+				fmt.Sprintf("Vị trí %s: %02x:%02x.%x", prof.Name, gpuBus, (gpuBDF>>3)&0x1F, gpuBDF&7),
+				fmt.Sprintf("đã đạt mục tiêu Gen%d thành công", targetGen),
+			},
+		}
+		return &NegotiationVerdict{
+			Success:        true,
+			CurrentSpeed:   cur,
+			CurrentWidth:   curWidth,
+			TargetGen:      targetGen,
+			Verdict:        fmt.Sprintf("PCIe đã đạt Gen%d, không cần thao tác thêm", cur),
+			StatusContract: st,
+			NeedsRetry:     false,
+		}, nil
+	}
+
+	// 2. Tra cứu Root Port và giới hạn tốc độ phần cứng
+	rootBDF := n.findRootPort(gpuBus)
+	gpuMax := n.pcieMaxSpeed(gpuBDF)
+	rootMax := gpuMax
+	if rootBDF != 0xFFFFFFFF {
+		rootMax = n.pcieMaxSpeed(rootBDF)
+	}
+
+	allowTarget := LinkTargetAllowed(gpuMax, rootMax, prof.MaxSupportedGen, targetGen)
+	// Đối với card CMP (RequiresMMIO / HasSafePL0 như CMP 40HX & 30HX), LNKCAP ban đầu bị khoá ở Gen1 khi chưa nạp thanh ghi Shadow.
+	// Miễn là Root Port và Profile hỗ trợ targetGen, cho phép nạp MMIO Shadow và đàm phán link thay vì dừng lại.
+	canUnlockViaMMIO := (prof.RequiresMMIO || prof.HasSafePL0) && rootMax >= targetGen && prof.MaxSupportedGen >= targetGen
+	if !allowTarget && !opts.ForceRoot && !canUnlockViaMMIO {
+		diagMsg := fmt.Sprintf("Phần cứng hoặc Profile không hỗ trợ Gen%d (GPU Max=%d, Root Max=%d, Cap=%d)", targetGen, gpuMax, rootMax, prof.MaxSupportedGen)
+		st := StatusContract{
+			StatusCode:   StatusHwLimit,
+			SpeedCurrent: cur,
+			WidthCurrent: curWidth,
+			TLSTarget:    targetGen,
+			ErrorCode:    "GEN2_HARDWARE_LIMIT",
+			Details: []string{
+				diagMsg,
+				fmt.Sprintf("GPU Max: Gen%d | Root Port Max: Gen%d", gpuMax, rootMax),
+			},
+		}
+		return &NegotiationVerdict{
+			Success:          false,
+			CurrentSpeed:     cur,
+			CurrentWidth:     curWidth,
+			TargetGen:        targetGen,
+			Verdict:          diagMsg,
+			StatusContract:   st,
+			NeedsRetry:       false,
+			DiagnosticReport: diagMsg,
+		}, nil
+	}
+
+	// 3. Thực hiện chuỗi đàm phán & huấn luyện lại link
+	allowStage2 := opts.AllowStage2
+	if prof.DeviceID == 0x2189 || prof.Family == "TU116" {
+		allowStage2 = false
+	}
+	res, err := n.Negotiate(gpuBDF, prof, rootBDF, targetGen, allowStage2)
+	if err != nil {
+		st := StatusContract{
+			StatusCode:   StatusDrvFail,
+			SpeedCurrent: cur,
+			WidthCurrent: curWidth,
+			TLSTarget:    targetGen,
+			ErrorCode:    "NEGOTIATION_ERROR",
+			Details:      []string{fmt.Sprintf("Lỗi thương lượng link: %v", err)},
+		}
+		return &NegotiationVerdict{
+			Success:        false,
+			CurrentSpeed:   cur,
+			CurrentWidth:   curWidth,
+			TargetGen:      targetGen,
+			Verdict:        fmt.Sprintf("Lỗi thương lượng link: %v", err),
+			StatusContract: st,
+			NeedsRetry:     true,
+		}, err
+	}
+
+	statusCode := StatusGen1Stuck
+	if res.Success {
+		statusCode = StatusGen2Success
+	}
+	st := StatusContract{
+		StatusCode:   statusCode,
+		SpeedCurrent: res.CurrentSpeed,
+		WidthCurrent: res.CurrentWidth,
+		TLSTarget:    res.TargetTLS,
+		ErrorCode:    "NONE",
+		Details: []string{
+			fmt.Sprintf("Kết luận: %s", res.Verdict),
+			fmt.Sprintf("Vị trí: %02x:%02x.%x | TLS: Gen%d", gpuBus, (gpuBDF>>3)&0x1F, gpuBDF&7, res.TargetTLS),
+		},
+	}
+
+	return &NegotiationVerdict{
+		Success:          res.Success,
+		CurrentSpeed:     res.CurrentSpeed,
+		CurrentWidth:     res.CurrentWidth,
+		TargetGen:        res.TargetGen,
+		Verdict:          res.Verdict,
+		StatusContract:   st,
+		NeedsRetry:       !res.Success,
+		DiagnosticReport: res.DiagnosticReport,
+	}, nil
 }
 
 // -------------------------------------------------------------
@@ -770,28 +990,4 @@ func (p *ProductionBus) RestartNVDisplay() error {
 		return nil
 	}
 	return nil
-}
-
-func (p *ProductionBus) Sleep(d time.Duration) {
-	time.Sleep(d)
-}
-
-func (p *ProductionBus) LinkSpeed(bdf uint32) uint32 {
-	return LinkSpeed(p.wh, bdf)
-}
-
-func (p *ProductionBus) LinkWidth(bdf uint32) uint32 {
-	return LinkWidth(p.wh, bdf)
-}
-
-func (p *ProductionBus) PcieCap(bdf uint32) uint32 {
-	return PcieCap(p.wh, bdf)
-}
-
-func (p *ProductionBus) PcieMaxSpeed(bdf uint32) uint32 {
-	return PcieMaxSpeed(p.wh, bdf)
-}
-
-func (p *ProductionBus) FindRootPort(gpuBus uint32) uint32 {
-	return FindRootPort(p.wh, gpuBus)
 }

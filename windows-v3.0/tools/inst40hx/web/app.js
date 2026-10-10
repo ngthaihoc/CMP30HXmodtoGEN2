@@ -8,85 +8,89 @@
   // --- Bilingual Dictionary ---
   const i18n = {
     vi: {
-      brand_desc: "NVIDIA CMP 40HX & 30HX PCIe Gen2 x16 / Kích hoạt Băng thông & Tính toán",
+      brand_desc: "NVIDIA CMP 40HX & 30HX: kích hoạt băng thông PCIe Gen2 x16 & năng lực tính toán",
       status_connecting: "Đang kết nối...",
       status_connected: "Trực tuyến (Live)",
       status_disconnected: "Mất kết nối",
       btn_refresh: "Quét lại",
       refresh_tooltip: "Quét lại môi trường hệ thống",
-      hud_silicon_title: "Thông tin Bán dẫn & PCIe Bus",
-      spec_bus_id: "PCIe Bus Device:",
-      spec_gsp: "GSP-RM Firmware:",
+      hud_silicon_title: "Thông tin bán dẫn & bus PCIe",
+      spec_bus_id: "Thiết bị bus PCIe:",
+      spec_gsp: "Firmware GSP-RM:",
       spec_vanguard: "Riot Vanguard / Game:",
-      spec_driver_strategy: "Chiến lược Driver:",
-      lane_topology: "Cấu trúc 16 làn PCIe vật lý (Physical Lanes):",
-      hud_bandwidth_title: "Băng thông & Liên kết PCIe",
-      speed_locked: "Mặc định (Khóa eFuse)",
+      spec_driver_strategy: "Chiến lược driver:",
+      lane_topology: "Cấu trúc 16 làn PCIe vật lý:",
+      hud_bandwidth_title: "Băng thông & liên kết PCIe",
+      speed_locked: "Mặc định (khóa eFuse)",
       speed_unlocked: "Đã mở khóa tối đa",
       btn_unlock_title: "Mở khóa PCIe Gen2 ngay",
-      btn_unlock_sub: "Kích hoạt tức thì phiên hiện tại (không cần khởi động lại máy)",
+      btn_unlock_sub: "Kích hoạt tức thì cho phiên hiện tại (không cần khởi động lại máy)",
       btn_full_title: "Cài đặt toàn bộ 1-chạm",
-      btn_full_sub: "Tự động cấu hình chuẩn: GSP + Driver + Tự khởi động + Nguồn",
-      btn_persist_title: "Mở khoá & Cài tự khởi động",
+      btn_full_sub: "Tự động cấu hình chuẩn: GSP + driver + tự khởi động + nguồn",
+      btn_persist_title: "Mở khóa & cài tự khởi động",
       btn_persist_sub: "Đăng ký tác vụ tự chạy khi đăng nhập Windows",
-      audit_title: "Chẩn đoán Môi trường & Phần cứng",
+      btn_forceroot_title: "⚡ Ép mở khóa Gen2 (Root Port)",
+      btn_forceroot_sub: "Bỏ qua kẹt LNKCAP Gen1 (khuyên dùng cho 40HX/30HX khi chưa reboot EFI)",
+      tip_forceroot_title: "💡 KHUYẾN NGHỊ: ÉP MỞ KHÓA GEN2 TRỰC TIẾP TRONG WINDOWS (-force-root-gen2)",
+      tip_forceroot_desc: "Khi mới cài đặt hoặc chưa khởi động lại máy (hoặc Fast Startup / CSM / Secure Boot chặn EFI), thanh ghi LNKCAP của CMP 40HX/30HX vẫn báo cứng Gen1 (0x00463D01). Bấm <strong>[⚡ Ép mở khóa Gen2 (Root Port)]</strong> (tương đương lệnh <code>40HXInstaller.exe -gen2 -force-root-gen2</code>) để nạp thẳng chuỗi MMIO Shadow TU106/TU116 và ép Root Port bo mạch chủ nâng tốc độ lên Gen2 x16 ngay lập tức!",
+      audit_title: "Chẩn đoán môi trường & phần cứng",
       audit_sub: "Kiểm tra tính tương thích trước khi kích hoạt",
       audit_loading: "Đang nạp dữ liệu kiểm tra hệ thống...",
-      components_title: "Thành phần & Thiết lập hệ thống",
+      components_title: "Thành phần & thiết lập hệ thống",
       components_sub: "Chọn các mục cần cập nhật hoặc bấm [Cài đặt mục đã chọn]",
       name_gsp: "Bật GSP (EnableGpuFirmware=1)",
-      name_drv: "Cài đặt Driver PCIe & Ngoại lệ Defender",
-      name_efi: "EFI Mở khoá + Khởi động BIOS (Chỉ 40HX)",
-      name_task: "Tự động mở khoá PCIe khi đăng nhập",
-      name_fast: "Nguồn: Tắt Fast Startup (Khởi động nhanh)",
-      name_aspm: "Nguồn: Tắt ASPM (Tiết kiệm điện PCIe)",
-      name_perf: "Nguồn: Bật chế độ High Performance",
+      name_drv: "Cài đặt driver PCIe & ngoại lệ Defender",
+      name_efi: "EFI mở khóa + khởi động BIOS (chỉ 40HX)",
+      name_task: "Tự động mở khóa PCIe khi đăng nhập",
+      name_fast: "Nguồn: tắt Fast Startup (khởi động nhanh)",
+      name_aspm: "Nguồn: tắt ASPM (tiết kiệm điện PCIe)",
+      name_perf: "Nguồn: bật chế độ High Performance",
       name_defoff: "Tắt Defender Realtime Protection",
-      desc_gsp: "Bắt buộc để tránh mã lỗi Code 43 sau khi mở khoá",
+      desc_gsp: "Bắt buộc để tránh mã lỗi Code 43 sau khi mở khóa",
       desc_drv: "Nạp driver can thiệp thanh ghi & cấp quyền an toàn",
       desc_efi: "Nạp payload vào phân vùng ESP (chỉ áp dụng cho chuẩn UEFI)",
-      desc_task: "Đăng ký tác vụ Task Scheduler SYSTEM và Run Key dự phòng",
+      desc_task: "Đăng ký tác vụ Task Scheduler SYSTEM và Run key dự phòng",
       desc_fast: "Tránh tình trạng Windows nạp sleep image bỏ qua UEFI hook",
       desc_aspm: "Tránh PCIe tự động rớt về Gen1 x1 khi máy tính ở trạng thái rảnh",
       desc_perf: "Đảm bảo cấp đủ năng lượng cho liên kết PCIe hoạt động tối đa",
       desc_defoff: "Chỉ cần thiết khi phần mềm diệt virus chặn file sys can thiệp",
       btn_install_selected: "Cài đặt mục đã chọn",
-      policy_title: "Chiến lược Driver & Tự phục hồi",
-      policy_sub: "Cấu hình hành vi sau khi hoàn tất mở khoá",
-      strat_0_name: "Dùng xong gỡ ngay (Khuyên dùng cho Game)",
+      policy_title: "Chiến lược driver & tự phục hồi",
+      policy_sub: "Cấu hình hành vi sau khi hoàn tất mở khóa",
+      strat_0_name: "Dùng xong gỡ ngay (khuyên dùng cho game)",
       strat_0_desc: "Sau khi nâng tốc độ, driver can thiệp được gỡ hoàn toàn. An toàn tuyệt đối với Riot Vanguard & Anti-Cheat.",
       strat_1_name: "Tự động thử lại khi lỗi",
       strat_1_desc: "Tự động thử lại nếu lần đầu khởi tạo GPU chưa đạt tốc độ Gen2.",
-      strat_2_name: "Thường trú (Canh giữ tốc độ PCIe)",
+      strat_2_name: "Thường trú (canh giữ tốc độ PCIe)",
       strat_2_desc: "Driver chạy nền thường trực, định kỳ kiểm tra và ép xung PCIe trở lại nếu bị tụt xung.",
-      desc_autohard: "Tự động kích hoạt Stage 2 (Link Disable + Reset PnP) khi mở khoá thường không đạt",
+      desc_autohard: "Tự động kích hoạt Stage 2 (Link Disable + Reset PnP) khi mở khóa thường không đạt",
       retry_count_label: "Số lần thử lại:",
       retry_count_unit: "lần",
       retry_interval_label: "Giãn cách:",
       retry_interval_unit: "phút",
       btn_save_policy: "Lưu cấu hình chính sách",
-      terminal_title: "Nhật ký Chẩn đoán thời gian thực",
+      terminal_title: "Nhật ký chẩn đoán thời gian thực",
       log_lines: "dòng log",
       btn_clear_log: "Xóa",
       btn_copy_log: "Sao chép",
-      safety_title: "An toàn cho Game & Anti-Cheat (Riot Vanguard, EasyAntiCheat, BattlEye)",
-      safety_desc: "Giải pháp v3.0 không flash VBIOS, không bật Test Signing, gỡ sạch driver can thiệp sau khi mở khoá. Đảm bảo 100% tính toàn vẹn hệ điều hành.",
-      btn_riot_title: "Tối ưu hóa Riot Games (1-Chạm)",
+      safety_title: "An toàn cho game & Anti-Cheat (Riot Vanguard, EasyAntiCheat, BattlEye)",
+      safety_desc: "Giải pháp v3.0 không flash VBIOS, không bật Test Signing, gỡ sạch driver can thiệp sau khi mở khóa. Đảm bảo 100% tính toàn vẹn hệ điều hành.",
+      btn_riot_title: "Tối ưu hóa Riot Games (1-chạm)",
       btn_riot_sub: "Dọn sạch driver can thiệp, kích hoạt MSHybrid CASO cho LoL / Valorant",
-      riot_panel_title: "Tương Thích Riot Games (MSHybrid & Vanguard)",
+      riot_panel_title: "Tương thích Riot Games (MSHybrid & Vanguard)",
       riot_panel_sub: "Hỗ trợ không cần cài lại driver, tối ưu LoL/TFT & Valorant",
-      riot_lol_detail: "MSHybrid CASO + Tự động cấu hình Borderless Windowed (WindowMode=2) mượt mà không cổng xuất hình.",
+      riot_lol_detail: "MSHybrid CASO + tự động cấu hình Borderless Windowed (WindowMode=2) mượt mà không cổng xuất hình.",
       riot_valorant_detail: "Dọn dẹp driver can thiệp, tắt Testsigning đáp ứng tiêu chuẩn Riot Vanguard.",
       riot_rec_title: "KHUYẾN NGHỊ TỐI ƯU:",
-      btn_riot_opt_inner: "⚡ Tối Ưu Hóa 1-Chạm",
+      btn_riot_opt_inner: "⚡ Tối ưu hóa 1-chạm",
       btn_riot_sign_inner: "🔐 Ký EFI (Valorant Win 11)",
-      btn_riot_guide_inner: "📖 Hướng Dẫn BIOS",
-      btn_launch_app: "Mở App Riêng",
-      modal_bios_title: "Hướng Dẫn Nạp Key BIOS & Giữ Tensor Core",
+      btn_riot_guide_inner: "📖 Hướng dẫn BIOS",
+      btn_launch_app: "Mở app riêng",
+      modal_bios_title: "Hướng dẫn nạp key BIOS & giữ Tensor Core",
       modal_bios_warning: "Hãy dùng điện thoại chụp lại hướng dẫn này trước khi khởi động lại máy tính!",
       modal_cert_locs: "Vị trí file chứng chỉ (CMP40HX_Key.cer):",
       modal_btn_close: "Đóng",
-      modal_btn_reboot: "Khởi Động Lại Vào BIOS Ngay"
+      modal_btn_reboot: "Khởi động lại vào BIOS ngay"
     },
     en: {
       brand_desc: "NVIDIA CMP 40HX & 30HX PCIe Gen2 x16 Bandwidth & Compute Enablement Suite",
@@ -110,6 +114,10 @@
       btn_full_sub: "Auto configure all: GSP + Drivers + Auto-Start + Power tuning",
       btn_persist_title: "Unlock & Install Autostart",
       btn_persist_sub: "Register persistent startup task on Windows user logon",
+      btn_forceroot_title: "⚡ Force Root Port Gen2 Unlock",
+      btn_forceroot_sub: "Bypass LNKCAP Gen1 lock (Recommended for 40HX/30HX before EFI reboot)",
+      tip_forceroot_title: "💡 RECOMMENDATION: FORCE ROOT PORT GEN2 UNLOCK IN WINDOWS (-force-root-gen2)",
+      tip_forceroot_desc: "When freshly installed or before restarting (or if Fast Startup / CSM / Secure Boot bypasses EFI), the GPU LNKCAP register initially reports locked Gen1 (0x00463D01). Click <strong>[⚡ Force Root Port Gen2 Unlock]</strong> (equivalent to <code>40HXInstaller.exe -gen2 -force-root-gen2</code>) to inject the TU106/TU116 MMIO shadow sequence and force the motherboard Root Port to retrain up to Gen2 x16 instantly!",
       audit_title: "System & Hardware Diagnostic",
       audit_sub: "Environment validation before link enablement",
       audit_loading: "Loading system diagnostic data...",
@@ -193,6 +201,7 @@
   const elSpecDriverStrategy = document.getElementById('specDriverStrategy');
 
   const elBtnUnlockNow = document.getElementById('btnUnlockNow');
+  const elBtnForceRootGen2 = document.getElementById('btnForceRootGen2');
   const elBtnFullInstall = document.getElementById('btnFullInstall');
   const elBtnGen2AndTask = document.getElementById('btnGen2AndTask');
   const elBtnRiotOptimize = document.getElementById('btnRiotOptimize');
@@ -257,6 +266,12 @@
       const key = el.getAttribute('data-i18n');
       if (i18n[lang] && i18n[lang][key]) {
         el.textContent = i18n[lang][key];
+      }
+    });
+    document.querySelectorAll('[data-i18n-html]').forEach(el => {
+      const key = el.getAttribute('data-i18n-html');
+      if (i18n[lang] && i18n[lang][key]) {
+        el.innerHTML = i18n[lang][key];
       }
     });
     document.querySelectorAll('[data-i18n-title]').forEach(el => {
@@ -493,14 +508,57 @@
 
     // PCIe Link status & gauge
     const isGen2 = data.isGen2 || false;
-    if (isGen2) {
+    const gpuDetected = data.gpuDetected || false;
+    if (gpuDetected && isGen2) {
       initLaneMatrix(16);
       if (elCurrentThroughput) elCurrentThroughput.innerHTML = `~6.4 <span class="unit">GB/s</span>`;
       if (elGaugeBarFill) elGaugeBarFill.style.width = '100%';
-    } else {
+    } else if (gpuDetected) {
       initLaneMatrix(1);
       if (elCurrentThroughput) elCurrentThroughput.innerHTML = `250 <span class="unit">MB/s</span>`;
       if (elGaugeBarFill) elGaugeBarFill.style.width = '4%';
+    } else {
+      initLaneMatrix(0);
+      if (elCurrentThroughput) elCurrentThroughput.innerHTML = `0 <span class="unit">MB/s</span>`;
+      if (elGaugeBarFill) elGaugeBarFill.style.width = '0%';
+    }
+
+    // Tự động điều chỉnh nhãn nút và ranh giới an toàn theo đúng dòng card 30HX / 40HX
+    const is30HX = data.is30HX || (data.gpuName && (data.gpuName.includes("30HX") || data.gpuName.includes("TU116")));
+    const is40HX = data.is40HX || (data.gpuName && (data.gpuName.includes("40HX") || data.gpuName.includes("TU106")));
+
+    if (elBtnForceRootGen2) {
+      const btnTitle = elBtnForceRootGen2.querySelector('.btn-title');
+      const btnSub = elBtnForceRootGen2.querySelector('.btn-sub');
+      if (btnTitle && btnSub) {
+        if (is30HX) {
+          btnTitle.textContent = currentLang === 'vi' ? "⚡ Ép mở khóa Gen2 (CMP 30HX)" : "⚡ Force Gen2 (CMP 30HX)";
+          btnSub.textContent = currentLang === 'vi' ? "Bảo vệ eFuse, nạp MMIO TU116 & ép Root Port Gen2 (Đã cách ly 40HX)" : "eFuse safe, inject TU116 MMIO & retrain Gen2 (40HX isolated)";
+        } else if (is40HX) {
+          btnTitle.textContent = currentLang === 'vi' ? "⚡ Ép mở khóa Gen2 (CMP 40HX)" : "⚡ Force Gen2 (CMP 40HX)";
+          btnSub.textContent = currentLang === 'vi' ? "Bỏ qua kẹt LNKCAP Gen1, nạp MMIO TU106 & ép Root Port Gen2" : "Bypass LNKCAP Gen1, inject TU106 MMIO & retrain Root Port";
+        } else {
+          btnTitle.textContent = currentLang === 'vi' ? "⚡ Ép mở khóa Gen2 (Tự nhận diện card)" : "⚡ Force Gen2 (Auto-Detect)";
+          btnSub.textContent = currentLang === 'vi' ? "Tự động nhận diện 30HX / 40HX để nạp đúng chuỗi an toàn" : "Auto-detect 30HX / 40HX to inject safe sequence";
+        }
+      }
+    }
+
+    // Cập nhật banner khuyến nghị theo card
+    const tipTitle = document.querySelector('.tip-callout-box .tip-title');
+    const tipDesc = document.querySelector('.tip-callout-box .tip-desc');
+    if (tipTitle && tipDesc) {
+      if (is30HX) {
+        tipTitle.textContent = currentLang === 'vi' ? "🔒 BẢO VỆ PHẦN CỨNG CMP 30HX (TU116)" : "🔒 HARDWARE ISOLATION: CMP 30HX (TU116)";
+        tipDesc.innerHTML = currentLang === 'vi'
+          ? "Đã nhận diện <strong>NVIDIA CMP 30HX</strong>. Hệ thống tự động cách ly: khóa cứng eFuse ở Gen2 (không ép Gen3), không áp dụng microcode/reset của 40HX. Bấm <strong>[⚡ Ép mở khóa Gen2 (CMP 30HX)]</strong> để nạp chuỗi MMIO TU116 và ép Root Port huấn luyện lại an toàn!"
+          : "Detected <strong>NVIDIA CMP 30HX</strong>. Hardware boundaries enforced: eFuse locked at Gen2, 40HX microcode and destructive resets blocked. Click <strong>[⚡ Force Gen2 (CMP 30HX)]</strong> to inject safe TU116 MMIO registers and retrain Root Port!";
+      } else if (is40HX) {
+        tipTitle.textContent = currentLang === 'vi' ? "⚡ KHUYẾN NGHỊ CMP 40HX (TU106) - BỎ QUA KẸT GEN1" : "⚡ RECOMMENDATION: CMP 40HX (TU106) - BYPASS GEN1 LOCK";
+        tipDesc.innerHTML = currentLang === 'vi'
+          ? "Đã nhận diện <strong>NVIDIA CMP 40HX</strong>. Khi chưa reboot EFI hoặc Fast Startup chặn UEFI, thanh ghi LNKCAP sẽ tạm thời báo Gen1 (0x00463D01). Bấm <strong>[⚡ Ép mở khóa Gen2 (CMP 40HX)]</strong> để nạp chuỗi MMIO TU106 và ép Root Port bo mạch chủ nâng tốc độ lên Gen2 x16 tức thì!"
+          : "Detected <strong>NVIDIA CMP 40HX</strong>. When freshly installed without EFI reboot, LNKCAP stays at Gen1 (0x00463D01). Click <strong>[⚡ Force Gen2 (CMP 40HX)]</strong> to inject TU106 MMIO shadow registers and force Root Port retrain up to Gen2 x16 instantly!";
+      }
     }
   }
 
@@ -536,6 +594,15 @@
     elBtnUnlockNow.addEventListener('click', () => {
       appendLogLine("[PCIe] Bắt đầu kích hoạt mở khóa Gen2 ngay lập tức...");
       sendAction('/api/unlock-now', null, elBtnUnlockNow);
+    });
+  }
+
+  // 1b. Ép mở khoá Gen2 qua Root Port (Bỏ qua kẹt LNKCAP Gen1)
+  if (elBtnForceRootGen2) {
+    elBtnForceRootGen2.addEventListener('click', () => {
+      appendLogLine("[PCIe] ⚡ Bắt đầu Ép Mở Khoá Gen2 qua Root Port (-force-root-gen2)...");
+      appendLogLine("[PCIe] 💡 Đang nạp chuỗi MMIO Shadow TU106/TU116 và ép Root Port huấn luyện lại...");
+      sendAction('/api/force-root-gen2', null, elBtnForceRootGen2);
     });
   }
 
@@ -765,7 +832,7 @@
   }
 
   // --- Initialization ---
-  initLaneMatrix(16);
+  initLaneMatrix(0);
   initLogStream();
   fetchStatus();
 

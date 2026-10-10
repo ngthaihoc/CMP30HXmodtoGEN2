@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"strings"
+
+	hxcore "40hxcore"
 )
 
 // GPUModel biểu thị dòng GPU NVIDIA được nhận diện
@@ -35,16 +37,42 @@ type RiotStatus struct {
 	Recommendation         string   `json:"recommendation"`
 }
 
-// DetectGPUModel nhận diện dòng GPU dựa trên Device ID và tên thiết bị
+// DetectGPUProfile tra cứu profile GPU chính thức từ hxcore.SupportedGPUProfiles
+func DetectGPUProfile(deviceID uint16, name string) hxcore.GPUProfile {
+	if prof, ok := hxcore.LookupGPUProfile(0x10DE, deviceID); ok {
+		return prof
+	}
+	upper := strings.ToUpper(name)
+	for _, prof := range hxcore.SupportedGPUProfiles {
+		if strings.Contains(upper, strings.ToUpper(prof.Name)) || (prof.HardwareID != "" && strings.Contains(upper, prof.HardwareID)) {
+			return prof
+		}
+	}
+	return hxcore.GPUProfile{
+		VendorID: 0x10DE,
+		DeviceID: deviceID,
+		Name:     name,
+	}
+}
+
+// DetectGPUModel nhận diện dòng GPU dựa trên Device ID và tên thiết bị thông qua hxcore GPUProfile
 func DetectGPUModel(deviceID uint16, name string) GPUModel {
-	upperName := strings.ToUpper(name)
-	if deviceID == DeviceIDCMP40HX || strings.Contains(upperName, "40HX") {
+	prof := DetectGPUProfile(deviceID, name)
+	switch prof.DeviceID {
+	case 0x1F0B:
 		return GPUModelCMP40HX
-	}
-	if deviceID == DeviceIDCMP30HX || strings.Contains(upperName, "30HX") {
+	case 0x2189:
 		return GPUModelCMP30HX
+	default:
+		upper := strings.ToUpper(prof.Name)
+		if strings.Contains(upper, "40HX") {
+			return GPUModelCMP40HX
+		}
+		if strings.Contains(upper, "30HX") {
+			return GPUModelCMP30HX
+		}
+		return GPUModelUnknown
 	}
-	return GPUModelUnknown
 }
 
 // EvaluateRiotStatus đánh giá khả năng chơi game Riot và trạng thái Tensor Core / Gen 2

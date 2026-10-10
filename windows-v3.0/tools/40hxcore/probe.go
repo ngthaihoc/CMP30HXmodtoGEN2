@@ -30,20 +30,23 @@ func FindGPU() bool {
 func FindGPUWithProfile() (GPUProfile, bool) {
 	base, err := registry.OpenKey(registry.LOCAL_MACHINE,
 		`SYSTEM\CurrentControlSet\Enum\PCI`, registry.ENUMERATE_SUB_KEYS)
-	if err != nil {
-		return GPUProfile{}, false
-	}
-	defer base.Close()
-	names, err := base.ReadSubKeyNames(-1)
-	if err != nil {
-		return GPUProfile{}, false
-	}
-	for _, prof := range SupportedGPUProfiles {
-		for _, n := range names {
-			if strings.Contains(n, prof.HardwareID) {
-				return prof, true
+	if err == nil {
+		defer base.Close()
+		names, err := base.ReadSubKeyNames(-1)
+		if err == nil {
+			for _, prof := range SupportedGPUProfiles {
+				upperTarget := strings.ToUpper(prof.HardwareID)
+				for _, n := range names {
+					if strings.Contains(strings.ToUpper(n), upperTarget) {
+						return prof, true
+					}
+				}
 			}
 		}
+	}
+	// Dò tìm dự phòng qua LocationInformation của Enum\PCI instance
+	if _, prof, ok := FindGPUBDFFromRegistryWithProfile(); ok {
+		return prof, true
 	}
 	return GPUProfile{}, false
 }
