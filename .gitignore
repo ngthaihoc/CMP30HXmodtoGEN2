@@ -29,11 +29,5 @@ windows-v3.0/tools/**/*.exe
 AGENTS.md
 docs/agents/
 
-# Ignore built binaries in the release directory
-windows-v3.0/release/*.exe
-windows-v3.0/release/files/*.EFI
-windows-v3.0/release/files/*.sys
-windows-v3.0/release/gen2/drivers/*.sys
-
 # Ignore debug symbols
 *.pdb
