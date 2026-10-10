@@ -9,6 +9,8 @@ PROJECT_CONTEXT.md
 skills-lock.json
 Test_Mock_CMP30HX.bat
 Test_Mock_CMP30HX_Linux.sh
+Build_WebUI.bat
+build.ps1
 .vscode/
 *.zip
 commits.txt

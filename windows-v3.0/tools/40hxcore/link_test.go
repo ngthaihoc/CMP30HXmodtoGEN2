@@ -521,3 +521,171 @@ func TestLinkNegotiator_TU106_MMIO_RMWSequence(t *testing.T) {
 	}
 }
 
+func TestLinkNegotiator_ExecuteNegotiation_FastPathSuccess(t *testing.T) {
+	// Arrange: Link is already at Gen2 -> ExecuteNegotiation should succeed immediately without retrain
+	bus := NewMockHardwareBus()
+	bdf := uint32(0x0100)
+	prof := GPUProfile{
+		VendorID:        0x10DE,
+		DeviceID:        0x2189,
+		Name:            "CMP 30HX",
+		Family:          "TU116",
+		MaxSupportedGen: 2,
+	}
+	bus.SetPCIConfig(bdf, 0x00, 0x218910DE)
+	bus.SetPCICap(bdf, 0x40)
+	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000022) // Gen2 attained
+
+	negotiator := NewLinkNegotiator(bus)
+	opts := NegotiationOptions{
+		TargetGen: 2,
+	}
+
+	// Act
+	verdict, err := negotiator.ExecuteNegotiation(bdf, prof, opts)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !verdict.Success {
+		t.Fatalf("expected verdict.Success=true")
+	}
+	if verdict.StatusContract.StatusCode != StatusGen2Success {
+		t.Fatalf("expected StatusGen2Success, got %v", verdict.StatusContract.StatusCode)
+	}
+	if verdict.NeedsRetry {
+		t.Fatalf("expected NeedsRetry=false")
+	}
+}
+
+func TestLinkNegotiator_ExecuteNegotiation_HardwareLimitGuarded(t *testing.T) {
+	// Arrange: Generic GPU without MMIO shadow capability advertises Gen1 max, target is Gen2
+	bus := NewMockHardwareBus()
+	bdf := uint32(0x0100)
+	prof := GPUProfile{
+		VendorID:        0x10DE,
+		DeviceID:        0x1234,
+		Name:            "Generic GPU",
+		Family:          "Generic",
+		MaxSupportedGen: 1, // Profile capped at Gen1
+	}
+	bus.SetPCIConfig(bdf, 0x00, 0x123410DE)
+	bus.SetPCICap(bdf, 0x40)
+	bus.SetPCIConfig(bdf, 0x40+0x0C, 0x00000001) // LNKCAP: Gen1 max
+	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000011) // LNKSTA: Gen1
+
+	negotiator := NewLinkNegotiator(bus)
+	opts := NegotiationOptions{
+		TargetGen: 2,
+		ForceRoot: false,
+	}
+
+	// Act
+	verdict, err := negotiator.ExecuteNegotiation(bdf, prof, opts)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if verdict.Success {
+		t.Fatalf("expected Success=false when hardware limit exceeded")
+	}
+	if verdict.StatusContract.StatusCode != StatusHwLimit {
+		t.Fatalf("expected StatusHwLimit, got %v", verdict.StatusContract.StatusCode)
+	}
+	if verdict.NeedsRetry {
+		t.Fatalf("hardware limits should not trigger retry loops")
+	}
+}
+
+func TestLinkNegotiator_ExecuteNegotiation_CMP40HX_UnlockedViaMMIOWhenEndpointLNKCAPIsGen1(t *testing.T) {
+	// Arrange: CMP 40HX initially advertises Gen1 in LNKCAP before unlock,
+	// but Root Port supports Gen3 and HasSafePL0/RequiresMMIO is true.
+	// ExecuteNegotiation must NOT be blocked by LinkTargetAllowed and must succeed.
+	bus := NewMockHardwareBus()
+	bdf := uint32(0x0100)
+	prof := GPUProfile{
+		VendorID:        0x10DE,
+		DeviceID:        0x1F0B,
+		Name:            "CMP 40HX",
+		Family:          "TU106",
+		MaxSupportedGen: 2,
+		RequiresMMIO:    true,
+		HasSafePL0:      true,
+	}
+	bus.SetPCIConfig(bdf, 0x00, 0x1F0B10DE)
+	bus.SetPCICap(bdf, 0x40)
+	bus.SetPCIConfig(bdf, 0x40+0x0C, 0x00000001) // LNKCAP: Gen1 max initially
+	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000011) // Current Gen1
+	bus.SetPCIConfig(bdf, 0x10, 0xF6000000)      // BAR0
+	bus.SetMMIO(0xF6000000+0x00, 0x16000000)     // BOOT_0: TU106 (0x16)
+
+	// Root Port supports Gen3
+	rootBDF := uint32(0x0008) // 00:01.0
+	bus.SetPCICap(rootBDF, 0x50)
+	bus.SetPCIConfig(rootBDF, 0x50+0x0C, 0x00000003) // Root Max: Gen3
+	bus.SetPCIConfig(rootBDF, 0x00, 0x19018086)      // PCI-to-PCI Bridge
+	bus.SetPCIConfig(rootBDF, 0x08, 0x06040000)      // Bridge class
+	bus.SetPCIConfig(rootBDF, 0x18, 0x00010100)      // Secondary bus = 1
+
+	negotiator := NewLinkNegotiator(bus)
+	opts := NegotiationOptions{
+		TargetGen:   2,
+		ForceRoot:   false, // Not manually forced; should auto-allow via canUnlockViaMMIO
+		AllowStage2: false,
+	}
+
+	// Act
+	verdict, err := negotiator.ExecuteNegotiation(bdf, prof, opts)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !verdict.Success {
+		t.Fatalf("expected CMP 40HX to unlock to Gen2 via MMIO shadow, got %+v", verdict)
+	}
+	if verdict.StatusContract.StatusCode != StatusGen2Success {
+		t.Fatalf("expected StatusGen2Success, got %v", verdict.StatusContract.StatusCode)
+	}
+}
+
+func TestLinkNegotiator_ExecuteNegotiation_FullSuccess(t *testing.T) {
+	// Arrange: Link starts at Gen1, negotiates to Gen2 successfully
+	bus := NewMockHardwareBus()
+	bdf := uint32(0x0100)
+	prof := GPUProfile{
+		VendorID:        0x10DE,
+		DeviceID:        0x2189,
+		Name:            "CMP 30HX",
+		Family:          "TU116",
+		MaxSupportedGen: 2,
+	}
+	bus.SetPCIConfig(bdf, 0x00, 0x218910DE)
+	bus.SetPCICap(bdf, 0x40)
+	bus.SetPCIConfig(bdf, 0x40+0x0C, 0x00000002) // LNKCAP Gen2
+	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000022) // LNKSTA Gen2 x2
+	bus.SetPCIConfig(bdf, 0x10, 0xF6000000)
+	bus.SetMMIO(0xF6000000+0x00, 0x17000000)
+
+	negotiator := NewLinkNegotiator(bus)
+	opts := NegotiationOptions{
+		TargetGen: 2,
+	}
+
+	// Act
+	verdict, err := negotiator.ExecuteNegotiation(bdf, prof, opts)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !verdict.Success {
+		t.Fatalf("expected success, got %+v", verdict)
+	}
+	if verdict.StatusContract.StatusCode != StatusGen2Success {
+		t.Fatalf("expected StatusGen2Success, got %v", verdict.StatusContract.StatusCode)
+	}
+}
+

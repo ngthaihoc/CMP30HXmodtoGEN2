@@ -53,10 +53,23 @@ exit /b 1
 cd /d "%~dp0windows-v3.0\release"
 if not exist "40HXInstaller.exe" (
     echo [!] Khong tim thay file windows-v3.0\release\40HXInstaller.exe
+    echo [*] Vui long chay Build_WebUI.bat de bien dich ung dung truoc.
     pause
     exit /b 1
 )
 
 echo [*] Dang khoi chay CMP Control Center Web UI...
 start "" "40HXInstaller.exe"
+
+echo.
+echo ================================================================
+echo  [✓] CMP Control Center Web UI da duoc khoi chay!
+echo  [✓] Trinh duyet web se tu dong mo trang dieu khien.
+echo.
+echo  [!] GIU CUA SO NAY MO DE DUY TRI TRANG THAI.
+echo      Nhan phim bat ky de dong ung dung va thoat...
+echo ================================================================
+echo.
+pause >nul
+taskkill /f /im 40HXInstaller.exe >nul 2>&1
 exit /b 0

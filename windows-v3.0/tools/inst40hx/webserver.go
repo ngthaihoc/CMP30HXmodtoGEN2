@@ -112,18 +112,36 @@ func runWebGUI() {
 	AttachLogSink(hub)
 	fmt.Println("Khởi chạy CMP 40HX / 30HX Modern Web Control Center...")
 
-	// Extract sub-filesystem from webFS
-	subWeb, err := fs.Sub(webFS, "web")
-	if err != nil {
-		fmt.Println("[!] Lỗi nạp tài nguyên web nhúng:", err)
-		runGUI() // Fallback to classic walk GUI
-		return
+	// Ưu tiên đọc giao diện trực tiếp từ đĩa (nếu có cạnh exe hoặc trong source tree) để hỗ trợ cập nhật nóng ngay lập tức
+	var staticFS fs.FS
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		for _, cand := range []string{
+			filepath.Join(exeDir, "web"),
+			filepath.Join(exeDir, "..", "tools", "inst40hx", "web"),
+			filepath.Join(exeDir, "..", "..", "windows-v3.0", "tools", "inst40hx", "web"),
+		} {
+			if fi, err := os.Stat(filepath.Join(cand, "index.html")); err == nil && !fi.IsDir() {
+				staticFS = os.DirFS(cand)
+				fmt.Printf("[Web] Nạp giao diện trực tiếp từ đĩa: %s\n", cand)
+				break
+			}
+		}
+	}
+	if staticFS == nil {
+		subWeb, err := fs.Sub(webFS, "web")
+		if err != nil {
+			fmt.Println("[!] Lỗi nạp tài nguyên web nhúng:", err)
+			runGUI() // Fallback to classic walk GUI
+			return
+		}
+		staticFS = subWeb
 	}
 
 	mux := http.NewServeMux()
 
 	// 1. Static Web Files
-	fsServer := http.FileServer(http.FS(subWeb))
+	fsServer := http.FileServer(http.FS(staticFS))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
 		if strings.HasSuffix(p, ".html") || p == "/" || p == "" {
@@ -192,9 +210,14 @@ func runWebGUI() {
 
 		gpuName := "Chưa phát hiện GPU CMP"
 		pciBusId := "Không khả dụng"
+		detectedModel := "Unknown"
+		deviceID := uint16(0)
 		if prof, ok := hxcore.FindGPUWithProfile(); ok {
+			gpuFound = true
 			gpuName = fmt.Sprintf("%s (%s)", prof.Name, prof.Family)
 			pciBusId = prof.HardwareID
+			detectedModel = prof.Name
+			deviceID = prof.DeviceID
 		}
 
 		isGen2 := false
@@ -227,6 +250,10 @@ func runWebGUI() {
 			"gpuDetected":    gpuFound,
 			"gpuName":        gpuName,
 			"pciBusId":       pciBusId,
+			"detectedModel":  detectedModel,
+			"deviceID":       deviceID,
+			"is30HX":         deviceID == 0x2189,
+			"is40HX":         deviceID == 0x1F0B,
 			"gspActive":      gspActive,
 			"isGen2":         isGen2,
 			"driverStrategy": strat,
@@ -259,6 +286,44 @@ func runWebGUI() {
 		go func() {
 			defer releaseOp()
 			fmt.Println("[PCIe] Bắt đầu kích hoạt mở khóa Gen2 ngay...")
+			gen2Main()
+		}()
+		json.NewEncoder(w).Encode(map[string]string{"status": "started"})
+	})
+
+	// 4b. Force Root Port Retrain (Tự động phát hiện 30HX/40HX & cách ly an toàn)
+	mux.HandleFunc("/api/force-root-gen2", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		if !tryAcquireOp("Ép mở khoá Gen2 qua Root Port") {
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{"message": "Hệ thống đang bận thao tác khác."})
+			return
+		}
+		go func() {
+			defer releaseOp()
+			// Nhận diện phần cứng card đồ họa trước khi thao tác
+			prof, hasProf := hxcore.FindGPUWithProfile()
+			if hasProf {
+				fmt.Printf("[PCIe] 🛡️ Tự động nhận diện phần cứng: %s [%s] (DEV_%04X)\n", prof.Name, prof.Family, prof.DeviceID)
+				if prof.DeviceID == 0x2189 || prof.Family == "TU116" {
+					fmt.Println("[PCIe] 🔒 Kích hoạt ranh giới bảo vệ CMP 30HX:")
+					fmt.Println("  [✓] Khóa eFuse cứng tại Gen2 (5.0 GT/s), tuyệt đối không ép Gen3")
+					fmt.Println("  [✓] Không áp dụng microcode hay EFI payload của 40HX")
+					fmt.Println("  [✓] Tắt toàn bộ reset PnP và Root Link Disable nguy hiểm")
+					fmt.Println("  [✓] Nạp chuỗi thanh ghi MMIO TU116ShadowSequence và ép Root Port huấn luyện lại!")
+				} else if prof.DeviceID == 0x1F0B || prof.Family == "TU106" {
+					fmt.Println("[PCIe] ⚡ Kích hoạt chế độ mở khóa CMP 40HX:")
+					fmt.Println("  [✓] Bỏ qua cản trở LNKCAP Gen1 ban đầu")
+					fmt.Println("  [✓] Nạp chuỗi thanh ghi MMIO Shadow TU106PL0Sequence chuẩn xác")
+					fmt.Println("  [✓] Tối ưu DMA MRRS 512B và ép Root Port huấn luyện lại lên Gen2 x16!")
+				}
+			} else {
+				fmt.Println("[PCIe] ⚡ Bắt đầu Ép Mở Khoá Gen2 qua Root Port (-force-root-gen2)...")
+				fmt.Println("[PCIe] Công cụ sẽ quét toàn bộ PCI Bus và tự động kích hoạt bảo vệ theo đúng silicon ID phát hiện được.")
+			}
+			origArgs := os.Args
+			os.Args = append(os.Args, "-force-root-gen2")
+			defer func() { os.Args = origArgs }()
 			gen2Main()
 		}()
 		json.NewEncoder(w).Encode(map[string]string{"status": "started"})

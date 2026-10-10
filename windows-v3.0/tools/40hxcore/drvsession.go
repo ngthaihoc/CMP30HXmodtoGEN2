@@ -148,3 +148,55 @@ func RunScopedBus(needsPL0 bool, fn func(bus HardwareBus) error) error {
 	bus := NewProductionBus(wh, th)
 	return fn(bus)
 }
+
+// ClassifyDriverLoadError chuyển đổi mã lỗi nạp driver thô sang nguyên nhân và cách xử lý dễ hiểu (HVCI, Memory Integrity, v.v.)
+func ClassifyDriverLoadError(raw string) string {
+	r := strings.ToLower(raw)
+	switch {
+	case strings.Contains(r, "1275"):
+		return "Cài đặt bảo mật Windows chặn tải driver (Lỗi 1275) — Thường do Defender bật 'Cách ly lõi / Tính toàn vẹn bộ nhớ', 'Danh sách chặn driver dễ bị tấn công' hoặc Smart App Control; vui lòng tạm tắt các bảo vệ này trong Windows Security rồi thử lại (sau khi nạp xong có thể bật lại)"
+	case strings.Contains(r, "577"):
+		return "Hình ảnh driver bị hệ thống từ chối (Lỗi 577) — Tệp đã bị chỉnh sửa hoặc bị chính sách bảo mật chặn; vui lòng chạy lại 40HXInstaller để triển khai lại driver gốc và kiểm tra cài đặt 'Driver không tin cậy' trong Windows Security"
+	case strings.Contains(r, "1058"):
+		return "Dịch vụ bị vô hiệu hóa (Lỗi 1058) — Công cụ đã cố gắng kích hoạt lại và tạo lại dịch vụ"
+	case strings.Contains(r, "1072"):
+		return "Dịch vụ đang ở trạng thái tồn đọng 'Đánh dấu để xóa' (Lỗi 1072) — Công cụ đã tạo lại và thử lại"
+	case strings.Contains(r, "拒绝访问"), strings.Contains(r, "access is denied"), strings.Contains(r, "error 5"), strings.Contains(r, " 5:"):
+		return "Không đủ quyền hạn hoặc bị chặn driver (Lỗi 5 / Access Denied) — Nếu đã chạy Administrator: Lỗi do Tính toàn vẹn bộ nhớ (HVCI) hoặc Danh sách chặn driver (Vulnerable Driver Blocklist). CẦN KHỞI ĐỘNG LẠI MÁY (REBOOT) để Windows áp dụng tắt HVCI."
+	case strings.Contains(r, "1060"), strings.Contains(r, "不存在"):
+		return "Không tìm thấy dịch vụ (Lỗi 1060) — Tệp driver chưa được triển khai thành công, hãy chạy lại trình cài đặt rồi thử lại"
+	}
+	return "Khởi động driver thất bại — Thường do tính năng HIPS / chặn driver của phần mềm diệt virus bên thứ ba, vui lòng thêm hai tệp .sys vào danh sách tin cậy / loại trừ rồi thử lại; nếu vẫn không được hãy gửi nhật ký cho tác giả"
+}
+
+// EnsureDiagnosticDrivers triển khai và khởi động ThrottleStop + WinRing0 cho công cụ chẩn đoán,
+// trả về thông tin triển khai, tính sẵn sàng và nguyên nhân lỗi được phân loại chi tiết
+func EnsureDiagnosticDrivers() (deployed bool, ok bool, fail string) {
+	svcTS := "ThrottleStop"
+	svcWR := "WinRing0_1_2_0"
+	fileTS := "ThrottleStop.sys"
+	fileWR := "WinRing0x64.sys"
+
+	_, _, stTS := ServiceInfo(svcTS)
+	_, _, stWR := ServiceInfo(svcWR)
+	if stTS == "RUNNING" && stWR == "RUNNING" {
+		return false, true, ""
+	}
+
+	deployed = true
+	var fails []string
+	if err := EnsureDriverLoaded(svcTS, fileTS); err != nil {
+		fails = append(fails, fileTS+": "+ClassifyDriverLoadError(err.Error()))
+	}
+	if err := EnsureDriverLoaded(svcWR, fileWR); err != nil {
+		fails = append(fails, fileWR+": "+ClassifyDriverLoadError(err.Error()))
+	}
+
+	_, _, stTS = ServiceInfo(svcTS)
+	_, _, stWR = ServiceInfo(svcWR)
+	ok = stTS == "RUNNING" && stWR == "RUNNING"
+	if !ok && len(fails) > 0 {
+		fail = strings.Join(fails, " || ")
+	}
+	return deployed, ok, fail
+}

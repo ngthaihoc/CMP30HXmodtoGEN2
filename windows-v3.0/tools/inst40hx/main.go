@@ -1132,159 +1132,51 @@ func gen2Main() {
 
 		gpuBus := (gpuBDF >> 8) & 0xFF
 		fmt.Printf("[Gen%d] %s tại %02x:%02x.%x\n", targetGen, gpuProfile.Name, gpuBus, (gpuBDF>>3)&0x1F, gpuBDF&7)
-		cur := bus.LinkSpeed(gpuBDF)
-		fmt.Printf("[Gen%d] Băng thông hiện tại: Gen%d\n", targetGen, cur)
-		// v2.6.0: Ghi nhận thanh ghi PCIe gốc (LNKCAP/LNKCTL/LNKCTL2) để chẩn đoán
-		if cap := bus.PcieCap(gpuBDF); cap != 0 {
-			rd := func(off uint32) uint32 {
-				v, _ := bus.ReadPCIConfig(gpuBDF, cap+off)
-				return v
-			}
-			fmt.Printf("[Gen%d] LNKCAP=0x%08X LNKCTL=0x%08X LNKCTL2=0x%08X (Mục tiêu Gen%d)\n",
-				targetGen, rd(0x0C), rd(0x10), rd(0x30), rd(0x30)&0xF)
-		}
-		if cur >= targetGen {
-			gen2Succeeded = true
-			fmt.Printf("[Gen%d] Đã đạt Gen%d, không cần thao tác thêm.\n", targetGen, cur)
-			stContract := hxcore.StatusContract{
-				StatusCode:   hxcore.StatusGen2Success,
-				SpeedCurrent: cur,
-				WidthCurrent: bus.LinkWidth(gpuBDF),
-				TLSTarget:    targetGen,
-				ErrorCode:    "NONE",
-				Details: []string{
-					fmt.Sprintf("Kết luận: ✅ Gen%d không cần thao tác: Băng thông hiện tại đã là Gen%d", targetGen, cur),
-					fmt.Sprintf("Quyền thực thi: %s", map[bool]string{true: "Quản trị viên (Admin)/SYSTEM", false: "Người dùng thường (Bị hạn chế)"}[isAdmin()]),
-					fmt.Sprintf("Vị trí %s: %02x:%02x.%x", gpuProfile.Name, gpuBus, (gpuBDF>>3)&0x1F, gpuBDF&7),
-					fmt.Sprintf("đã đạt mục tiêu Gen%d thành công", targetGen),
-				},
-			}
-			_ = hxcore.WriteStructuredGen2Status(stContract)
-			gen2Notify(fmt.Sprintf("PCIe đã đạt Gen%d, không cần thao tác thêm.", cur))
-			return nil
-		}
-
-		// PCIe Capability gate (Phía GPU + Phía Root Port)
-		root := bus.FindRootPort(gpuBus)
-		if root == 0xFFFFFFFF {
-			fmt.Printf("[Gen%d] Không tìm thấy root port, dùng GPU retrain dự phòng\n", targetGen)
-		} else {
-			fmt.Printf("[Gen%d] root port = 00:%02x.%x\n", targetGen, (root>>3)&0x1F, root&7)
-		}
-		gpuMax := bus.PcieMaxSpeed(gpuBDF)
-		rootMax := uint32(0)
-		if root != 0xFFFFFFFF {
-			rootMax = bus.PcieMaxSpeed(root)
-		} else {
-			rootMax = gpuMax
-		}
-		fmt.Printf("[Gen%d] Khả năng PCIe: GPU Max=Gen%d, Root Max=Gen%d, Giới hạn Profile=Gen%d\n", targetGen, gpuMax, rootMax, gpuProfile.MaxSupportedGen)
-		allowTarget := hxcore.LinkTargetAllowed(gpuMax, rootMax, gpuProfile.MaxSupportedGen, targetGen)
-		forceRoot := hasArg("-force-root-gen2") || hasArg("-force-root-gen3") || hasArg("-gen2-30hx") || hasArg("-gen3-30hx") || gpuProfile.DeviceID == 0x2189
-
-		if !allowTarget {
-			if forceRoot && gpuProfile.DeviceID == 0x2189 && rootMax >= targetGen {
-				fmt.Printf("[Gen%d] Card đồ hoạ báo LNKCAP Gen%d, kích hoạt chế độ huấn luyện Gen%d: Root Port (Max=Gen%d) khởi tạo huấn luyện Gen%d\n", targetGen, gpuMax, targetGen, rootMax, targetGen)
-			} else if forceRoot && gpuProfile.DeviceID == 0x2189 && targetGen == 3 && rootMax < 3 {
-				fmt.Printf("[Gen3][!] Phần cứng Root Port chỉ hỗ trợ Gen%d (< Gen3), hạ xuống Gen%d để thử nghiệm\n", rootMax, rootMax)
-				targetGen = rootMax
-				if targetGen < 2 {
-					msg := fmt.Sprintf("Root Port chỉ hỗ trợ Gen%d, không thể đạt Gen2/Gen3", rootMax)
-					fmt.Printf("[Gen3][!] %s, an toàn dừng lại.\n", msg)
-					gen2StatusFail(msg)
-					return nil
-				}
-			} else {
-				width := bus.LinkWidth(gpuBDF)
-				tls := uint32(0)
-				if cap := bus.PcieCap(gpuBDF); cap != 0 {
-					if v, err := bus.ReadPCIConfig(gpuBDF, cap+0x30); err == nil {
-						tls = v & 0xF
-					}
-				}
-				fmt.Printf("[Gen%d] Chẩn đoán: GPU Device ID: %04X:%04X\n", targetGen, gpuProfile.VendorID, gpuProfile.DeviceID)
-				fmt.Printf("[Gen%d] Chẩn đoán: GPU Family: %s\n", targetGen, gpuProfile.Family)
-				fmt.Printf("[Gen%d] Chẩn đoán: GPU Max Link Speed: Gen%d\n", targetGen, gpuMax)
-				fmt.Printf("[Gen%d] Chẩn đoán: Root Port Max Link Speed: Gen%d\n", targetGen, rootMax)
-				fmt.Printf("[Gen%d] Chẩn đoán: Current Link Speed: Gen%d\n", targetGen, cur)
-				fmt.Printf("[Gen%d] Chẩn đoán: Current Width: x%d\n", targetGen, width)
-				fmt.Printf("[Gen%d] Chẩn đoán: Target TLS: Gen%d\n", targetGen, tls)
-				fmt.Printf("[Gen%d] Chẩn đoán: Mutation: skipped\n", targetGen)
-				fmt.Printf("[Gen%d] Chẩn đoán: Reason: endpoint advertises Gen%d (< Gen%d)\n", targetGen, gpuMax, targetGen)
-
-				msg := fmt.Sprintf("Phần cứng hoặc Profile không hỗ trợ Gen%d (GPU Max=%d, Root Max=%d, Cap=%d)", targetGen, gpuMax, rootMax, gpuProfile.MaxSupportedGen)
-				fmt.Printf("[Gen%d][!] %s, an toàn dừng lại.\n", targetGen, msg)
-				gen2StatusFail(msg)
-				gen2Notify(fmt.Sprintf("%s Liên kết phần cứng PCIe không hỗ trợ Gen%d (chỉ Gen%d), an toàn dừng lại.\nRoot Port Max=Gen%d\nCần kiểm tra thiết lập BIOS khe cắm bo mạch chủ, riser/dây nối hoặc giới hạn VBIOS/Strap.\nNếu muốn Root Port ép huấn luyện lại, thêm tham số: -force-root-gen%d", gpuProfile.Name, targetGen, gpuMax, rootMax, targetGen))
-				return nil
-			}
-		}
 
 		negotiator := hxcore.NewLinkNegotiator(bus)
+		forceRoot := hasArg("-force-root-gen2") || hasArg("-force-root-gen3") || hasArg("-gen2-30hx") || hasArg("-gen3-30hx") || gpuProfile.DeviceID == 0x2189 || gpuProfile.DeviceID == 0x1F0B || gpuProfile.RequiresMMIO
 		allowStage2 := hasArg("-hard") || (gpuProfile.DeviceID != 0x2189 && gen2AutoHardEnabled())
 
 		fmt.Printf("[Gen%d] Khởi chạy LinkNegotiator cho %s (DEV_%04X)...\n", targetGen, gpuProfile.Name, gpuProfile.DeviceID)
-		res, err := negotiator.Negotiate(gpuBDF, gpuProfile, root, targetGen, allowStage2)
+		opts := hxcore.NegotiationOptions{
+			TargetGen:   targetGen,
+			ForceRoot:   forceRoot,
+			AllowStage2: allowStage2,
+			UserIsAdmin: isAdmin(),
+		}
+
+		verdict, err := negotiator.ExecuteNegotiation(gpuBDF, gpuProfile, opts)
 		if err != nil {
 			fmt.Printf("[Gen%d][!] Lỗi thương lượng link: %v\n", targetGen, err)
 			gen2StatusFail(fmt.Sprintf("Lỗi thương lượng link: %v", err))
 			return nil
 		}
 
-		gen2Succeeded = res.Success
-		if res.Success {
+		gen2Succeeded = verdict.Success
+		if verdict.Success {
 			deleteGen2Retry()
-		} else if hxcore.DriverStrategy() != hxcore.DriverStrategyResident {
+		} else if verdict.NeedsRetry && hxcore.DriverStrategy() != hxcore.DriverStrategyResident {
 			scheduleGen2Retry(retryDepth())
 		}
 
-		fmt.Printf("[Gen%d] %s\n", res.TargetGen, res.Verdict)
-
-		statusCode := hxcore.StatusGen1Stuck
-		if res.Success {
-			statusCode = hxcore.StatusGen2Success
-		}
-		details := []string{
-			fmt.Sprintf("Kết luận: %s", res.Verdict),
-			fmt.Sprintf("Quyền thực thi: %s", map[bool]string{true: "Quản trị viên (Admin)/SYSTEM", false: "Người dùng thường (Bị hạn chế)"}[isAdmin()]),
-			fmt.Sprintf("%s Vị trí: %02x:%02x.%x", gpuProfile.Name, gpuBus, (gpuBDF>>3)&0x1F, gpuBDF&7),
-			fmt.Sprintf("Root Port: %02x:%02x.%x", (root>>8)&0xFF, (root>>3)&0x1F, root&7),
-			fmt.Sprintf("Băng thông: Hiện tại Gen%d x%d / GPU TLS=Gen%d / Root TLS=Gen%d", res.CurrentSpeed, res.CurrentWidth, res.TargetTLS, res.RootTLS),
-		}
-		if gpuProfile.DeviceID == 0x2189 {
-			details = append(details, "MRRS: 512B [Đã tối ưu]")
-		}
-		if res.Success {
-			details = append(details, fmt.Sprintf("đã đạt mục tiêu Gen%d thành công", res.TargetGen))
-		} else {
-			details = append(details, fmt.Sprintf("chưa đạt mục tiêu Gen%d", res.TargetGen))
+		fmt.Printf("[Gen%d] %s\n", verdict.TargetGen, verdict.Verdict)
+		if err := hxcore.WriteStructuredGen2Status(verdict.StatusContract); err != nil {
+			fmt.Printf("[Gen%d] Ghi file trạng thái thất bại: %v\n", verdict.TargetGen, err)
 		}
 
-		stContract := hxcore.StatusContract{
-			StatusCode:   statusCode,
-			SpeedCurrent: res.CurrentSpeed,
-			WidthCurrent: res.CurrentWidth,
-			TLSTarget:    res.TargetGen,
-			ErrorCode:    "NONE",
-			Details:      details,
-		}
-		if err := hxcore.WriteStructuredGen2Status(stContract); err != nil {
-			fmt.Printf("[Gen%d] Ghi file trạng thái thất bại: %v\n", res.TargetGen, err)
+		if verdict.Success {
+			gen2Notify(fmt.Sprintf("%s PCIe đã đạt Gen%d, không cần thao tác thêm.", gpuProfile.Name, verdict.CurrentSpeed))
+		} else if verdict.StatusContract.StatusCode == hxcore.StatusHwLimit {
+			gen2Notify(fmt.Sprintf("%s Liên kết phần cứng PCIe không hỗ trợ Gen%d (chỉ Gen%d), an toàn dừng lại.\nCần kiểm tra thiết lập BIOS khe cắm bo mạch chủ, riser/dây nối hoặc giới hạn VBIOS/Strap.", gpuProfile.Name, targetGen, verdict.CurrentSpeed))
 		}
 
 		if !hasArg("-silent") && !hasArg("-y") {
 			icon := uint(mbIconInfo)
-			txt := fmt.Sprintf("Băng thông PCIe: Hiện tại Gen%d x%d (GPU TLS=Gen%d, Root TLS=Gen%d)\n", res.CurrentSpeed, res.CurrentWidth, res.TargetTLS, res.RootTLS)
-			if res.Success {
-				if res.CurrentSpeed < res.TargetGen {
-					txt += fmt.Sprintf("\nGen1 lúc nhàn rỗi là tiết kiệm điện bình thường; hãy chạy GPU-Z Render Test hoặc tải 3D/CUDA để xác nhận Gen%d.", res.TargetGen)
-				}
-				txt += fmt.Sprintf("\n=== MỞ KHOÁ GEN%d THÀNH CÔNG ===", res.TargetGen)
-			} else {
-				txt += fmt.Sprintf("\nVẫn ở Gen%d, chưa đạt Gen%d. Xem %s và kiểm tra HVCI, riser/khe PCIe, BIOS; sau đó thử lại.", res.CurrentSpeed, res.TargetGen, filepath.Join(os.TempDir(), "40HX_installer.log"))
+			txt := fmt.Sprintf("Băng thông PCIe: Hiện tại Gen%d x%d (Mục tiêu Gen%d)\n%s\n", verdict.CurrentSpeed, verdict.CurrentWidth, verdict.TargetGen, verdict.Verdict)
+			if !verdict.Success {
 				icon = mbIconError
 			}
-			msgbox(fmt.Sprintf("%s Gen%d", gpuProfile.Name, res.TargetGen), txt, icon)
+			msgbox(fmt.Sprintf("%s Gen%d", gpuProfile.Name, verdict.TargetGen), txt, icon)
 		}
 		return nil
 	})

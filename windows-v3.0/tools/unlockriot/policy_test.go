@@ -374,3 +374,20 @@ func TestRunOptimization_OutputLogging(t *testing.T) {
 		})
 	}
 }
+
+func TestDetectGPUProfile_HxCoreProfiles(t *testing.T) {
+	prof40 := DetectGPUProfile(0x1F0B, "")
+	if prof40.DeviceID != 0x1F0B || prof40.Name != "CMP 40HX" {
+		t.Errorf("expected CMP 40HX profile, got %+v", prof40)
+	}
+
+	prof30 := DetectGPUProfile(0x2189, "")
+	if prof30.DeviceID != 0x2189 || prof30.Name != "CMP 30HX" {
+		t.Errorf("expected CMP 30HX profile, got %+v", prof30)
+	}
+
+	profByName := DetectGPUProfile(0, "NVIDIA CMP 40HX")
+	if profByName.DeviceID != 0x1F0B {
+		t.Errorf("expected profile by name to resolve 0x1F0B, got %+v", profByName)
+	}
+}

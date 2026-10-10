@@ -2,6 +2,7 @@ package hxcore
 
 import (
 	"errors"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -346,5 +347,27 @@ func TestDriverSession_RunScoped_Delegates(t *testing.T) {
 	}
 	if !called {
 		t.Fatalf("expected closure to be called")
+	}
+}
+
+func TestClassifyDriverLoadError_KnownCodes(t *testing.T) {
+	cases := []struct {
+		errStr   string
+		contains string
+	}{
+		{"Failed with error 1275", "1275"},
+		{"System blocked error 577", "577"},
+		{"Service disabled 1058", "1058"},
+		{"Service marked for deletion 1072", "1072"},
+		{"Access is denied", "HVCI"},
+		{"Service error 1060 not found", "1060"},
+		{"Random unknown error", "HIPS"},
+	}
+
+	for _, c := range cases {
+		classified := ClassifyDriverLoadError(c.errStr)
+		if !strings.Contains(classified, c.contains) {
+			t.Errorf("expected %q to contain %q, got: %s", c.errStr, c.contains, classified)
+		}
 	}
 }

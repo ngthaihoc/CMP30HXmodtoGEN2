@@ -73,57 +73,19 @@ func svcState(name string) string {
 	return st
 }
 
-// throttleStopAppRunning: 本机是否正在运行 ThrottleStop 软件(同名驱动共存, 不删它的)。
+// throttleStopAppRunning kiểm tra xem ThrottleStop.exe có đang chạy không
 func throttleStopAppRunning() bool {
-	out, _ := hxcore.RunOut("tasklist.exe", "/fi", "imagename eq ThrottleStop.exe")
-	return strings.Contains(out, "ThrottleStop.exe")
+	return hxcore.ThrottleStopAppRunning()
 }
 
-// ensureDrivers: 确保 TS/WinRing0 服务 RUNNING。已运行→不管(外部管理);
-// 否则从包 drivers 部署+启动。
-// 返回 (deployed 本工具是否部署/尝试拉起过, ok 是否两个都在运行, fail 拉起失败线索)。
-// 杀软隔离常把 .sys 替换成 0 字节占位(文件仍在)→ 仅判"不存在"会漏, 故按
-// 缺失/0字节自愈重部署; 重部署后补 Defender 排除防再删。
-// 说明: "拉起"本身就是一次驱动加载测试 — 失败大多能归因(见 classifyLoadErr)。
+// ensureDrivers đảm bảo ThrottleStop và WinRing0 sẵn sàng thông qua DriverSession sâu của hxcore
 func ensureDrivers() (deployed bool, ok bool, fail string) {
-	allRunning := svcState(svcTS) == "RUNNING" && svcState(svcWR) == "RUNNING"
-	if allRunning {
-		return false, true, ""
-	}
-	deployed = true
-	var fails []string
-	if err := hxcore.EnsureDriverLoaded(svcTS, fileTS); err != nil {
-		fails = append(fails, fileTS+": "+err.Error())
-	}
-	if err := hxcore.EnsureDriverLoaded(svcWR, fileWR); err != nil {
-		fails = append(fails, fileWR+": "+err.Error())
-	}
-	time.Sleep(400 * time.Millisecond)
-	ok = svcState(svcTS) == "RUNNING" && svcState(svcWR) == "RUNNING"
-	if !ok && len(fails) > 0 {
-		fail = strings.Join(fails, " || ")
-	}
-	return deployed, ok, fail
+	return hxcore.EnsureDiagnosticDrivers()
 }
 
-// classifyLoadErr: Chuyển đổi mã lỗi nạp driver thô sang nguyên nhân và cách xử lý dễ hiểu.
+// classifyLoadErr chuyển đổi mã lỗi nạp driver thô sang nguyên nhân và cách xử lý qua hxcore
 func classifyLoadErr(raw string) string {
-	r := strings.ToLower(raw)
-	switch {
-	case strings.Contains(r, "1275"):
-		return "Cài đặt bảo mật Windows chặn tải driver (Lỗi 1275) — Thường do Defender bật 'Cách ly lõi / Tính toàn vẹn bộ nhớ', 'Danh sách chặn driver dễ bị tấn công' hoặc Smart App Control; vui lòng tạm tắt các bảo vệ này trong Windows Security rồi thử lại (sau khi nạp xong có thể bật lại)"
-	case strings.Contains(r, "577"):
-		return "Hình ảnh driver bị hệ thống từ chối (Lỗi 577) — Tệp đã bị chỉnh sửa hoặc bị chính sách bảo mật chặn; vui lòng chạy lại 40HXInstaller để triển khai lại driver gốc và kiểm tra cài đặt 'Driver không tin cậy' trong Windows Security"
-	case strings.Contains(r, "1058"):
-		return "Dịch vụ bị vô hiệu hóa (Lỗi 1058) — Công cụ đã cố gắng kích hoạt lại và tạo lại dịch vụ"
-	case strings.Contains(r, "1072"):
-		return "Dịch vụ đang ở trạng thái tồn đọng 'Đánh dấu để xóa' (Lỗi 1072) — Công cụ đã tạo lại và thử lại"
-	case strings.Contains(r, "拒绝访问"), strings.Contains(r, "access is denied"), strings.Contains(r, "error 5"), strings.Contains(r, " 5:"):
-		return "Không đủ quyền hạn hoặc bị chặn driver (Lỗi 5 / Access Denied) — Nếu đã chạy Administrator: Lỗi do Tính toàn vẹn bộ nhớ (HVCI) hoặc Danh sách chặn driver (Vulnerable Driver Blocklist). CẦN KHỞI ĐỘNG LẠI MÁY (REBOOT) để Windows áp dụng tắt HVCI."
-	case strings.Contains(r, "1060"), strings.Contains(r, "不存在"):
-		return "Không tìm thấy dịch vụ (Lỗi 1060) — Tệp driver chưa được triển khai thành công, hãy chạy lại trình cài đặt rồi thử lại"
-	}
-	return "Khởi động driver thất bại — Thường do tính năng HIPS / chặn driver của phần mềm diệt virus bên thứ ba, vui lòng thêm hai tệp .sys vào danh sách tin cậy / loại trừ rồi thử lại; nếu vẫn không được hãy gửi nhật ký cho tác giả"
+	return hxcore.ClassifyDriverLoadError(raw)
 }
 
 // cleanupDrivers: Tự dọn dẹp — Dừng dịch vụ, xoá dịch vụ, xoá tệp driver (giữ sạch sẽ hệ thống).
