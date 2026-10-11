@@ -519,9 +519,6 @@ func (n *LinkNegotiator) ExecuteNegotiation(gpuBDF uint32, prof GPUProfile, opts
 	if prof.DeviceID == 0x2189 && targetGen > 2 {
 		targetGen = 2
 	}
-	if prof.MaxSupportedGen > 0 && targetGen > prof.MaxSupportedGen {
-		targetGen = prof.MaxSupportedGen
-	}
 
 	gpuBus := (gpuBDF >> 8) & 0xFF
 	cap := n.findPcieCap(gpuBDF)

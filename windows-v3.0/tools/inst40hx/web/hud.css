@@ -1,0 +1,477 @@
+/* HERO HUD */
+.hero-hud {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.hud-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative;
+  overflow: hidden;
+}
+
+.card-header-compact {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-category-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-phosphor);
+}
+
+.card-category-dot.cyan {
+  background: var(--accent-cyan);
+}
+
+.card-heading {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.2px;
+}
+
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+}
+
+.badge-emerald {
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--accent-phosphor);
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.boost-badge {
+  font-size: 12px;
+  font-weight: 700;
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.15), rgba(14, 165, 233, 0.15));
+  color: var(--accent-phosphor);
+  border: 1px solid var(--accent-phosphor);
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+}
+
+/* Specs Grid */
+.hardware-specs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 20px;
+  margin-bottom: 16px;
+}
+
+.spec-unit {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.spec-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.spec-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.highlight-cyan {
+  color: var(--accent-cyan);
+}
+
+.highlight-emerald {
+  color: var(--accent-phosphor);
+}
+
+/* 16-Lane PCIe Matrix (Physical Gold Finger Pins) */
+.lane-matrix-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px;
+}
+
+.lane-matrix-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.lane-title {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.lane-status-text {
+  font-size: 11.5px;
+  color: var(--accent-phosphor);
+  font-weight: 600;
+}
+
+.lane-pins-grid {
+  display: grid;
+  grid-template-columns: repeat(16, 1fr);
+  gap: 4px;
+}
+
+.lane-pin {
+  height: 32px;
+  background: #0f141d;
+  border: 1px solid #1e2838;
+  border-radius: 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  position: relative;
+  transition: all var(--transition-fast);
+}
+
+.lane-pin::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 2px;
+  right: 2px;
+  height: 3px;
+  background: #253346;
+  border-radius: 1px 1px 0 0;
+}
+
+.lane-pin.active {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: var(--accent-phosphor);
+  color: var(--accent-phosphor);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.25);
+}
+
+.lane-pin.active::after {
+  background: var(--accent-phosphor);
+  box-shadow: 0 0 4px var(--accent-phosphor);
+}
+
+/* Speed Comparison */
+.speed-compare-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  margin: 12px 0 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 16px 12px;
+}
+
+.speed-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.speed-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.speed-tag.highlight {
+  color: var(--accent-phosphor);
+}
+
+.speed-num {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text-secondary);
+}
+
+.speed-num .unit {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.speed-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.speed-arrow {
+  color: var(--accent-phosphor);
+}
+
+/* Throughput Gauge */
+.gauge-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gauge-bar-track {
+  height: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  position: relative;
+}
+
+.gauge-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #059669 0%, var(--accent-phosphor) 65%, var(--accent-cyan) 100%);
+  position: relative;
+  transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.gauge-shimmer {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
+  transform: translateX(-100%);
+  animation: shimmer 2.5s infinite;
+}
+
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+
+.gauge-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.gauge-labels .active-mark {
+  color: var(--accent-phosphor);
+  font-weight: 700;
+}
+
+/* Fast Action Deck */
+.action-deck {
+  margin-bottom: 24px;
+}
+
+.deck-main-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px;
+}
+
+.btn {
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 14px 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  transition: all var(--transition-fast);
+  position: relative;
+  overflow: hidden;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(0.5);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #059669, #10b981);
+  color: #03140d;
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.25);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: linear-gradient(135deg, #10b981, #34d399);
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-emerald {
+  background: var(--bg-surface);
+  border: 1px solid var(--accent-phosphor);
+  color: var(--accent-phosphor);
+}
+
+.btn-emerald:not(:disabled):hover {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: #34d399;
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  color: var(--text-primary);
+}
+
+.btn-secondary:not(:disabled):hover {
+  background: var(--bg-card-hover);
+  border-color: var(--accent-cyan);
+  transform: translateY(-1px);
+}
+
+.btn-riot {
+  background: linear-gradient(135deg, rgba(244, 63, 94, 0.16), rgba(245, 158, 11, 0.1));
+  border: 1px solid var(--accent-crimson);
+  color: var(--text-primary);
+  box-shadow: 0 4px 16px rgba(244, 63, 94, 0.15);
+}
+
+.btn-riot:not(:disabled):hover {
+  background: linear-gradient(135deg, rgba(244, 63, 94, 0.28), rgba(245, 158, 11, 0.2));
+  border-color: #fb7185;
+  box-shadow: 0 6px 20px rgba(244, 63, 94, 0.35);
+  transform: translateY(-1px);
+}
+
+.btn-riot .btn-icon {
+  color: #fb7185;
+}
+
+.btn-amber {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(217, 119, 6, 0.28));
+  border: 1px solid var(--accent-amber);
+  color: var(--text-primary);
+  box-shadow: 0 4px 16px var(--accent-amber-glow);
+}
+
+.btn-amber:not(:disabled):hover {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.28), rgba(217, 119, 6, 0.4));
+  border-color: #fbbf24;
+  box-shadow: 0 6px 20px rgba(245, 158, 11, 0.35);
+  transform: translateY(-1px);
+}
+
+.btn-amber .btn-icon {
+  color: var(--accent-amber);
+}
+
+.highlight-amber {
+  color: #fbbf24;
+}
+
+/* Advisory / Tip Callout Banner */
+.tip-callout-banner {
+  margin-bottom: 20px;
+}
+
+.tip-callout-box {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(17, 23, 34, 0.95));
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-left: 4px solid var(--accent-amber);
+  border-radius: var(--radius-md);
+  padding: 14px 18px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.tip-callout-box .tip-icon {
+  color: var(--accent-amber);
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.tip-callout-box .tip-content {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.tip-callout-box .tip-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fbbf24;
+  letter-spacing: 0.5px;
+}
+
+.tip-callout-box .tip-desc {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.tip-callout-box .tip-desc code {
+  background: rgba(0, 0, 0, 0.4);
+  color: #fbbf24;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.btn-icon {
+  flex-shrink: 0;
+}
+
+.btn-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.btn-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.1px;
+}
+
+.btn-sub {
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.btn-outline {
+  background: var(--bg-card);
+  border: 1px solid var(--border-medium);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all var(--transition-fast);
+}
+
+.btn-outline:not(:disabled):hover {
+  border-color: var(--accent-phosphor);
+  color: var(--accent-phosphor);
+  background: rgba(16, 185, 129, 0.06);
+}
+
