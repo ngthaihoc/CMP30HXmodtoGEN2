@@ -16,6 +16,7 @@ Width=1920
 Height=1080
 WindowMode=0
 Colors=32
+PreferDX9LegacyMode=1
 
 [Performance]
 GraphicsSlider=4
@@ -41,11 +42,20 @@ GraphicsSlider=4
 	if !strings.Contains(content, "BorderlessWindow=1") {
 		t.Errorf("Expected BorderlessWindow=1, got content:\n%s", content)
 	}
+	if !strings.Contains(content, "PreferDX9LegacyMode=0") {
+		t.Errorf("Expected PreferDX9LegacyMode=0, got content:\n%s", content)
+	}
+	if !strings.Contains(content, "DX11Support=1") {
+		t.Errorf("Expected DX11Support=1, got content:\n%s", content)
+	}
 	if !strings.Contains(content, "Width=1920") || !strings.Contains(content, "GraphicsSlider=4") {
 		t.Errorf("Other settings were not preserved:\n%s", content)
 	}
 	if strings.Contains(content, "WindowMode=0") {
 		t.Errorf("Old WindowMode=0 still present:\n%s", content)
+	}
+	if strings.Contains(content, "PreferDX9LegacyMode=1") {
+		t.Errorf("Old PreferDX9LegacyMode=1 still present:\n%s", content)
 	}
 }
 
@@ -71,8 +81,12 @@ GraphicsSlider=4
 	}
 	content := string(updated)
 
-	if !strings.Contains(content, "[General]") || !strings.Contains(content, "WindowMode=2") || !strings.Contains(content, "BorderlessWindow=1") {
-		t.Errorf("Missing [General] or settings in content:\n%s", content)
+	if !strings.Contains(content, "[General]") ||
+		!strings.Contains(content, "WindowMode=2") ||
+		!strings.Contains(content, "BorderlessWindow=1") ||
+		!strings.Contains(content, "PreferDX9LegacyMode=0") ||
+		!strings.Contains(content, "DX11Support=1") {
+		t.Errorf("Missing settings in content:\n%s", content)
 	}
 }
 
@@ -106,8 +120,8 @@ func TestFindAndConfigureLeagueConfigs(t *testing.T) {
 	}
 
 	content, _ := os.ReadFile(cfgFile)
-	if !strings.Contains(string(content), "WindowMode=2") {
-		t.Errorf("Expected WindowMode=2 in file content:\n%s", string(content))
+	if !strings.Contains(string(content), "WindowMode=2") ||
+		!strings.Contains(string(content), "DX11Support=1") {
+		t.Errorf("Expected WindowMode=2 and DX11Support=1 in file content:\n%s", string(content))
 	}
 }
-

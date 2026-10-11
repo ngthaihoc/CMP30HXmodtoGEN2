@@ -77,16 +77,21 @@ func RunCLI(opts CLIOptions, log io.Writer, uefiMgr UEFIManager) error {
 
 	if opts.CheckSig {
 		fmt.Fprintln(log, "[*] Kiểm tra chữ ký số driver nvwgf2umx.dll (User-Mode Driver)...")
-		valid, info, err := CheckDriverSignature("")
+		valid, info, cat, err := CheckDriverSignatureEx("")
 		if err != nil {
 			fmt.Fprintf(log, "[!] Cảnh báo kiểm tra chữ ký: %v\n", err)
 		} else {
 			if valid {
-				fmt.Fprintf(log, "[V] Chữ ký số driver HỢP LỆ: %s\n", info)
+				fmt.Fprintf(log, "[V] Chữ ký số driver HỢP LỆ (%s): %s\n", cat, info)
 			} else {
-				fmt.Fprintf(log, "[!] CẢNH BÁO CHỮ KÝ: Driver nvwgf2umx.dll không hợp lệ hoặc bị sửa đổi!\n    %s\n", info)
-				fmt.Fprintln(log, "    => Riot Vanguard có thể chặn DLL này khi khởi động LoL / Valorant.")
-				fmt.Fprintln(log, "    => Khắc phục: Sử dụng driver Studio hoặc bản mod driver có kèm chứng chỉ được tin cậy.")
+				fmt.Fprintf(log, "[!] CẢNH BÁO CHỮ KÝ: Driver nvwgf2umx.dll (%s) không phải WHQL gốc!\n    %s\n", cat, info)
+				if cat == SigCategoryDartraiden {
+					fmt.Fprintln(log, "    => Phát hiện driver mod Dartraiden. UnlockRiotGame đã tự động tắt VulnerableDriverBlocklist.")
+					fmt.Fprintln(log, "    => Khuyến nghị: Nếu vẫn bị Vanguard chặn, dùng driver RainCandy Mode 2 hoặc bản WHQL 460.89.")
+				} else {
+					fmt.Fprintln(log, "    => Riot Vanguard có thể chặn DLL này khi khởi động LoL / Valorant.")
+					fmt.Fprintln(log, "    => Khắc phục: Sử dụng driver Studio hoặc bản mod driver có kèm chứng chỉ được tin cậy.")
+				}
 			}
 		}
 	}

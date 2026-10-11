@@ -30,6 +30,7 @@ type RiotStatus struct {
 	CompletionTitle        string   `json:"completionTitle"`
 	CompletionDetail       string   `json:"completionDetail"`
 	GpuDesc                string   `json:"gpuDesc"`
+	DisplayHostDesc        string   `json:"displayHostDesc,omitempty"`
 	OsDesc                 string   `json:"osDesc"`
 	SecureBootDesc         string   `json:"secureBootDesc"`
 	ValorantDesc           string   `json:"valorantDesc"`
@@ -98,6 +99,16 @@ func EvaluateRiotStatus(deviceID uint16, gpuName string, sbOn, isWin11 bool) Rio
 		OsDesc:                 osName,
 		SecureBootDesc:         sbText,
 		LoLDesc:                "✓ Sẵn sàng 100% (MSHybrid CASO + Borderless Windowed)",
+	}
+
+	if topo, err := ScanGPUTopology(); err == nil && topo != nil {
+		if len(topo.DisplayHosts) > 0 {
+			status.DisplayHostDesc = topo.DisplayHosts[0].Desc
+			banner += fmt.Sprintf("🖥️ GPU XUẤT HÌNH: %s\n", topo.DisplayHosts[0].Desc)
+		}
+		if len(topo.RenderGPUs) > 0 {
+			banner += fmt.Sprintf("⚡ GPU RENDER 3D: %s\n", topo.RenderGPUs[0].Desc)
+		}
 	}
 
 	switch model {

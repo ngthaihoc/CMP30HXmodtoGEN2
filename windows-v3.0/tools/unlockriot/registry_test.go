@@ -82,8 +82,8 @@ func TestConfigureDriverClassRegistry_Execution(t *testing.T) {
 	}
 
 	t.Logf("Registry config output:\n%s", buf.String())
-	t.Logf("NvidiaIndices: %v, DisplayIndices: %v, TDR: %v, ICD: %v",
-		res.NvidiaIndices, res.DisplayIndices, res.TdrConfigured, res.IcdRegistered)
+	t.Logf("NvidiaIndices: %v, DisplayIndices: %v, TDR: %v, ICD: %v, Blocklist: %v, DXGlobal: %v",
+		res.NvidiaIndices, res.DisplayIndices, res.TdrConfigured, res.IcdRegistered, res.BlocklistDisabled, res.DirectXGlobalConfigured)
 
 	if !res.TdrConfigured {
 		t.Errorf("Expected TdrConfigured to be true")
@@ -91,4 +91,21 @@ func TestConfigureDriverClassRegistry_Execution(t *testing.T) {
 	if !res.IcdRegistered {
 		t.Errorf("Expected IcdRegistered to be true")
 	}
+	if !res.DirectXGlobalConfigured {
+		t.Errorf("Expected DirectXGlobalConfigured to be true")
+	}
+}
+
+func TestConfigureDirectXGlobalRouting(t *testing.T) {
+	buf := &bytes.Buffer{}
+	err := ConfigureDirectXGlobalRouting(buf, "10DE&1F0B")
+	if err != nil {
+		t.Fatalf("ConfigureDirectXGlobalRouting returned error: %v", err)
+	}
+}
+
+func TestDisableVulnerableDriverBlocklist(t *testing.T) {
+	buf := &bytes.Buffer{}
+	// Hàm yêu cầu quyền admin nếu thực thi thật trên máy, test đảm bảo không panic
+	_ = DisableVulnerableDriverBlocklist(buf)
 }

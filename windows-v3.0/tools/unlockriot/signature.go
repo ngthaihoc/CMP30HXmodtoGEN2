@@ -11,6 +11,39 @@ import (
 	"time"
 )
 
+// SignatureCategory phân loại nguồn gốc chữ ký số của driver
+type SignatureCategory string
+
+const (
+	SigCategoryGenuineWHQL SignatureCategory = "WHQL_GENUINE"
+	SigCategoryDartraiden  SignatureCategory = "DARTRAIDEN_MOD"
+	SigCategorySelfSigned  SignatureCategory = "SELF_SIGNED"
+	SigCategoryUnsigned    SignatureCategory = "UNSIGNED"
+	SigCategoryUnknown     SignatureCategory = "UNKNOWN"
+)
+
+// ClassifySignature phân loại chữ ký dựa trên subject và tính hợp lệ
+func ClassifySignature(isValid bool, subject string) SignatureCategory {
+	upper := strings.ToUpper(subject)
+	if strings.Contains(upper, "DARTRAIDEN") || strings.Contains(upper, "ATHEROS") {
+		return SigCategoryDartraiden
+	}
+	if strings.Contains(upper, "MICROSOFT WINDOWS HARDWARE COMPATIBILITY") ||
+		(strings.Contains(upper, "NVIDIA CORPORATION") && isValid) {
+		return SigCategoryGenuineWHQL
+	}
+	if strings.Contains(upper, "NVCLEANSTALL") {
+		return SigCategorySelfSigned
+	}
+	if !isValid && subject == "" {
+		return SigCategoryUnsigned
+	}
+	if isValid {
+		return SigCategoryGenuineWHQL
+	}
+	return SigCategoryUnknown
+}
+
 // SignatureResult cấu trúc kết quả kiểm tra chữ ký số
 type SignatureResult struct {
 	Status  string `json:"Status"`
@@ -38,14 +71,14 @@ func findDriverDLL() string {
 	return p
 }
 
-// CheckDriverSignature kiểm tra trạng thái chữ ký số Authenticode của file driver DLL
-func CheckDriverSignature(dllPath string) (bool, string, error) {
+// CheckDriverSignatureEx kiểm tra chữ ký số và phân loại chi tiết nguồn gốc chứng chỉ
+func CheckDriverSignatureEx(dllPath string) (bool, string, SignatureCategory, error) {
 	if dllPath == "" {
 		dllPath = findDriverDLL()
 	}
 
 	if _, err := os.Stat(dllPath); err != nil {
-		return false, "", fmt.Errorf("không tìm thấy file: %w", err)
+		return false, "", SigCategoryUnsigned, fmt.Errorf("không tìm thấy file: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -57,17 +90,25 @@ func CheckDriverSignature(dllPath string) (bool, string, error) {
 	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", cmdStr)
 	out, err := cmd.Output()
 	if err != nil {
-		return false, "", fmt.Errorf("lỗi thực thi kiểm tra chữ ký PowerShell: %w", err)
+		return false, "", SigCategoryUnknown, fmt.Errorf("lỗi thực thi kiểm tra chữ ký PowerShell: %w", err)
 	}
 
 	var res SignatureResult
 	if err := json.Unmarshal(out, &res); err != nil {
-		// Fallback nếu JSON parse lỗi
 		raw := strings.TrimSpace(string(out))
-		return strings.Contains(raw, "Valid"), raw, nil
+		isValid := strings.Contains(raw, "Valid")
+		cat := ClassifySignature(isValid, raw)
+		return isValid, raw, cat, nil
 	}
 
 	isValid := strings.EqualFold(res.Status, "Valid")
-	desc := fmt.Sprintf("Trạng thái: %s | Chủ thể: %s", res.Status, res.Subject)
-	return isValid, desc, nil
+	cat := ClassifySignature(isValid, res.Subject)
+	desc := fmt.Sprintf("Trạng thái: %s | Chủ thể: %s | Phân loại: %s", res.Status, res.Subject, cat)
+	return isValid, desc, cat, nil
+}
+
+// CheckDriverSignature kiểm tra trạng thái chữ ký số Authenticode của file driver DLL
+func CheckDriverSignature(dllPath string) (bool, string, error) {
+	valid, desc, _, err := CheckDriverSignatureEx(dllPath)
+	return valid, desc, err
 }

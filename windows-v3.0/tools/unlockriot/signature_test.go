@@ -6,6 +6,55 @@ import (
 	"testing"
 )
 
+func TestClassifySignature(t *testing.T) {
+	tests := []struct {
+		name     string
+		isValid  bool
+		subject  string
+		expected SignatureCategory
+	}{
+		{
+			name:     "Dartraiden_PKI",
+			isValid:  false,
+			subject:  "CN=NVIDIA Corporation, OU=sign.pki.dartraiden.dn, O=dartraiden PKI Service",
+			expected: SigCategoryDartraiden,
+		},
+		{
+			name:     "Atheros_Expired",
+			isValid:  false,
+			subject:  "CN=Atheros Communications Inc.",
+			expected: SigCategoryDartraiden,
+		},
+		{
+			name:     "Microsoft_WHQL",
+			isValid:  true,
+			subject:  "CN=Microsoft Windows Hardware Compatibility Publisher, O=Microsoft Corporation",
+			expected: SigCategoryGenuineWHQL,
+		},
+		{
+			name:     "NVCleanstall_Cert",
+			isValid:  true,
+			subject:  "CN=NVCleanstall",
+			expected: SigCategorySelfSigned,
+		},
+		{
+			name:     "Unsigned_Empty",
+			isValid:  false,
+			subject:  "",
+			expected: SigCategoryUnsigned,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ClassifySignature(tt.isValid, tt.subject)
+			if got != tt.expected {
+				t.Errorf("ClassifySignature(%v, %q) = %v, expected %v", tt.isValid, tt.subject, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestCheckDriverSignature_Unsigned(t *testing.T) {
 	tmpDir := t.TempDir()
 	dummy := filepath.Join(tmpDir, "dummy.dll")
@@ -13,15 +62,18 @@ func TestCheckDriverSignature_Unsigned(t *testing.T) {
 		t.Fatalf("Failed to create dummy file: %v", err)
 	}
 
-	valid, status, err := CheckDriverSignature(dummy)
+	valid, status, cat, err := CheckDriverSignatureEx(dummy)
 	if err != nil {
-		t.Fatalf("CheckDriverSignature returned unexpected error: %v", err)
+		t.Fatalf("CheckDriverSignatureEx returned unexpected error: %v", err)
 	}
 	if valid {
 		t.Errorf("Expected dummy file to be invalid, got valid=true")
 	}
 	if status == "" {
 		t.Errorf("Expected non-empty status description")
+	}
+	if cat != SigCategoryUnsigned && cat != SigCategoryUnknown {
+		t.Logf("Categorized as %v", cat)
 	}
 }
 

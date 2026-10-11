@@ -127,21 +127,25 @@ func showTensorGuide(owner walk.Form, isWin11, is40HX bool) {
 
 func showDriverSignatureCheck(owner walk.Form, log io.Writer) {
 	fmt.Fprintln(log, "\n[*] Kiểm tra chữ ký số driver nvwgf2umx.dll (User-Mode Driver)...")
-	valid, info, err := CheckDriverSignature("")
+	valid, info, cat, err := CheckDriverSignatureEx("")
 	if err != nil {
 		fmt.Fprintf(log, "[!] Cảnh báo kiểm tra chữ ký: %v\n", err)
 		walk.MsgBox(owner, "Kiểm Tra Chữ Ký Driver", fmt.Sprintf("Không thể kiểm tra chữ ký: %v", err), walk.MsgBoxIconWarning)
 		return
 	}
 	if valid {
-		fmt.Fprintf(log, "[V] Chữ ký số driver HỢP LỆ: %s\n", info)
+		fmt.Fprintf(log, "[V] Chữ ký số driver HỢP LỆ (%s): %s\n", cat, info)
 		walk.MsgBox(owner, "Chữ Ký Driver Hợp Lệ",
-			fmt.Sprintf("Driver nvwgf2umx.dll có chữ ký số hợp lệ:\n%s\n\n✓ An toàn tuyệt đối với Riot Vanguard!", info),
+			fmt.Sprintf("Driver nvwgf2umx.dll có chữ ký số hợp lệ (%s):\n%s\n\n✓ An toàn tuyệt đối với Riot Vanguard!", cat, info),
 			walk.MsgBoxIconInformation)
 	} else {
-		fmt.Fprintf(log, "[!] CẢNH BÁO CHỮ KÝ: Driver nvwgf2umx.dll không hợp lệ hoặc bị sửa đổi!\n    %s\n", info)
+		fmt.Fprintf(log, "[!] CẢNH BÁO CHỮ KÝ: Driver nvwgf2umx.dll (%s) không phải WHQL gốc!\n    %s\n", cat, info)
+		if cat == SigCategoryDartraiden {
+			fmt.Fprintln(log, "    => Phát hiện driver mod Dartraiden. UnlockRiotGame đã tự động tắt VulnerableDriverBlocklist để mở khóa.")
+			fmt.Fprintln(log, "    => Nếu Vanguard vẫn chặn, hãy dùng driver RainCandy Mode 2 hoặc gói WHQL 460.89.")
+		}
 		walk.MsgBox(owner, "Cảnh Báo Chữ Ký Driver",
-			fmt.Sprintf("Driver nvwgf2umx.dll có chữ ký không hợp lệ:\n%s\n\n⚠️ Riot Vanguard có thể chặn file này khi khởi động game!", info),
+			fmt.Sprintf("Driver nvwgf2umx.dll (%s):\n%s\n\n⚠️ Đã tự động tắt VulnerableDriverBlocklist để chống chặn nạp DLL.\nNếu gặp lỗi khởi tạo đồ họa, hãy dùng driver ký chuẩn hoặc WHQL!", cat, info),
 			walk.MsgBoxIconWarning)
 	}
 }
@@ -567,6 +571,11 @@ func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) {
 			`Riot Games\League of Legends\Game\League of Legends.exe`,
 			`Riot Games\League of Legends\LeagueClient.exe`,
 			`Riot Games\Riot Client\RiotClientServices.exe`,
+			`VNGGames\League of Legends\Game\League of Legends.exe`,
+			`VNGGames\League of Legends\LeagueClient.exe`,
+			`Garena\Games\32787\Game\League of Legends.exe`,
+			`Games\League of Legends\Game\League of Legends.exe`,
+			`League of Legends\Game\League of Legends.exe`,
 		}
 
 		for _, drive := range drives {

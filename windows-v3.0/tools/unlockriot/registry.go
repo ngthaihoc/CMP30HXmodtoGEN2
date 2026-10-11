@@ -9,9 +9,12 @@ import (
 )
 
 const (
-	GpuClassPath       = `SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}`
-	GraphicsDriversKey = `SYSTEM\CurrentControlSet\Control\GraphicsDrivers`
-	PciEnumKey         = `SYSTEM\CurrentControlSet\Enum\PCI`
+	GpuClassPath             = `SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}`
+	GraphicsDriversKey       = `SYSTEM\CurrentControlSet\Control\GraphicsDrivers`
+	PciEnumKey               = `SYSTEM\CurrentControlSet\Enum\PCI`
+	CiConfigPath             = `SYSTEM\CurrentControlSet\Control\CI\Config`
+	DxGraphicsSettingsPath   = `Software\Microsoft\DirectX\GraphicsSettings`
+	DxUserGpuPreferencesPath = `Software\Microsoft\DirectX\UserGpuPreferences`
 
 	// FeatureScore 0xD1 (209 thập phân): Định danh card đồ họa Mobile / MSHybrid discrete GPU (Render dGPU)
 	// Tránh việc DirectX / DWM coi card là Desktop có cổng xuất hình rời dẫn đến lỗi EnumOutputs rỗng
@@ -61,21 +64,85 @@ func ClassifyAdapter(matchID, desc, provider string) AdapterRole {
 
 // RegistryConfigResult chứa kết quả cấu hình Registry cho driver
 type RegistryConfigResult struct {
-	NvidiaIndices  []string
-	DisplayIndices []string
-	TdrConfigured  bool
-	IcdRegistered  bool
-	FriendlyNamed  bool
-	Details        []string
+	NvidiaIndices          []string
+	DisplayIndices         []string
+	TdrConfigured          bool
+	IcdRegistered          bool
+	FriendlyNamed          bool
+	BlocklistDisabled      bool
+	DirectXGlobalConfigured bool
+	HighPerfDID            string
+	Details                []string
 }
 
-// ConfigureDriverClassRegistry tự động cấu hình MSHybrid, CASO, TDR và ICD cho driver hiện có
+// DisableVulnerableDriverBlocklist tắt danh sách đen driver của Windows để ngăn Vanguard/Windows chặn driver mod
+func DisableVulnerableDriverBlocklist(log io.Writer) error {
+	if log == nil {
+		log = io.Discard
+	}
+	k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, CiConfigPath, registry.SET_VALUE)
+	if err != nil {
+		return fmt.Errorf("không thể mở Registry CI\\Config: %w", err)
+	}
+	defer k.Close()
+
+	if err := k.SetDWordValue("VulnerableDriverBlocklistEnable", 0); err != nil {
+		return fmt.Errorf("không thể ghi VulnerableDriverBlocklistEnable=0: %w", err)
+	}
+	fmt.Fprintln(log, "  [V] Đã tắt Microsoft Vulnerable Driver Blocklist (ngăn Vanguard/Windows chặn driver mod).")
+	return nil
+}
+
+// ConfigureDirectXGlobalRouting thiết lập định tuyến GPU hiệu năng cao toàn cục cho DirectX
+func ConfigureDirectXGlobalRouting(log io.Writer, highPerfDID string) error {
+	if log == nil {
+		log = io.Discard
+	}
+
+	// Cho phép hệ thống chọn GPU High-Performance trong cài đặt DirectX
+	if gsKey, _, err := registry.CreateKey(registry.CURRENT_USER, DxGraphicsSettingsPath, registry.SET_VALUE); err == nil {
+		_ = gsKey.SetDWordValue("DefaultHighPerfGPUApplicable", 1)
+		_ = gsKey.SetDWordValue("SpecificGPUOptionApplicable", 1)
+		gsKey.Close()
+		fmt.Fprintln(log, "  [V] Đã kích hoạt tùy chọn High-Performance trong DirectX Graphics Settings.")
+	}
+
+	// Gán HighPerfAdapter toàn cục
+	if highPerfDID != "" {
+		ugpKey, _, err := registry.CreateKey(registry.CURRENT_USER, DxUserGpuPreferencesPath, registry.QUERY_VALUE|registry.SET_VALUE)
+		if err == nil {
+			defer ugpKey.Close()
+			current, _, _ := ugpKey.GetStringValue("DirectXUserGlobalSettings")
+			swapEffect := "SwapEffectUpgradeEnable=1;"
+			if strings.Contains(current, "SwapEffectUpgradeEnable=0") {
+				swapEffect = "SwapEffectUpgradeEnable=0;"
+			}
+			newSetting := fmt.Sprintf("HighPerfAdapter=%s;%s", highPerfDID, swapEffect)
+			if err := ugpKey.SetStringValue("DirectXUserGlobalSettings", newSetting); err == nil {
+				fmt.Fprintf(log, "  [V] Đã thiết lập HighPerfAdapter toàn cục cho DirectX: %s\n", highPerfDID)
+			}
+		}
+	}
+	return nil
+}
+
+// ConfigureDriverClassRegistry tự động cấu hình MSHybrid, CASO, TDR, ICD và DirectX toàn cục
 func ConfigureDriverClassRegistry(log io.Writer, gpuModel GPUModel) (*RegistryConfigResult, error) {
 	if log == nil {
 		log = io.Discard
 	}
 
 	res := &RegistryConfigResult{}
+
+	// Tắt Vulnerable Driver Blocklist
+	if err := DisableVulnerableDriverBlocklist(log); err == nil {
+		res.BlocklistDisabled = true
+	} else {
+		fmt.Fprintf(log, "  [!] Cảnh báo tắt Vulnerable Driver Blocklist: %v\n", err)
+	}
+
+	// Quét cấu trúc liên kết GPU (GPU xuất hình vs GPU render 3D)
+	topo, _ := ScanGPUTopology()
 
 	// 1. Quét và cấu hình Class Display Adapter
 	baseKey, err := registry.OpenKey(registry.LOCAL_MACHINE, GpuClassPath, registry.ENUMERATE_SUB_KEYS|registry.QUERY_VALUE)
@@ -90,7 +157,6 @@ func ConfigureDriverClassRegistry(log io.Writer, gpuModel GPUModel) (*RegistryCo
 	}
 
 	for _, sub := range subkeys {
-		// Chỉ xử lý các subkey 4 ký tự số (0000, 0001, ...)
 		if len(sub) != 4 {
 			continue
 		}
@@ -105,24 +171,41 @@ func ConfigureDriverClassRegistry(log io.Writer, gpuModel GPUModel) (*RegistryCo
 		desc, _, _ := sk.GetStringValue("DriverDesc")
 		provider, _, _ := sk.GetStringValue("ProviderName")
 
-		role := ClassifyAdapter(matchID, desc, provider)
+		// Kiểm tra vai trò dựa trên topo đã quét trước, nếu không có thì fallback sang ClassifyAdapter
+		role := RoleUnknown
+		if topo != nil {
+			for _, h := range topo.DisplayHosts {
+				if h.ClassIndex == sub {
+					role = RoleDisplayHost
+					break
+				}
+			}
+			if role == RoleUnknown {
+				for _, r := range topo.RenderGPUs {
+					if r.ClassIndex == sub {
+						role = RoleNvidiaRender
+						break
+					}
+				}
+			}
+		}
+		if role == RoleUnknown {
+			role = ClassifyAdapter(matchID, desc, provider)
+		}
 
 		switch role {
 		case RoleNvidiaRender:
 			res.NvidiaIndices = append(res.NvidiaIndices, sub)
 			fmt.Fprintf(log, "  -> Phát hiện Render dGPU (NVIDIA) tại Class Index [%s]: %s\n", sub, desc)
 
-			// Thiết lập MSHybrid & CASO cho dGPU không cổng xuất hình
 			_ = sk.SetDWordValue("FeatureScore", FeatureScoreMSHybrid)
 			_ = sk.SetDWordValue("EnableMsHybrid", 1)
 			_ = sk.SetDWordValue("EnableCrossAdapterScanOut", 1)
 			_ = sk.SetDWordValue("EnableCoproc", 1)
 
-			// Chống ngủ sâu D3Cold và ổn định nguồn điện để tránh TDR timeout lúc vào trận game
 			_ = sk.SetDWordValue("D3ColdSupported", 0)
 			_ = sk.SetDWordValue("RmDisableGpuPowerMgmt", 1)
 
-			// Xóa bỏ AdapterType=0 hoặc LargePageMinimum gây xung đột compute / WDDM surface
 			_ = sk.DeleteValue("AdapterType")
 			_ = sk.DeleteValue("LargePageMinimum")
 
@@ -131,18 +214,17 @@ func ConfigureDriverClassRegistry(log io.Writer, gpuModel GPUModel) (*RegistryCo
 
 		case RoleDisplayHost:
 			res.DisplayIndices = append(res.DisplayIndices, sub)
-			fmt.Fprintf(log, "  -> Phát hiện Display Adapter (iGPU) tại Class Index [%s]: %s\n", sub, desc)
+			fmt.Fprintf(log, "  -> Phát hiện Display Adapter (Xuất hình) tại Class Index [%s]: %s\n", sub, desc)
 
-			// Đăng ký EnableMsHybrid = 2 để Windows DWM nhận diện iGPU làm máy chủ xuất hình
 			_ = sk.SetDWordValue("EnableMsHybrid", 2)
-			res.Details = append(res.Details, fmt.Sprintf("[%s] Cấu hình Display Host iGPU: EnableMsHybrid=2", sub))
+			res.Details = append(res.Details, fmt.Sprintf("[%s] Cấu hình Display Host: EnableMsHybrid=2", sub))
 			fmt.Fprintf(log, "     [V] Đã áp dụng: EnableMsHybrid=2 (Chỉ định làm Adapter xuất hình màn hình chính)\n")
 		}
 
 		sk.Close()
 	}
 
-	// 2. Cấu hình TDR Delay (Timeout Detection & Recovery) trong GraphicsDrivers
+	// 2. Cấu hình TDR Delay trong GraphicsDrivers
 	gfxKey, _, err := registry.CreateKey(registry.LOCAL_MACHINE, GraphicsDriversKey, registry.SET_VALUE)
 	if err == nil {
 		_ = gfxKey.SetDWordValue("TdrDelay", 10)
@@ -173,7 +255,27 @@ func ConfigureDriverClassRegistry(log io.Writer, gpuModel GPUModel) (*RegistryCo
 	res.IcdRegistered = true
 	fmt.Fprintln(log, "  [V] Đã đăng ký OpenCL và Vulkan ICD cho NVIDIA driver.")
 
-	// 4. Đồng bộ FriendlyName trong Enum\PCI nếu cần
+	// 4. Cấu hình DirectX Global Routing (HighPerfAdapter)
+	targetDID := ""
+	if topo != nil && topo.HighPerfDID != "" {
+		targetDID = topo.HighPerfDID
+	} else {
+		switch gpuModel {
+		case GPUModelCMP40HX:
+			targetDID = "10DE&1F0B"
+		case GPUModelCMP30HX:
+			targetDID = "10DE&2189"
+		}
+	}
+
+	if targetDID != "" {
+		res.HighPerfDID = targetDID
+		if err := ConfigureDirectXGlobalRouting(log, targetDID); err == nil {
+			res.DirectXGlobalConfigured = true
+		}
+	}
+
+	// 5. Đồng bộ FriendlyName trong Enum\PCI nếu cần
 	targetFriendly := ""
 	switch gpuModel {
 	case GPUModelCMP40HX:

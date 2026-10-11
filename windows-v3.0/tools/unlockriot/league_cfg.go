@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// ConfigureLeagueConfig đảm bảo thiết lập Borderless Windowed trong game.cfg
+// ConfigureLeagueConfig đảm bảo thiết lập Borderless Windowed và DirectX 11 trong game.cfg
 func ConfigureLeagueConfig(cfgPath string) error {
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
@@ -22,6 +22,8 @@ func ConfigureLeagueConfig(cfgPath string) error {
 	generalFound := false
 	windowModeFound := false
 	borderlessFound := false
+	preferDX9Found := false
+	dx11SupportFound := false
 
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -36,6 +38,14 @@ func ConfigureLeagueConfig(cfgPath string) error {
 				if !borderlessFound {
 					newLines = append(newLines, "BorderlessWindow=1")
 					borderlessFound = true
+				}
+				if !preferDX9Found {
+					newLines = append(newLines, "PreferDX9LegacyMode=0")
+					preferDX9Found = true
+				}
+				if !dx11SupportFound {
+					newLines = append(newLines, "DX11Support=1")
+					dx11SupportFound = true
 				}
 				inGeneral = false
 			}
@@ -62,6 +72,16 @@ func ConfigureLeagueConfig(cfgPath string) error {
 					borderlessFound = true
 					continue
 				}
+				if strings.EqualFold(key, "PreferDX9LegacyMode") {
+					newLines = append(newLines, "PreferDX9LegacyMode=0")
+					preferDX9Found = true
+					continue
+				}
+				if strings.EqualFold(key, "DX11Support") {
+					newLines = append(newLines, "DX11Support=1")
+					dx11SupportFound = true
+					continue
+				}
 			}
 		}
 
@@ -80,6 +100,12 @@ func ConfigureLeagueConfig(cfgPath string) error {
 		if !borderlessFound {
 			newLines = append(newLines, "BorderlessWindow=1")
 		}
+		if !preferDX9Found {
+			newLines = append(newLines, "PreferDX9LegacyMode=0")
+		}
+		if !dx11SupportFound {
+			newLines = append(newLines, "DX11Support=1")
+		}
 	}
 
 	// Nếu hoàn toàn không có [General]
@@ -87,7 +113,7 @@ func ConfigureLeagueConfig(cfgPath string) error {
 		if len(newLines) > 0 && strings.TrimSpace(newLines[len(newLines)-1]) != "" {
 			newLines = append(newLines, "")
 		}
-		newLines = append(newLines, "[General]", "WindowMode=2", "BorderlessWindow=1")
+		newLines = append(newLines, "[General]", "WindowMode=2", "BorderlessWindow=1", "PreferDX9LegacyMode=0", "DX11Support=1")
 	}
 
 	var buf bytes.Buffer
@@ -105,15 +131,29 @@ func FindAndConfigureLeagueConfigs(drives []string) ([]string, error) {
 
 	relativePaths := []string{
 		`Riot Games\League of Legends\Config\game.cfg`,
+		`Riot Games\League of Legends\Game\Config\game.cfg`,
 		`League of Legends\Config\game.cfg`,
+		`League of Legends\Game\Config\game.cfg`,
+		`VNGGames\League of Legends\Config\game.cfg`,
+		`VNGGames\League of Legends\Game\Config\game.cfg`,
+		`Games\League of Legends\Config\game.cfg`,
+		`Games\Riot Games\League of Legends\Config\game.cfg`,
 		`Garena\Games\32787\Game\Config\game.cfg`,
+		`Garena\Games\32787\Config\game.cfg`,
 	}
+
+	seen := make(map[string]bool)
 
 	for _, drive := range drives {
 		for _, rel := range relativePaths {
 			fullPath := filepath.Join(drive, rel)
+			lower := strings.ToLower(fullPath)
+			if seen[lower] {
+				continue
+			}
 			if fi, err := os.Stat(fullPath); err == nil && !fi.IsDir() {
 				if err := ConfigureLeagueConfig(fullPath); err == nil {
+					seen[lower] = true
 					modified = append(modified, fullPath)
 				}
 			}
