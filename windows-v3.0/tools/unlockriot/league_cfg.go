@@ -160,5 +160,20 @@ func FindAndConfigureLeagueConfigs(drives []string) ([]string, error) {
 		}
 	}
 
+	// Bổ sung các file game.cfg tìm được từ Metadata/Registry/SmartScan
+	allTargets := FindAllRiotGameTargets(drives)
+	for _, cfg := range allTargets.LeagueConfigs {
+		lower := strings.ToLower(cfg)
+		if seen[lower] {
+			continue
+		}
+		if fi, err := os.Stat(cfg); err == nil && !fi.IsDir() {
+			if err := ConfigureLeagueConfig(cfg); err == nil {
+				seen[lower] = true
+				modified = append(modified, cfg)
+			}
+		}
+	}
+
 	return modified, nil
 }

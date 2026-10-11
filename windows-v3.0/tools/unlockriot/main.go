@@ -564,35 +564,32 @@ func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) {
 		defer k.Close()
 
 		drives := getLogicalDrives()
+		games := FindAllRiotGameTargets(drives)
 		found := 0
 
-		targets := []string{
-			`Riot Games\VALORANT\live\ShooterGame\Binaries\Win64\VALORANT-Win64-Shipping.exe`,
-			`Riot Games\League of Legends\Game\League of Legends.exe`,
-			`Riot Games\League of Legends\LeagueClient.exe`,
-			`Riot Games\Riot Client\RiotClientServices.exe`,
-			`VNGGames\League of Legends\Game\League of Legends.exe`,
-			`VNGGames\League of Legends\LeagueClient.exe`,
-			`Garena\Games\32787\Game\League of Legends.exe`,
-			`Games\League of Legends\Game\League of Legends.exe`,
-			`League of Legends\Game\League of Legends.exe`,
-		}
-
+		var allExes []string
+		allExes = append(allExes, games.ValorantExes...)
+		allExes = append(allExes, games.LeagueExes...)
+		allExes = append(allExes, games.RiotClientExes...)
 		for _, drive := range drives {
-			for _, t := range targets {
-				fullPath := filepath.Join(drive, t)
-				if _, err := os.Stat(fullPath); err == nil {
-					k.SetStringValue(fullPath, "GpuPreference=2;")
-					fmt.Fprintf(log, "  -> Đã gán GpuPreference=2 (High Performance) cho: %s\n", fullPath)
-					found++
-				}
+			allExes = append(allExes, filepath.Join(drive, `Riot Games\League of Legends\LeagueClient.exe`))
+			allExes = append(allExes, filepath.Join(drive, `VNGGames\League of Legends\LeagueClient.exe`))
+			allExes = append(allExes, filepath.Join(drive, `Garena\Games\32787\Game\League of Legends.exe`))
+		}
+		allExes = uniquePaths(allExes)
+
+		for _, fullPath := range allExes {
+			if fi, err := os.Stat(fullPath); err == nil && !fi.IsDir() {
+				_ = k.SetStringValue(fullPath, "GpuPreference=2;")
+				fmt.Fprintf(log, "  -> Đã gán GpuPreference=2 (High Performance) cho: %s\n", fullPath)
+				found++
 			}
 		}
 
 		if found == 0 {
 			fmt.Fprintln(log, "  -> Không tìm thấy thư mục cài game tự động, gán giá trị mặc định cho ổ C:...")
-			k.SetStringValue(filepath.Join(sysRoot[:3], targets[0]), "GpuPreference=2;")
-			k.SetStringValue(filepath.Join(sysRoot[:3], targets[1]), "GpuPreference=2;")
+			k.SetStringValue(filepath.Join(sysRoot[:3], `Riot Games\VALORANT\live\ShooterGame\Binaries\Win64\VALORANT-Win64-Shipping.exe`), "GpuPreference=2;")
+			k.SetStringValue(filepath.Join(sysRoot[:3], `Riot Games\League of Legends\Game\League of Legends.exe`), "GpuPreference=2;")
 		}
 
 		fmt.Fprintln(log, "[V] Hoàn tất cấu hình Registry DirectX.")
