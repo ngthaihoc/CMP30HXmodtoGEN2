@@ -638,6 +638,7 @@ type RiotStatusJSON struct {
 	NeedsEFISigning        bool   `json:"needsEFISigning"`
 	RecommendedSecureBoot  string `json:"recommendedSecureBoot"`
 	GpuDesc                string `json:"gpuDesc"`
+	DisplayHostDesc        string `json:"displayHostDesc,omitempty"`
 	OsDesc                 string `json:"osDesc"`
 	SecureBootDesc         string `json:"secureBootDesc"`
 	ValorantDesc           string `json:"valorantDesc"`

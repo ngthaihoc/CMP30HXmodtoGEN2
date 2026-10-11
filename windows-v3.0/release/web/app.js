@@ -479,6 +479,7 @@
     }
     if ($('riotValorantDetail') && data.valorantDesc) $('riotValorantDetail').textContent = data.valorantDesc;
     if ($('riotRecText') && data.recommendation) $('riotRecText').textContent = data.recommendation;
+    if ($('riotDisplayHost')) $('riotDisplayHost').textContent = data.displayHostDesc || "iGPU / Màn hình chính";
 
     const btnSign = $('btnRiotSignEfi');
     if (btnSign) {

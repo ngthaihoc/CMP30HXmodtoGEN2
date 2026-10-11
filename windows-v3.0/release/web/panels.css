@@ -78,6 +78,34 @@
   line-height: 1.4;
 }
 
+.riot-gpu-topology-box {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.topo-unit {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.topo-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.topo-val {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
 .riot-actions-toolbar {
   display: flex;
   flex-wrap: wrap;
