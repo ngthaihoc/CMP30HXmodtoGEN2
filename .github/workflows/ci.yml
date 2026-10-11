@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          check-latest: true
+
+      - name: Run Core Tests (40hxcore)
+        run: |
+          cd windows-v3.0/tools/40hxcore
+          go test -v ./...
+
+      - name: Run Riot Tests (unlockriot)
+        run: |
+          cd windows-v3.0/tools/unlockriot
+          go test -v ./...
+
+      - name: Verify Builds
+        run: |
+          cd windows-v3.0/tools/inst40hx
+          go build -ldflags "-s -w -H=windowsgui" -o "../../release/40HXInstaller.exe" .
+          cd ../check40x
+          go build -ldflags "-s -w -H=windowsgui" -o "../../release/40HXCheck.exe" .
+          cd ../uninstall40x
+          go build -ldflags "-s -w -H=windowsgui" -o "../../release/40HXUninstaller.exe" .
+          cd ../unlockriot
+          go build -ldflags "-s -w -H=windowsgui" -o "../../release/UnlockRiotGame.exe" .
