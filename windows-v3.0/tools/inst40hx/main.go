@@ -85,7 +85,29 @@ const (
 	gen2TaskName = "40HX PCIe Gen2 Bring-up"
 	// v2.6.0: Gen2 失败后的自动重试任务(一次性, 成功即删, 卸载链按名清理)
 	gen2RetryTask = "40HXGen2Retry"
+
+	uiModeCancel  = 0
+	uiModeWeb     = 1
+	uiModeClassic = 2
 )
+
+func promptUIMode() int {
+	res := hxcore.MsgBoxYesNoCancel(
+		"CMP 40HX & 30HX Control Center",
+		"Bạn muốn sử dụng giao diện điều khiển nào?\n\n"+
+			"• Chọn [Yes]    : Giao diện Web Hiện Đại (Khuyên dùng - Modern Web UI)\n"+
+			"• Chọn [No]     : Giao diện Cổ Điển (Giao diện gốc exe bằng Go)\n"+
+			"• Chọn [Cancel] : Thoát ứng dụng",
+	)
+	switch res {
+	case hxcore.IdYes:
+		return uiModeWeb
+	case hxcore.IdNo:
+		return uiModeClassic
+	default:
+		return uiModeCancel
+	}
+}
 
 func main() {
 	hxcore.DriverFileProvider = func(filename string) ([]byte, error) {
@@ -93,14 +115,39 @@ func main() {
 	}
 	// GUI 无窗口版(v1.1): 输出全部镜像到日志(默认 %TEMP%\40HX_installer.log, 可 -log 指定)
 	setupLog("40HX_installer.log")
-	// v3.0: Mặc định khởi chạy Modern Web Control Center khi nhấp đúp hoặc UAC -elevated
-	if hasArg("-gui-classic") {
+
+	// 1. Chỉ định trực tiếp giao diện qua tham số dòng lệnh
+	if hasArg("-gui-classic") || hasArg("-classic") || hasArg("-go-ui") {
 		runGUI()
 		return
 	}
-	if len(os.Args) <= 1 || (len(os.Args) == 2 && os.Args[1] == "-elevated") || hasArg("-ui") || hasArg("-web") || hasArg("-gui") {
+	if hasArg("-ui") || hasArg("-web") || hasArg("-ui-web") {
 		runWebGUI()
 		return
+	}
+
+	// 2. Chế độ tương tác khi người dùng nhấp đúp file exe hoặc chạy không kèm cờ lệnh
+	isInteractive := len(os.Args) <= 1 || (len(os.Args) == 2 && os.Args[1] == "-elevated")
+	if isInteractive && !hasArg("-silent") && !hasArg("-y") {
+		switch promptUIMode() {
+		case uiModeWeb:
+			if !isAdmin() {
+				selfElevate("-web")
+				return
+			}
+			runWebGUI()
+			return
+		case uiModeClassic:
+			if !isAdmin() {
+				selfElevate("-gui-classic")
+				return
+			}
+			runGUI()
+			return
+		default:
+			// Người dùng bấm Cancel hoặc đóng hộp thoại
+			return
+		}
 	}
 	// install/-uninstall 需管理员: 非提升时自动 ShellExecute runas 弹 UAC 重启
 	needAdmin := true
@@ -184,8 +231,8 @@ func regTaskOnly() {
 }
 
 // selfElevate: Khởi động lại với quyền Admin qua UAC ShellExecute "runas"
-func selfElevate() {
-	hxcore.SelfElevate("Trình Cài Đặt 40HX / 30HX")
+func selfElevate(extraArgs ...string) {
+	hxcore.SelfElevate("Trình Cài Đặt 40HX / 30HX", extraArgs...)
 }
 
 var (

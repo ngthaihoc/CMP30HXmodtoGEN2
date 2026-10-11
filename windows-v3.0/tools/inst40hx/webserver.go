@@ -588,6 +588,24 @@ func runWebGUI() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "launched"})
 	})
 
+	// 14. Launch Classic Walk Go GUI
+	mux.HandleFunc("/api/launch-classic-gui", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		exePath, err := os.Executable()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"message": "Không thể định vị file thực thi"})
+			return
+		}
+		cmd := exec.Command(exePath, "-gui-classic")
+		if err := cmd.Start(); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"message": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "launched"})
+	})
+
 	// Bind to localhost port
 	port := 40100
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))

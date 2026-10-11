@@ -11,15 +11,26 @@ import (
 )
 
 const (
-	MbIconError = 0x10
-	MbIconWarn  = 0x30
-	MbIconInfo  = 0x40
-	MbYesNo     = 0x04
+	MbIconError    = 0x10
+	MbIconQuestion = 0x20
+	MbIconWarn     = 0x30
+	MbIconInfo     = 0x40
+	MbYesNo        = 0x04
+	MbYesNoCancel  = 0x03
+	MbTopMost      = 0x40000
+
+	IdOK     = 1
+	IdCancel = 2
+	IdYes    = 6
+	IdNo     = 7
 )
 
 var (
 	procShellExecuteW = syscall.NewLazyDLL("shell32.dll").NewProc("ShellExecuteW")
 	procMsgBoxW       = syscall.NewLazyDLL("user32.dll").NewProc("MessageBoxW")
+
+	// MsgBoxPromptHook cho phép chặn hộp thoại trong unit test
+	MsgBoxPromptHook func(title, text string) int
 )
 
 // IsAdmin checks if the current process is running with elevated administrator privileges.
@@ -44,7 +55,7 @@ func IsAdmin() bool {
 }
 
 // SelfElevate relaunches the current executable with administrative privileges via UAC "runas".
-func SelfElevate(appTitle string) {
+func SelfElevate(appTitle string, extraArgs ...string) {
 	// Phòng chống vòng lặp nâng quyền UAC
 	for _, a := range os.Args[1:] {
 		if a == "-elevated" {
@@ -63,6 +74,13 @@ func SelfElevate(appTitle string) {
 	// Escape các tham số có chứa dấu cách/kí tự đặc biệt
 	var escapedArgs []string
 	for _, arg := range os.Args[1:] {
+		if strings.ContainsAny(arg, " \t\n\v\"") {
+			escapedArgs = append(escapedArgs, `"`+strings.ReplaceAll(arg, `"`, `\"`)+`"`)
+		} else {
+			escapedArgs = append(escapedArgs, arg)
+		}
+	}
+	for _, arg := range extraArgs {
 		if strings.ContainsAny(arg, " \t\n\v\"") {
 			escapedArgs = append(escapedArgs, `"`+strings.ReplaceAll(arg, `"`, `\"`)+`"`)
 		} else {
@@ -94,4 +112,15 @@ func MsgBoxYesNo(title, text string) bool {
 	b, _ := syscall.UTF16PtrFromString(text)
 	r, _, _ := procMsgBoxW.Call(0, uintptr(unsafe.Pointer(b)), uintptr(unsafe.Pointer(t)), uintptr(MbYesNo|MbIconInfo))
 	return r == 6 // IDYES
+}
+
+// MsgBoxYesNoCancel displays a native Windows MessageBox with Yes/No/Cancel options and returns the chosen button ID.
+func MsgBoxYesNoCancel(title, text string) int {
+	if MsgBoxPromptHook != nil {
+		return MsgBoxPromptHook(title, text)
+	}
+	t, _ := syscall.UTF16PtrFromString(title)
+	b, _ := syscall.UTF16PtrFromString(text)
+	r, _, _ := procMsgBoxW.Call(0, uintptr(unsafe.Pointer(b)), uintptr(unsafe.Pointer(t)), uintptr(MbYesNoCancel|MbIconQuestion|MbTopMost))
+	return int(r)
 }

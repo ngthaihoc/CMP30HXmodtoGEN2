@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"40hxcore"
@@ -572,6 +573,13 @@ func runGUI() {
 									st.scanOnce()
 									st.applySmartDefaults()
 								}()
+							}},
+							PushButton{Text: "Mở Web Control Center", OnClicked: func() {
+								exe, err := os.Executable()
+								if err != nil {
+									return
+								}
+								_ = exec.Command(exe, "-web").Start()
 							}},
 						},
 					},

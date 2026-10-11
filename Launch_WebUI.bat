@@ -59,7 +59,7 @@ if not exist "40HXInstaller.exe" (
 )
 
 echo [*] Dang khoi chay CMP Control Center Web UI...
-start "" "40HXInstaller.exe"
+start "" "40HXInstaller.exe" -web
 
 echo.
 echo ================================================================

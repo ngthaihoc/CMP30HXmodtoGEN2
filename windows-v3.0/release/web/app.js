@@ -366,6 +366,7 @@
     { id: 'btnRiotOptimize', url: '/api/riot/optimize', log: '[RIOT] Bắt đầu tối ưu hóa hệ thống cho Riot Games & dọn dẹp driver...' },
     { id: 'btnRiotOptimizeInner', url: '/api/riot/optimize', log: '[RIOT] Bắt đầu tối ưu hóa hệ thống cho Riot Games & dọn dẹp driver...' },
     { id: 'btnLaunchUnlockRiotExe', url: '/api/riot/launch-gui', log: '[EXE] Khởi chạy ứng dụng chuyên sâu UnlockRiotGame.exe...' },
+    { id: 'btnLaunchClassicGui', url: '/api/launch-classic-gui', log: '[GUI] Khởi chạy Giao diện Cổ điển (Go Walk GUI)...' },
     { id: 'btnModalRebootBios', url: '/api/riot/reboot-bios', log: '[BIOS] Đang khởi động lại vào BIOS Setup...' }
   ];
 
