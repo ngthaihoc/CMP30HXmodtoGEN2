@@ -282,104 +282,159 @@
 
 .deck-main-actions {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 1300px) {
+  .deck-main-actions {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 860px) {
+  .deck-main-actions {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 580px) {
+  .deck-main-actions {
+    grid-template-columns: 1fr;
+  }
 }
 
 .btn {
-  border: none;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
   border-radius: var(--radius-md);
-  padding: 14px 18px;
+  padding: 14px 14px;
   cursor: pointer;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   text-align: left;
   transition: all var(--transition-fast);
+  color: var(--text-primary);
+  min-height: 82px;
   position: relative;
   overflow: hidden;
 }
 
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
   filter: grayscale(0.5);
 }
 
+.btn-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.btn-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.btn-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.btn-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
 .btn-primary {
-  background: linear-gradient(135deg, #059669, #10b981);
-  color: #03140d;
-  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.25);
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid var(--accent-phosphor);
+}
+
+.btn-primary .btn-icon {
+  color: var(--accent-phosphor);
 }
 
 .btn-primary:not(:disabled):hover {
-  background: linear-gradient(135deg, #10b981, #34d399);
-  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.22);
+  border-color: #34d399;
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);
   transform: translateY(-1px);
 }
 
 .btn-emerald {
-  background: var(--bg-surface);
-  border: 1px solid var(--accent-phosphor);
+  background: rgba(16, 185, 129, 0.06);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.btn-emerald .btn-icon {
   color: var(--accent-phosphor);
 }
 
 .btn-emerald:not(:disabled):hover {
-  background: rgba(16, 185, 129, 0.08);
-  border-color: #34d399;
+  background: rgba(16, 185, 129, 0.15);
+  border-color: var(--accent-phosphor);
   transform: translateY(-1px);
 }
 
 .btn-secondary {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-medium);
-  color: var(--text-primary);
+  background: rgba(14, 165, 233, 0.06);
+  border: 1px solid rgba(14, 165, 233, 0.4);
+}
+
+.btn-secondary .btn-icon {
+  color: var(--accent-cyan);
 }
 
 .btn-secondary:not(:disabled):hover {
-  background: var(--bg-card-hover);
+  background: rgba(14, 165, 233, 0.15);
   border-color: var(--accent-cyan);
   transform: translateY(-1px);
 }
 
 .btn-riot {
-  background: linear-gradient(135deg, rgba(244, 63, 94, 0.16), rgba(245, 158, 11, 0.1));
-  border: 1px solid var(--accent-crimson);
-  color: var(--text-primary);
-  box-shadow: 0 4px 16px rgba(244, 63, 94, 0.15);
-}
-
-.btn-riot:not(:disabled):hover {
-  background: linear-gradient(135deg, rgba(244, 63, 94, 0.28), rgba(245, 158, 11, 0.2));
-  border-color: #fb7185;
-  box-shadow: 0 6px 20px rgba(244, 63, 94, 0.35);
-  transform: translateY(-1px);
+  background: rgba(244, 63, 94, 0.08);
+  border: 1px solid rgba(244, 63, 94, 0.45);
 }
 
 .btn-riot .btn-icon {
   color: #fb7185;
 }
 
-.btn-amber {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(217, 119, 6, 0.28));
-  border: 1px solid var(--accent-amber);
-  color: var(--text-primary);
-  box-shadow: 0 4px 16px var(--accent-amber-glow);
+.btn-riot:not(:disabled):hover {
+  background: rgba(244, 63, 94, 0.18);
+  border-color: #fb7185;
+  box-shadow: 0 4px 16px rgba(244, 63, 94, 0.25);
+  transform: translateY(-1px);
 }
 
-.btn-amber:not(:disabled):hover {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.28), rgba(217, 119, 6, 0.4));
-  border-color: #fbbf24;
-  box-shadow: 0 6px 20px rgba(245, 158, 11, 0.35);
-  transform: translateY(-1px);
+.btn-amber {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.45);
 }
 
 .btn-amber .btn-icon {
   color: var(--accent-amber);
 }
 
-.highlight-amber {
+.btn-amber .highlight-amber {
   color: #fbbf24;
+}
+
+.btn-amber:not(:disabled):hover {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: #fbbf24;
+  box-shadow: 0 4px 16px var(--accent-amber-glow);
+  transform: translateY(-1px);
 }
 
 /* Advisory / Tip Callout Banner */
