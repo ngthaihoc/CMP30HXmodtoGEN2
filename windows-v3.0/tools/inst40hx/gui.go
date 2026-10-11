@@ -518,31 +518,31 @@ func runGUI() {
 
 	createErr := MainWindow{
 		AssignTo: &st.mw,
-		Title:    "Trình Mở Khoá CMP 40HX / 30HX v3.0.0",
-		MinSize:  Size{Width: 800, Height: 680},
-		Size:     Size{Width: 880, Height: 800},
-		Layout:   VBox{Spacing: 6},
+		Title:    "CMP Unlock Control Center v3.0",
+		MinSize:  Size{Width: 760, Height: 640},
+		Size:     Size{Width: 820, Height: 720},
+		Layout:   VBox{Spacing: 8, Margins: Margins{Left: 12, Top: 12, Right: 12, Bottom: 12}},
 		Children: []Widget{
 			GroupBox{
-				Title:  "① Cài đặt thành phần & Môi trường (Tự động chọn theo máy; Tích chọn = Cài đặt/Làm mới)",
-				Layout: VBox{Spacing: 4},
+				Title:  "Thành phần & Thiết lập hệ thống",
+				Layout: VBox{Spacing: 6, Margins: Margins{Left: 10, Top: 10, Right: 10, Bottom: 10}},
 				Children: []Widget{
 					Label{AssignTo: &st.tip, Text: "Đang kiểm tra môi trường hệ thống…"},
 					Composite{
 						Layout: Grid{Columns: 2},
 						Children: []Widget{
-							CheckBox{AssignTo: &st.ckGsp, Text: "Bật GSP (EnableGpuFirmware=1)"},
-							CheckBox{AssignTo: &st.ckEfi, Text: "EFI Mở khoá + Mục khởi động BIOS (Chỉ 40HX)"},
-							CheckBox{AssignTo: &st.ckDrv, Text: "Cài đặt Driver PCIe + Thêm loại trừ Defender"},
-							CheckBox{AssignTo: &st.ckTask, Text: "Tự động mở khoá PCIe khi đăng nhập Windows"},
-							CheckBox{AssignTo: &st.ckFast, Text: "Nguồn: Tắt Fast Startup (Khởi động nhanh)"},
-							CheckBox{AssignTo: &st.ckAspm, Text: "Nguồn: Tắt ASPM (Tiết kiệm điện PCIe)"},
-							CheckBox{AssignTo: &st.ckPerf, Text: "Nguồn: Bật chế độ High Performance"},
-							CheckBox{AssignTo: &st.ckDefOff, Text: "Tắt bảo vệ thời gian thực Defender"},
+							CheckBox{AssignTo: &st.ckGsp, Text: "Bật GSP (EnableGpuFirmware)"},
+							CheckBox{AssignTo: &st.ckEfi, Text: "EFI Mở khoá BIOS (Chỉ 40HX)"},
+							CheckBox{AssignTo: &st.ckDrv, Text: "Driver PCIe & Ngoại lệ Defender"},
+							CheckBox{AssignTo: &st.ckTask, Text: "Tự động mở khoá khi đăng nhập"},
+							CheckBox{AssignTo: &st.ckFast, Text: "Tắt Fast Startup"},
+							CheckBox{AssignTo: &st.ckAspm, Text: "Tắt ASPM (Tiết kiệm điện PCIe)"},
+							CheckBox{AssignTo: &st.ckPerf, Text: "Chế độ High Performance"},
+							CheckBox{AssignTo: &st.ckDefOff, Text: "Tắt Realtime Protection Defender"},
 						},
 					},
 					Composite{
-						Layout: HBox{},
+						Layout: HBox{Spacing: 8},
 						Children: []Widget{
 							PushButton{AssignTo: &st.pbInstall, Text: "Cài đặt mục đã chọn", OnClicked: func() {
 								if !st.begin("Cài đặt thành phần") {
@@ -560,7 +560,7 @@ func runGUI() {
 								}
 								go st.installSelected(sel)
 							}},
-							PushButton{AssignTo: &st.pbFull, Text: "Cài đặt toàn bộ (Một chạm)", OnClicked: func() {
+							PushButton{AssignTo: &st.pbFull, Text: "Cài đặt toàn bộ (1-Chạm)", OnClicked: func() {
 								if !st.begin("Cài đặt toàn bộ") {
 									return
 								}
@@ -578,11 +578,9 @@ func runGUI() {
 				},
 			},
 			GroupBox{
-				Title:  "② Cấu hình PCIe (Lưu có hiệu lực ngay; Tác vụ tự chạy sẽ áp dụng cấu hình này)",
-				Layout: VBox{Spacing: 4},
+				Title:  "Cấu hình & Tác vụ PCIe",
+				Layout: VBox{Spacing: 6, Margins: Margins{Left: 10, Top: 10, Right: 10, Bottom: 10}},
 				Children: []Widget{
-					Label{Text: "Chính sách Driver: Cách xử lý driver can thiệp sau khi mở khoá PCIe"},
-					Label{Text: "① Dùng xong gỡ ngay (Mặc định, sạch sẽ, chuẩn game/anti-cheat)   ② Thử lại nếu lỗi   ③ Thường trú (Giữ driver, canh và giữ tốc độ)"},
 					Composite{
 						Layout: Grid{Columns: 3},
 						Children: []Widget{
@@ -591,19 +589,19 @@ func runGUI() {
 							RadioButton{AssignTo: &st.rbStrategy[2], Text: "Thường trú (Canh giữ PCIe)"},
 						},
 					},
-					CheckBox{AssignTo: &st.ckAutoHard, Text: "Tự động kích hoạt Stage 2 nếu chưa đạt (Link Disable + Khôi phục PnP)"},
+					CheckBox{AssignTo: &st.ckAutoHard, Text: "Tự động kích hoạt Stage 2 (Link Disable & Khôi phục PnP khi cần)"},
 					Composite{
-						Layout: HBox{},
+						Layout: HBox{Spacing: 6},
 						Children: []Widget{
-							Label{Text: "Thử lại khi lỗi:"},
-							NumberEdit{AssignTo: &st.neRetryCnt, MinValue: 0.0, MaxValue: 12.0, MinSize: Size{Width: 56}},
+							Label{Text: "Thử lại:"},
+							NumberEdit{AssignTo: &st.neRetryCnt, MinValue: 0.0, MaxValue: 12.0, MinSize: Size{Width: 50}},
 							Label{Text: "lần / Giãn cách:"},
-							NumberEdit{AssignTo: &st.neRetryMin, MinValue: 1.0, MaxValue: 240.0, MinSize: Size{Width: 56}},
+							NumberEdit{AssignTo: &st.neRetryMin, MinValue: 1.0, MaxValue: 240.0, MinSize: Size{Width: 50}},
 							Label{Text: "phút"},
 						},
 					},
 					Composite{
-						Layout: HBox{},
+						Layout: HBox{Spacing: 8},
 						Children: []Widget{
 							PushButton{AssignTo: &st.pbSave, Text: "Lưu cấu hình", OnClicked: func() {
 								if !st.begin("Lưu cấu hình") {
@@ -611,7 +609,7 @@ func runGUI() {
 								}
 								go st.savePolicy()
 							}},
-							PushButton{AssignTo: &st.pbGen2, Text: "Mở khoá PCIe ngay (Phiên này)", OnClicked: func() {
+							PushButton{AssignTo: &st.pbGen2, Text: "Mở khoá Gen2 ngay", OnClicked: func() {
 								if !st.begin("Mở khoá PCIe ngay") {
 									return
 								}
@@ -624,7 +622,7 @@ func runGUI() {
 									st.scanOnce()
 								}()
 							}},
-							PushButton{AssignTo: &st.pbGen2Install, Text: "Mở khoá ngay & Cài tự khởi động", OnClicked: func() {
+							PushButton{AssignTo: &st.pbGen2Install, Text: "Mở khoá & Cài tự khởi động", OnClicked: func() {
 								if !st.begin("Mở khoá & Cài tự khởi động") {
 									return
 								}
@@ -656,11 +654,11 @@ func runGUI() {
 				},
 			},
 			GroupBox{
-				Title:  "③ Nhật ký hoạt động (Thời gian thực)",
-				Layout: VBox{},
+				Title:  "Nhật ký hoạt động (Thời gian thực)",
+				Layout: VBox{Margins: Margins{Left: 8, Top: 8, Right: 8, Bottom: 8}},
 				Children: []Widget{
 					TextEdit{AssignTo: &st.teLog, ReadOnly: true, VScroll: true,
-						MinSize: Size{Height: 120}, StretchFactor: 2},
+						MinSize: Size{Height: 140}, StretchFactor: 2},
 				},
 			},
 		},

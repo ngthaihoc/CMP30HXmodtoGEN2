@@ -9,24 +9,14 @@
 </head>
 <body>
   <div class="app-layout">
-    <!-- Header -->
+    <!-- Minimalist Header -->
     <header class="app-header">
-      <div class="brand-group">
-        <div class="brand-icon">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="4" y="4" width="16" height="16" rx="2"/>
-            <rect x="8" y="8" width="8" height="8" fill="currentColor" fill-opacity="0.2"/>
-            <path d="M8 1v3M16 1v3M8 20v3M16 20v3M1 8h3M1 16h3M20 8h3M20 16h3" stroke-linecap="round"/>
-          </svg>
+      <div class="brand">
+        <div class="brand-title">
+          <span class="brand-name">CMP UNLOCK</span>
+          <span class="version-tag mono">v3.0.0</span>
         </div>
-        <div>
-          <div class="brand-title">
-            <span class="brand-name">CMP Unlock</span>
-            <span class="brand-sub">Control Center</span>
-            <span class="version-tag mono">v3.0.0</span>
-          </div>
-          <div class="brand-desc">NVIDIA CMP 40HX & 30HX: Mở khóa PCIe Gen2 x16 & Tối ưu Riot Vanguard</div>
-        </div>
+        <div class="brand-sub">NVIDIA CMP 40HX & 30HX · PCIe Gen2 x16 & Riot Vanguard</div>
       </div>
 
       <div class="header-actions">
@@ -35,7 +25,7 @@
           <span class="status-label mono" id="streamStatusText">Đang kết nối...</span>
         </div>
         <button class="btn-tool" id="btnRefresh" title="Quét lại môi trường">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
           </svg>
           <span>Quét lại</span>
@@ -44,76 +34,69 @@
     </header>
 
     <main class="main-content">
-      <!-- HERO HUD: Silicon & PCIe Topology -->
+      <!-- HERO HUD: Integrated Telemetry Strip -->
       <section class="hero-hud">
-        <!-- Hardware Specs & Lane Topology -->
+        <!-- Hardware Specs -->
         <div class="hud-card hardware-card">
-          <div class="card-header-compact">
-            <h2 class="card-heading">Bán dẫn & Cấu trúc liên kết PCIe</h2>
-            <span class="badge mono" id="gpuDetectedBadge">Đang quét GPU...</span>
+          <div class="card-header">
+            <span class="card-title">PHẦN CỨNG & BÁN DẪN</span>
+            <span class="badge mono" id="gpuDetectedBadge">Đang quét...</span>
           </div>
 
-          <div class="hardware-specs-grid">
-            <div class="spec-unit">
+          <div class="specs-table">
+            <div class="spec-row">
               <span class="spec-label">Bus PCIe:</span>
-              <span class="spec-value mono" id="specBusId">Đang quét...</span>
+              <span class="spec-val mono" id="specBusId">--</span>
             </div>
-            <div class="spec-unit">
+            <div class="spec-row">
               <span class="spec-label">GSP-RM Firmware:</span>
-              <span class="spec-value" id="specGsp">Đang kiểm tra...</span>
+              <span class="spec-val" id="specGsp">Đang kiểm tra...</span>
             </div>
-            <div class="spec-unit">
-              <span class="spec-label">Riot Vanguard / Game:</span>
-              <span class="spec-value" id="specAnticheat">Đang quét...</span>
+            <div class="spec-row">
+              <span class="spec-label">Riot Vanguard:</span>
+              <span class="spec-val" id="specAnticheat">Đang quét...</span>
             </div>
-            <div class="spec-unit">
+            <div class="spec-row">
               <span class="spec-label">Chiến lược Driver:</span>
-              <span class="spec-value" id="specDriverStrategy">Đang tải...</span>
+              <span class="spec-val" id="specDriverStrategy">Đang tải...</span>
             </div>
           </div>
 
-          <!-- 16-Lane PCIe Matrix -->
+          <!-- 16 PCIe Lanes Matrix -->
           <div class="lane-matrix-box">
             <div class="lane-matrix-header">
-              <span class="lane-title">16 Làn PCIe vật lý:</span>
+              <span class="lane-title">16 Làn PCIe vật lý</span>
               <span class="lane-status-text mono" id="laneSummaryText">Đang kiểm tra...</span>
             </div>
             <div class="lane-pins-grid" id="lanePinsGrid"></div>
           </div>
         </div>
 
-        <!-- Bandwidth & Throughput Gauge -->
+        <!-- Throughput & Link Rate -->
         <div class="hud-card throughput-card">
-          <div class="card-header-compact">
-            <h2 class="card-heading">Băng thông & Tốc độ liên kết</h2>
+          <div class="card-header">
+            <span class="card-title">BĂNG THÔNG LIÊN KẾT PCIE</span>
             <span class="boost-badge mono" id="boostRatio">-- BOOST</span>
           </div>
 
-          <div class="speed-compare-row">
-            <div class="speed-box before">
-              <span class="speed-tag">Mặc định (Khóa eFuse)</span>
-              <div class="speed-num mono">250 <span class="unit">MB/s</span></div>
-              <span class="speed-sub mono">Gen1 x1 @ 2.5 GT/s</span>
+          <div class="throughput-display">
+            <div class="throughput-main">
+              <span class="throughput-num mono" id="currentThroughput">-- <span class="unit">MB/s</span></span>
+              <span class="throughput-sub mono" id="currentSpeedSub">Đang kiểm tra...</span>
             </div>
-            <div class="speed-arrow">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M5 12h14M12 5l7 7-7 7"/>
-              </svg>
-            </div>
-            <div class="speed-box after">
-              <span class="speed-tag">Băng thông hiện tại</span>
-              <div class="speed-num mono" id="currentThroughput">-- <span class="unit">MB/s</span></div>
-              <span class="speed-sub mono" id="currentSpeedSub">Đang kiểm tra...</span>
+            <div class="speed-baseline">
+              <span class="baseline-label">Mặc định eFuse:</span>
+              <span class="baseline-val mono">250 MB/s (Gen1 x1)</span>
             </div>
           </div>
 
-          <!-- Throughput Gauge Bar -->
+          <!-- Linear Gauge Bar -->
           <div class="gauge-container">
             <div class="gauge-bar-track">
               <div class="gauge-bar-fill" id="gaugeBarFill" style="width: 0%;"></div>
             </div>
             <div class="gauge-labels mono">
-              <span>0 GB/s</span>
+              <span>0</span>
               <span>Gen1 x1 (250MB/s)</span>
               <span>Gen2 x8 (3.2GB/s)</span>
               <span class="active-mark">Gen2 x16 (6.4GB/s)</span>
@@ -126,70 +109,68 @@
       <section class="action-deck">
         <div class="deck-main-actions">
           <button class="btn btn-primary" id="btnUnlockNow">
-            <svg class="btn-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
             <div class="btn-content">
               <span class="btn-title">Mở khóa Gen2 ngay</span>
-              <span class="btn-sub">Tức thì phiên hiện tại (không cần reboot)</span>
+              <span class="btn-sub">Tức thì phiên hiện tại</span>
             </div>
           </button>
 
-          <button class="btn btn-emerald" id="btnFullInstall">
-            <svg class="btn-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          <button class="btn btn-secondary" id="btnFullInstall">
+            <svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
             <div class="btn-content">
-              <span class="btn-title">Cài đặt toàn bộ 1-chạm</span>
-              <span class="btn-sub">GSP + Driver + Tự khởi động + Nguồn</span>
+              <span class="btn-title">Cài đặt toàn bộ</span>
+              <span class="btn-sub">1-Chạm: GSP, Driver, Nguồn</span>
             </div>
           </button>
 
           <button class="btn btn-secondary" id="btnGen2AndTask">
-            <svg class="btn-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            <svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
             <div class="btn-content">
-              <span class="btn-title">Mở khóa & Tự khởi động</span>
-              <span class="btn-sub">Đăng ký tự mở khóa khi đăng nhập</span>
+              <span class="btn-title">Mở khóa & Tự chạy</span>
+              <span class="btn-sub">Tự mở khóa khi đăng nhập</span>
             </div>
           </button>
 
           <button class="btn btn-riot" id="btnRiotOptimize">
-            <svg class="btn-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            <svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
             <div class="btn-content">
-              <span class="btn-title">Tối ưu Riot Games (1-Chạm)</span>
-              <span class="btn-sub">CASO, Borderless & Dọn dẹp Vanguard</span>
+              <span class="btn-title">Tối ưu Riot Games</span>
+              <span class="btn-sub">MSHybrid & Vanguard clean</span>
             </div>
           </button>
 
           <button class="btn btn-amber" id="btnForceRootGen2">
-            <svg class="btn-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            <svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
             <div class="btn-content">
               <span class="btn-title highlight-amber">⚡ Ép mở khóa Gen2</span>
-              <span class="btn-sub">Tự động nhận diện 30HX / 40HX để nạp đúng chuỗi</span>
+              <span class="btn-sub">Nạp MMIO Shadow TU106/116</span>
             </div>
           </button>
         </div>
       </section>
 
-      <!-- Advisory Banner -->
+      <!-- Minimal Advisory Callout -->
       <section class="tip-callout-banner">
         <div class="tip-callout-box">
-          <svg class="tip-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg class="tip-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
           </svg>
           <div class="tip-content">
-            <div class="tip-title mono">KHUYẾN NGHỊ ÉP MỞ KHÓA GEN2 TRỰC TIẾP (-force-root-gen2)</div>
-            <div class="tip-desc">
-              Khi mới cài đặt hoặc chưa khởi động lại máy, thanh ghi LNKCAP có thể tạm thời báo Gen1 (0x00463D01). Bấm <strong>[Ép mở khóa Root Port]</strong> để nạp thẳng chuỗi MMIO Shadow và ép Root Port bo mạch chủ nâng tốc độ lên Gen2 x16 tức thì!
-            </div>
+            <span class="tip-title mono">KHUYẾN NGHỊ ÉP MỞ KHÓA GEN2 TRỰC TIẾP (-force-root-gen2)</span>
+            <span class="tip-desc">Khi mới cài đặt hoặc chưa reboot, thanh ghi LNKCAP có thể tạm báo Gen1 (0x00463D01). Bấm <strong>[⚡ Ép mở khóa Gen2]</strong> để nạp thẳng MMIO và ép Root Port huấn luyện lại lên Gen2 x16 tức thì.</span>
           </div>
         </div>
       </section>
 
-      <!-- Two Column Controls & Diagnostics -->
+      <!-- Main Two-Column Layout -->
       <section class="two-col-grid">
-        <!-- Left: Environment, Riot Cockpit, Components, Strategy -->
+        <!-- Left: System Diagnostics & Settings -->
         <div class="col-controls">
-          <!-- Environment Audit -->
+          <!-- Environment & Hardware Diagnostics -->
           <div class="panel-box">
             <div class="panel-header">
-              <h3 class="panel-title">Chẩn đoán môi trường & phần cứng</h3>
+              <h3 class="panel-title">Chẩn đoán môi trường</h3>
               <span class="summary-chip mono" id="auditSummaryChip">Đang kiểm tra...</span>
             </div>
             <div class="audit-list" id="auditList">
@@ -197,12 +178,12 @@
             </div>
           </div>
 
-          <!-- Riot Games & Vanguard Cockpit -->
+          <!-- Riot Games & Vanguard Compatibility -->
           <div class="panel-box riot-panel">
             <div class="panel-header">
               <div>
-                <h3 class="panel-title">Tương thích Riot Games (MSHybrid & Vanguard)</h3>
-                <div class="panel-subtitle">Zero-Reinstall: Hỗ trợ mọi driver mod, tối ưu LoL/TFT & Valorant</div>
+                <h3 class="panel-title">Tương thích Riot Games</h3>
+                <div class="panel-subtitle">Zero-Reinstall · Hỗ trợ driver mod · MSHybrid CASO</div>
               </div>
               <span class="summary-chip mono" id="riotSummaryChip">Đang quét...</span>
             </div>
@@ -214,7 +195,7 @@
                   <span class="riot-game-status highlight-emerald" id="riotLolStatus">✓ Sẵn sàng</span>
                 </div>
                 <div class="riot-game-name">Liên Minh Huyền Thoại</div>
-                <div class="riot-game-detail" id="riotLolDetail">MSHybrid CASO + Tự động cấu hình Borderless Windowed (WindowMode=2) mượt mà.</div>
+                <div class="riot-game-detail" id="riotLolDetail">MSHybrid CASO + Borderless Windowed (WindowMode=2).</div>
               </div>
 
               <div class="riot-game-card">
@@ -223,59 +204,58 @@
                   <span class="riot-game-status" id="riotValorantStatus">Đang quét...</span>
                 </div>
                 <div class="riot-game-name">Riot Vanguard (VALORANT)</div>
-                <div class="riot-game-detail" id="riotValorantDetail">Dọn dẹp driver can thiệp, tắt Testsigning đáp ứng tiêu chuẩn Riot Vanguard.</div>
+                <div class="riot-game-detail" id="riotValorantDetail">Dọn dẹp driver can thiệp, tắt testsigning.</div>
               </div>
             </div>
 
             <div class="riot-recommendation-banner" id="riotRecBanner">
-              <div class="rec-title mono">KHUYẾN NGHỊ:</div>
-              <div class="rec-body" id="riotRecText">Đang phân tích cấu hình phần cứng và hệ điều hành...</div>
+              <span class="rec-title mono">KHUYẾN NGHỊ:</span>
+              <span class="rec-body" id="riotRecText">Đang phân tích cấu hình phần cứng và hệ điều hành...</span>
             </div>
 
-            <!-- Dynamic GPU Topology & Driver Mod Status -->
             <div class="riot-gpu-topology-box">
               <div class="topo-unit">
                 <span class="topo-label">GPU Xuất hình:</span>
-                <span class="topo-val mono highlight-cyan" id="riotDisplayHost">Đang quét...</span>
+                <span class="topo-val mono" id="riotDisplayHost">Đang quét...</span>
               </div>
               <div class="topo-unit">
                 <span class="topo-label">DirectX 3D:</span>
-                <span class="topo-val mono highlight-emerald">HighPerfAdapter (CMP)</span>
+                <span class="topo-val mono">HighPerfAdapter (CMP)</span>
               </div>
               <div class="topo-unit">
                 <span class="topo-label">Driver 5xx/6xx:</span>
-                <span class="topo-val mono highlight-emerald">Blocklist: TẮT</span>
+                <span class="topo-val mono">Blocklist: TẮT</span>
               </div>
               <div class="topo-unit">
-                <span class="topo-label">Khởi tạo đồ họa:</span>
-                <span class="topo-val mono highlight-emerald">Borderless + DX11</span>
+                <span class="topo-label">Đồ họa:</span>
+                <span class="topo-val mono">Borderless + DX11</span>
               </div>
             </div>
 
             <div class="riot-actions-toolbar">
               <button class="btn btn-primary btn-sm" id="btnRiotOptimizeInner">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                <span>⚡ Tối Ưu Hóa 1-Chạm</span>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                <span>Tối Ưu 1-Chạm</span>
               </button>
               <button class="btn btn-outline btn-sm" id="btnRiotSignEfi">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                <span>🔐 Ký EFI (Win 11)</span>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                <span>Ký EFI (Win 11)</span>
               </button>
               <button class="btn btn-ghost btn-sm" id="btnRiotGuide">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                <span>📖 Hướng Dẫn BIOS</span>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                <span>Hướng Dẫn BIOS</span>
               </button>
-              <button class="btn btn-ghost btn-sm" id="btnLaunchUnlockRiotExe" title="Mở ứng dụng UnlockRiotGame riêng">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              <button class="btn btn-ghost btn-sm" id="btnLaunchUnlockRiotExe" title="Mở UnlockRiotGame.exe">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                 <span>Mở App Riêng</span>
               </button>
             </div>
           </div>
 
-          <!-- Component Installation Checklist -->
+          <!-- Components Installation -->
           <div class="panel-box">
             <div class="panel-header">
-              <h3 class="panel-title">Thành phần & Thiết lập hệ thống</h3>
+              <h3 class="panel-title">Thành phần & Thiết lập</h3>
             </div>
 
             <div class="checkbox-grid">
@@ -283,8 +263,8 @@
                 <input type="checkbox" id="ckGsp" checked>
                 <div class="chk-box"></div>
                 <div class="chk-label">
-                  <span class="chk-name">Bật GSP (EnableGpuFirmware=1)</span>
-                  <span class="chk-desc">Tránh mã lỗi Code 43 sau khi mở khóa</span>
+                  <span class="chk-name">Bật GSP (EnableGpuFirmware)</span>
+                  <span class="chk-desc">Tránh lỗi Code 43</span>
                 </div>
               </label>
 
@@ -292,8 +272,8 @@
                 <input type="checkbox" id="ckDrv" checked>
                 <div class="chk-box"></div>
                 <div class="chk-label">
-                  <span class="chk-name">Driver PCIe & Ngoại lệ Defender</span>
-                  <span class="chk-desc">Nạp driver can thiệp thanh ghi & cấp quyền an toàn</span>
+                  <span class="chk-name">Driver PCIe & Loại trừ Defender</span>
+                  <span class="chk-desc">Nạp driver và cấp quyền an toàn</span>
                 </div>
               </label>
 
@@ -301,8 +281,8 @@
                 <input type="checkbox" id="ckEfi">
                 <div class="chk-box"></div>
                 <div class="chk-label">
-                  <span class="chk-name">EFI Mở khóa + BIOS Hook (Chỉ 40HX)</span>
-                  <span class="chk-desc">Nạp payload vào phân vùng ESP (chuẩn UEFI)</span>
+                  <span class="chk-name">EFI Mở khóa BIOS (Chỉ 40HX)</span>
+                  <span class="chk-desc">Nạp payload phân vùng ESP</span>
                 </div>
               </label>
 
@@ -311,7 +291,7 @@
                 <div class="chk-box"></div>
                 <div class="chk-label">
                   <span class="chk-name">Tự động mở khóa khi đăng nhập</span>
-                  <span class="chk-desc">Đăng ký tác vụ Task Scheduler SYSTEM và Run Key</span>
+                  <span class="chk-desc">Task Scheduler SYSTEM & Run Key</span>
                 </div>
               </label>
 
@@ -319,8 +299,8 @@
                 <input type="checkbox" id="ckFast">
                 <div class="chk-box"></div>
                 <div class="chk-label">
-                  <span class="chk-name">Tắt Fast Startup (Khởi động nhanh)</span>
-                  <span class="chk-desc">Tránh Windows nạp sleep image bỏ qua hook</span>
+                  <span class="chk-name">Tắt Fast Startup</span>
+                  <span class="chk-desc">Tránh Windows sleep image</span>
                 </div>
               </label>
 
@@ -328,8 +308,8 @@
                 <input type="checkbox" id="ckAspm">
                 <div class="chk-box"></div>
                 <div class="chk-label">
-                  <span class="chk-name">Tắt ASPM (Tiết kiệm điện PCIe)</span>
-                  <span class="chk-desc">Tránh PCIe tự động rớt về Gen1 x1 khi rảnh</span>
+                  <span class="chk-name">Tắt ASPM</span>
+                  <span class="chk-desc">Chống PCIe rớt về Gen1 khi rảnh</span>
                 </div>
               </label>
 
@@ -337,8 +317,8 @@
                 <input type="checkbox" id="ckPerf">
                 <div class="chk-box"></div>
                 <div class="chk-label">
-                  <span class="chk-name">Bật chế độ High Performance</span>
-                  <span class="chk-desc">Cấp đủ năng lượng cho liên kết PCIe tối đa</span>
+                  <span class="chk-name">Bật High Performance</span>
+                  <span class="chk-desc">Cấp nguồn tối đa cho PCIe</span>
                 </div>
               </label>
 
@@ -346,15 +326,15 @@
                 <input type="checkbox" id="ckDefOff">
                 <div class="chk-box"></div>
                 <div class="chk-label">
-                  <span class="chk-name">Tắt Defender Realtime Protection</span>
-                  <span class="chk-desc">Khi phần mềm diệt virus chặn file sys</span>
+                  <span class="chk-name">Tắt Defender Realtime</span>
+                  <span class="chk-desc">Khi Defender chặn nạp driver</span>
                 </div>
               </label>
             </div>
 
             <div class="panel-footer-actions">
               <button class="btn btn-outline" id="btnInstallSelected">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
                 <span>Cài đặt mục đã chọn</span>
               </button>
             </div>
@@ -363,7 +343,7 @@
           <!-- Driver Policy & Recovery -->
           <div class="panel-box">
             <div class="panel-header">
-              <h3 class="panel-title">Chiến lược Driver & Tự phục hồi</h3>
+              <h3 class="panel-title">Chính sách Driver & Khôi phục</h3>
             </div>
 
             <div class="radio-stack">
@@ -381,7 +361,7 @@
                 <div class="rad-circle"></div>
                 <div class="rad-label">
                   <span class="rad-name">Tự động thử lại khi lỗi</span>
-                  <span class="rad-desc">Thử lại nếu lần đầu khởi tạo GPU chưa đạt Gen2.</span>
+                  <span class="rad-desc">Tự động thử lại nếu lần đầu chưa đạt tốc độ mong muốn.</span>
                 </div>
               </label>
 
@@ -390,7 +370,7 @@
                 <div class="rad-circle"></div>
                 <div class="rad-label">
                   <span class="rad-name">Thường trú (Canh giữ tốc độ)</span>
-                  <span class="rad-desc">Chạy nền thường trực, tự động ép xung lại nếu bị tụt xung.</span>
+                  <span class="rad-desc">Chạy nền, canh và duy trì tốc độ liên tục.</span>
                 </div>
               </label>
             </div>
@@ -399,7 +379,9 @@
               <label class="custom-checkbox">
                 <input type="checkbox" id="ckAutoHard" checked>
                 <div class="chk-box"></div>
-                <span class="chk-name">Tự động kích hoạt Stage 2 (Link Disable + Reset PnP) khi cần</span>
+                <div class="chk-label">
+                  <span class="chk-name">Tự động kích hoạt Stage 2 (Link Disable & Reset PnP khi cần)</span>
+                </div>
               </label>
 
               <div class="retry-config-box">
@@ -418,22 +400,20 @@
 
             <div class="panel-footer-actions">
               <button class="btn btn-outline" id="btnSavePolicy">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                <span>Lưu cấu hình chính sách</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
+                <span>Lưu cấu hình</span>
               </button>
             </div>
           </div>
         </div>
 
-        <!-- Right: Terminal & Safety Notice -->
+        <!-- Right: Realtime Console & Safety -->
         <div class="col-console">
           <div class="terminal-panel">
             <div class="terminal-header">
               <div class="terminal-title-group">
-                <span class="terminal-dot red"></span>
-                <span class="terminal-dot yellow"></span>
-                <span class="terminal-dot green"></span>
-                <span class="terminal-title mono">Nhật ký chẩn đoán thời gian thực</span>
+                <span class="terminal-status-dot"></span>
+                <span class="terminal-title mono">NHẬT KÝ THỜI GIAN THỰC</span>
               </div>
               <div class="terminal-filters">
                 <button class="btn-filter active mono" data-filter="all">ALL</button>
@@ -444,20 +424,20 @@
             </div>
 
             <div class="terminal-body mono" id="terminalLogBody">
-              <div class="log-line sys"><span class="log-time">[00:00:00]</span> [SYSTEM] Khởi động giao diện điều khiển CMP Unlock v3.0.0...</div>
+              <div class="log-line sys"><span class="log-time">[00:00:00]</span> CMP Unlock Control Center khởi động...</div>
             </div>
 
             <div class="terminal-footer">
               <div class="terminal-stats">
-                <span id="logLineCount" class="mono">1</span> <span>dòng log</span>
+                <span id="logLineCount" class="mono">1</span> <span>dòng</span>
               </div>
               <div class="terminal-controls">
                 <button class="btn-term-action" id="btnClearLog" title="Xóa log">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                   <span>Xóa</span>
                 </button>
                 <button class="btn-term-action" id="btnCopyLog" title="Sao chép toàn bộ log">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                   <span>Sao chép</span>
                 </button>
               </div>
@@ -466,12 +446,12 @@
 
           <!-- Safety Notice -->
           <div class="safety-badge-panel">
-            <svg class="safety-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg class="safety-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
             </svg>
             <div class="safety-info">
-              <h4 class="safety-title">An toàn với Vanguard, EasyAntiCheat & BattlEye</h4>
-              <p class="safety-desc">Không flash VBIOS, không bật testsigning, gỡ sạch kernel driver can thiệp sau khi nạp tốc độ. Đảm bảo toàn vẹn hệ điều hành.</p>
+              <h4 class="safety-title">An toàn với Vanguard, EAC & BattlEye</h4>
+              <p class="safety-desc">Không flash VBIOS, không bật testsigning, tự động gỡ sạch kernel driver can thiệp sau khi nạp tốc độ. Bảo vệ toàn vẹn Windows.</p>
             </div>
           </div>
         </div>
@@ -481,11 +461,11 @@
     <footer class="app-footer">
       <div class="footer-left">
         <span class="mono">CMP Unlock v3.0.0</span>
-        <span class="footer-sep">/</span>
+        <span class="footer-sep">·</span>
         <span>TU106 & TU116 Silicon Orchestrator</span>
       </div>
       <div class="footer-right">
-        <a href="https://github.com/nvdv-vn/CMP40HX-Unlock" target="_blank" rel="noopener noreferrer" class="footer-link mono">GitHub Repo</a>
+        <a href="https://github.com/nvdv-vn/CMP40HX-Unlock" target="_blank" rel="noopener noreferrer" class="footer-link mono">GitHub</a>
       </div>
     </footer>
   </div>
@@ -503,13 +483,12 @@
 
       <div class="modal-body">
         <div class="modal-alert-box">
-          <span>⚠️ Dùng điện thoại chụp lại hướng dẫn này trước khi khởi động lại máy!</span>
+          <span>⚠️ Chụp lại hướng dẫn này trước khi khởi động lại máy!</span>
         </div>
 
         <div class="cert-locations-box">
           <div class="cert-loc-label mono">Vị trí file chứng chỉ (CMP40HX_Key.cer):</div>
-          <div class="cert-path mono">1. C:\CMP40HX_Key.cer</div>
-          <div class="cert-path mono">2. Desktop\CMP40HX_Key.cer</div>
+          <div class="cert-path mono">1. C:\CMP40HX_Key.cer<br>2. Desktop\CMP40HX_Key.cer</div>
         </div>
 
         <div class="bios-steps-timeline">
@@ -519,7 +498,7 @@
           </div>
           <div class="timeline-step">
             <div class="step-num mono">BƯỚC 2</div>
-            <div class="step-content"><strong>Nạp cert vào db:</strong> Chọn <code>Authorized Signatures (db)</code> hoặc <code>Append db</code> &rarr; nạp file <code>CMP40HX_Key.cer</code> (giữ nguyên key Microsoft).</div>
+            <div class="step-content"><strong>Nạp cert vào db:</strong> Chọn <code>Authorized Signatures (db)</code> &rarr; nạp file <code>CMP40HX_Key.cer</code>.</div>
           </div>
           <div class="timeline-step">
             <div class="step-num mono">BƯỚC 3</div>
@@ -534,8 +513,8 @@
 
       <div class="modal-footer">
         <button class="btn btn-outline" id="btnModalDismiss">Đóng</button>
-        <button class="btn btn-emerald" id="btnModalRebootBios">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        <button class="btn btn-primary" id="btnModalRebootBios">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
           <span>Khởi động vào BIOS ngay</span>
         </button>
       </div>
