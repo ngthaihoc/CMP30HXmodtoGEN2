@@ -16,11 +16,11 @@
 
 Bandwidth unlock solution for **PCIe Gen2 x16 (~6.4 GB/s)** and dedicated 3D graphics rendering optimization for **NVIDIA CMP 30HX (TU116 die)** and **CMP 40HX (TU106 die)** mining GPUs on Windows 10/11 x64 and Linux.
 
-- **1-Click Setup** — Interactive Web Control Center interface or fully automated All-In-One batch scripts.
-- **Universal Driver Compatibility** — Works with official NVIDIA drivers, modded desktop drivers, and latest 5xx/6xx branch drivers.
-- **Riot Games & Anti-Cheat Optimization** — Built-in DirectX Global Router, solves League of Legends display initialization crash, 100% compatible with Riot Vanguard, EAC, and BattlEye with Test Signing disabled.
-- **No BIOS Modification** — Safe software-level unlock via BAR0 MMIO inside Windows/Linux; no VBIOS or motherboard BIOS flashing needed (for 30HX).
-- **MRRS 512B Max Throughput** — Adjusts Max Read Request Size to 512 Bytes, achieving full ~6.4 GB/s DMA memory bandwidth.
+- **1-Click Setup**: Interactive Web Control Center interface or fully automated All-In-One batch scripts.
+- **Universal Driver Compatibility**: Works with official NVIDIA drivers, modded desktop drivers, and latest 5xx/6xx branch drivers.
+- **Riot Games & Anti-Cheat Optimization**: Built-in DirectX Global Router, solves League of Legends display initialization crash, 100% compatible with Riot Vanguard, EAC, and BattlEye with Test Signing disabled.
+- **No BIOS Modification**: Safe software-level unlock via BAR0 MMIO inside Windows/Linux; no VBIOS or motherboard BIOS flashing needed (for 30HX).
+- **MRRS 512B Max Throughput**: Adjusts Max Read Request Size to 512 Bytes, achieving full ~6.4 GB/s DMA memory bandwidth.
 
 > [!TIP]
 > **Support the Author (Donate)**
@@ -58,7 +58,7 @@ Bandwidth unlock solution for **PCIe Gen2 x16 (~6.4 GB/s)** and dedicated 3D gra
 
 **Download Toolset:**
 
-Click **Code → Download ZIP** on GitHub or grab the latest release archive, then extract to a dedicated local directory (e.g., `D:\CMP30HX-Unlock`).
+Click **Code -> Download ZIP** on GitHub or grab the latest release archive, then extract to a dedicated local directory (e.g., `D:\CMP30HX-Unlock`).
 
 ---
 
@@ -66,21 +66,21 @@ Click **Code → Download ZIP** on GitHub or grab the latest release archive, th
 
 ### ⭐ Fastest Method: Web Control Center (Recommended)
 
-> **Just 1 step** — Double-click `Launch_WebUI.bat`.
+> **Just 1 step**: Double-click `Launch_WebUI.bat`.
 
 Your browser will automatically open the local dashboard (`http://127.0.0.1:8080`) featuring real-time 16-lane PCIe matrix telemetry, GPU clocks, temperature monitoring, and a **1-Click Unlock Gen2** action button.
 
 ### Method 2: All-In-One Automated Script
 
-> Right-click `Setup_CMP30HX_WindowsAIO.bat` → **Run as administrator**.
+> Right-click `Setup_CMP30HX_WindowsAIO.bat` -> **Run as administrator**.
 
 The script handles the full configuration process:
-1. **Disables PCIe ASPM and Hybrid Sleep** — Prevents Windows from downclocking the PCIe link during idle states.
-2. **Disables Fast Startup (hiberboot)** — Prevents links from getting stuck at Gen1 after restart.
-3. **Disables Vulnerable Driver Blocklist** — Allows temporary kernel driver loading to write hardware registers.
-4. **Disables Memory Integrity (HVCI / Core Isolation)** — Permits writing to BAR0 MMIO registers (if enabled, the script disables it and prompts for a single reboot).
-5. **Registers Resident Guard Service** — Creates multi-tier Scheduled Tasks (Startup + Logon + Wake) and Registry Run Keys to automatically restore Gen2 speed if reset by the driver.
-6. **Unlocks Gen2 x16 + MRRS 512B** — GPU is ready immediately, maximizing DMA throughput.
+1. **Disables PCIe ASPM and Hybrid Sleep**: Prevents Windows from downclocking the PCIe link during idle states.
+2. **Disables Fast Startup (hiberboot)**: Prevents links from getting stuck at Gen1 after restart.
+3. **Disables Vulnerable Driver Blocklist**: Allows temporary kernel driver loading to write hardware registers.
+4. **Disables Memory Integrity (HVCI / Core Isolation)**: Permits writing to BAR0 MMIO registers (if enabled, the script disables it and prompts for a single reboot).
+5. **Registers Resident Guard Service**: Creates multi-tier Scheduled Tasks (Startup delay 45s + Logon delay 10s + Wake) and Registry Run Keys to automatically restore Gen2 speed if reset by the driver.
+6. **Unlocks Gen2 x16 + MRRS 512B**: GPU is ready immediately, maximizing DMA throughput.
 
 ---
 
@@ -122,7 +122,7 @@ After running the unlock, verify performance using either tool:
 | Utility | Check Location | Expected Result |
 |---|---|---|
 | **GPU-Z** or `40HXCheck.exe` | **Bus Interface** row | `PCIe x16 2.0 @ x16 2.0` |
-| **AIDA64** → Tools → GPGPU Benchmark | **Memory Read / Memory Copy** rows | **6.3 – 6.4 GB/s** |
+| **AIDA64** -> Tools -> GPGPU Benchmark | **Memory Read / Memory Copy** rows | **6.3 - 6.4 GB/s** |
 
 > [!NOTE]
 > If GPU-Z shows Gen2 x16 but AIDA64 only achieves ~2.5 GB/s, MRRS is still stuck at the default 128 Bytes limit. Run `windows-v3.0\release\40HXInstaller.exe -gen2-30hx` to reactivate MRRS 512B.
@@ -141,12 +141,15 @@ The repository provides companion tools for common environment configurations:
 
 | Symptom | Cause | Solution |
 |---|---|---|
-| **Stuck at Gen1 (GPU TLS=Gen1, Root TLS=Gen2)** | - Dual-GPU system (CMP + iGPU) or modded driver reset GPU TLS to Gen1 upon re-init.<br>- Windows has HVCI enabled, or riser cable has poor signal | 1. **Automated**: `Setup_CMP30HX_WindowsAIO.bat` features a **Resident Guard** mode to automatically restore Gen2 speed.<br>2. **Manual**: Keep the card **Enabled** in Device Manager (strictly **DO NOT Disable** the card as it cuts MMIO communication) → Re-run `40HXInstaller.exe -gen2-30hx`.<br>3. If HVCI is enabled: Turn off Memory Integrity and reboot. |
-| **Gen2 speed lost after reboot** | - Driver loaded late on APU system or vBIOS reset link speed.<br>- Fast Startup is enabled in Windows | 1. The script deploys multi-tier Scheduled Tasks and Resident Guard to automatically detect and correct speed.<br>2. Turn off Fast Startup in Windows Power Options.<br>3. Recommended: Cleanly remove old drivers with **DDU (Display Driver Uninstaller)** in Safe Mode before reinstalling. |
-| **Throttling to Gen1 x16 when idle** | Windows PCIe ASPM power saving is enabled | Re-run `Setup_CMP30HX_WindowsAIO.bat` (automatically disables ASPM) or configure Power Options → PCI Express → Link State Power Management to **Off**. |
-| **GPU-Z shows Gen2 x16 but AIDA64 only gets ~2.5 GB/s** | Max Read Request Size (MRRS) is clamped at 128 Bytes | Execute `40HXInstaller.exe -gen2-30hx` to raise MRRS to 512 Bytes and flush DMA queues. |
-| **GPU not detected / Code 43 error** | Resistor mod solder joint has poor contact, or missing driver | 1. Check resistor mod soldering.<br>2. If your motherboard uses CSM mode, run `Fix_CMP30HX_CSM_Error43.bat`.<br>3. Use DDU to clean install the latest driver. |
-| **Crash initializing graphics when launching LoL** | Exclusive fullscreen display conflict on headless mining card | Run `UnlockRiotGame.exe` and click **1-CLICK Optimize** to enforce borderless presentation and DirectX 11 mode. |
+| **Stuck at Gen1 (GPU TLS=Gen1, Root TLS=Gen2)** | - Dual-GPU system (CMP 30HX + AMD/Intel iGPU) or modded driver (RainCandy) re-initialization resetting GPU TLS to Gen1.<br>- Or Windows has Memory Integrity (HVCI) enabled, or poor PCIe riser cable contact | 1. **Automated**: The new `Setup_CMP30HX_WindowsAIO.bat` activates **Resident Guard** mode and a Logon task (10s delay) to automatically compensate Gen2 speed.<br>2. **Manual**: Keep the card **Enabled** in Device Manager (strictly **DO NOT** Disable as it disconnects BAR0 MMIO) -> Run `Setup_CMP30HX_WindowsAIO.bat` or `40HXInstaller.exe -gen2-30hx` once the desktop has stabilized.<br>3. If HVCI is enabled: Disable HVCI and **Reboot the computer**. |
+| **Gen2 activation lost after reboot** | - NVIDIA / RainCandy driver loading late on APU systems or overwriting vBIOS state after boot.<br>- Old driver configuration conflicts or Fast Startup still enabled | 1. `Setup_CMP30HX_WindowsAIO.bat` includes multi-tier Scheduled Tasks (Logon delay 10s + Startup delay 45s) with **DriverStrategy=2 (Resident Guard)** mode that checks every minute and retrains if Gen2 is lost.<br>2. **DDU Recommendation**: Use **DDU (Display Driver Uninstaller)** in Safe Mode to cleanly remove all old display drivers before reinstalling modded drivers to avoid registry conflicts. |
+| **Throttling to Gen1 x16 when idle** | Windows PCIe ASPM power saving feature is enabled | Re-run `Setup_CMP30HX_WindowsAIO.bat` (script automatically disables ASPM) or set Power Options -> PCI Express -> Link State Power Management to: **Off**. |
+| **GPU-Z reports Gen2 x16 but AIDA64 only achieves ~2.5 GB/s** | Card Max Read Request Size (MRRS) is clamped at default 128 Bytes | Run command `40HXInstaller.exe -gen2-30hx` to increase MRRS to 512 Bytes and flush DMA queues. |
+| **GPU not detected / Code 43 error** | Resistor mod solder joint for x16 lanes has poor contact, or driver not installed properly | 1. Inspect the resistor mod solder joints on the card.<br>2. If your motherboard uses CSM mode, run `Fix_CMP30HX_CSM_Error43.bat`.<br>3. Reinstall the NVIDIA driver (use DDU to clean install the latest driver). |
+| **All fixes attempted but still failing** | NVIDIA driver registry conflicts, overwritten profiles, or faulty driver services | Cleanly remove old drivers using **DDU (Display Driver Uninstaller)** in Safe Mode, then perform a fresh driver installation. |
+| **Crash initializing graphics / black screen in LoL** | Exclusive fullscreen display conflict on headless mining card | Open `windows-v3.0\release\UnlockRiotGame.exe` and click **[⚡ 1-CLICK Optimize]** (or run `UnlockRiotGame.exe -silent -optimize`) to automatically force `game.cfg` to Borderless mode and enable DirectX 11 (`WindowMode=2`, `BorderlessWindow=1`, `DX11Support=1`). |
+| **3D games do not utilize CMP card, only running on iGPU** | Windows has not configured global graphics routing for DirectX applications | Run `UnlockRiotGame.exe` and click **[⚡ 1-CLICK Optimize]**. The tool binds CMP Hardware ID to `DirectXUserGlobalSettings` (`HighPerfAdapter`), forcing all 3D games to render on CMP without adding each game manually. |
+| **Vanguard or Windows blocks modded 5xx/6xx driver / Driver signature error** | Microsoft Vulnerable Driver Blocklist enabled or driver certificate not trusted | Run `UnlockRiotGame.exe` to automatically disable `VulnerableDriverBlocklistEnable=0`, import driver certificates (.cer) into Windows Root Certificate Store, and clean conflict drivers. Never enable `testsigning` as Vanguard blocks it. |
 
 ---
 
@@ -155,7 +158,7 @@ The repository provides companion tools for common environment configurations:
 | Operating System | Method |
 |---|---|
 | **Windows** (script) | Run `Setup_CMP30HX_WindowsAIO.bat -uninstall` |
-| **Windows** (GUI) | Right-click `windows-v3.0\release\40HXUninstaller.exe` → **Run as administrator** |
+| **Windows** (GUI) | Right-click `windows-v3.0\release\40HXUninstaller.exe` -> **Run as administrator** |
 | **Linux** | Run `sudo ./Setup_CMP30HX_LinuxAIO.sh --uninstall` |
 
 The uninstaller removes all Scheduled Tasks, Registry Run Keys, and application files, restoring system settings to default.
