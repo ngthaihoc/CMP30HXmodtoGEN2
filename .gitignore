@@ -15,9 +15,10 @@ build.ps1
 *.zip
 commits.txt
 diff.txt
+.tours/
+NewFeature.txt
+select_default_GPU/
 
-# Ignore dev build artifacts in tool source dirs (release binaries go to release/)
-windows-v3.0/tools/**/*.exe
 
 # Ignore agent-generated .md files everywhere
 *.md
