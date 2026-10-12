@@ -22,13 +22,13 @@ export function RegisterAutostartTask():Promise<void>;
 
 export function RevertReBar():Promise<main.SubtoolResult>;
 
-export function RiotOptimize():Promise<void>;
+export function RiotOptimize(arg1:boolean):Promise<void>;
 
 export function RiotRevertOptimization():Promise<void>;
 
 export function RiotSignEFI(arg1:string):Promise<void>;
 
-export function SavePolicy(arg1:number,arg2:number,arg3:number,arg4:number):Promise<void>;
+export function SavePolicy(arg1:main.PolicyConfig):Promise<void>;
 
 export function ScanEnvironment():Promise<main.EnvironmentReport>;
 

@@ -115,7 +115,7 @@ const Actions = {
           rollback: "Bấm nút [Hoàn Tác Riot] để bật lại Blocklist và xoá định tuyến DirectX.",
           onConfirm: () => {
             if (window.go && window.go.main && window.go.main.App) {
-              window.go.main.App.RiotOptimize().then(() => this.refreshRiot());
+              window.go.main.App.RiotOptimize(true).then(() => this.refreshRiot());
             }
           }
         });

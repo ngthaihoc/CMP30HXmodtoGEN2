@@ -50,11 +50,11 @@ func main() {
 	}
 
 	err := wails.Run(&options.App{
-		Title:             "CMP Unlock Control Center AIO — NVIDIA 30HX & 40HX",
-		Width:             1120,
-		Height:            780,
-		MinWidth:          980,
-		MinHeight:         680,
+		Title:     "CMP Unlock Control Center AIO — NVIDIA 30HX & 40HX",
+		Width:     1120,
+		Height:    780,
+		MinWidth:  980,
+		MinHeight: 680,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
@@ -83,15 +83,31 @@ func handleCLIArgs() {
 
 	app := NewApp()
 
-	for _, a := range os.Args[1:] {
+	for i, a := range os.Args[1:] {
 		switch a {
-		case "-gen2", "-gen2-30hx", "-force-root-gen2":
+		case "-gen2", "-gen2-30hx":
 			res := app.UnlockGen2Now()
 			fmt.Printf("Kết quả mở khoá Gen2: %v (Tốc độ=%d, Độ rộng=%d): %s\n", res.Success, res.Speed, res.Width, res.Message)
 			return
+		case "-force-root-gen2":
+			res := app.ForceRootGen2()
+			fmt.Printf("Kết quả ép Root Port Gen2: %v (Tốc độ=%d, Độ rộng=%d): %s\n", res.Success, res.Speed, res.Width, res.Message)
+			return
 		case "-optimize":
-			_ = app.RiotOptimize()
-			fmt.Println("Đã hoàn tất tối ưu hoá Riot Games.")
+			confirmed := false
+			for _, flag := range os.Args[i+2:] {
+				if flag == "-y" || flag == "-confirm-riot" {
+					confirmed = true
+					break
+				}
+			}
+			if !confirmed {
+				fmt.Fprintln(os.Stderr, "CẢNH BÁO: Tối ưu Riot sẽ tắt VulnerableDriverBlocklistEnable và thay đổi cấu hình hệ thống. Thêm -y để xác nhận.")
+				return
+			}
+			if err := app.RiotOptimize(true); err != nil {
+				fmt.Fprintf(os.Stderr, "Tối ưu Riot thất bại: %v\n", err)
+			}
 			return
 		case "-json-status":
 			st := app.GetRiotStatus()

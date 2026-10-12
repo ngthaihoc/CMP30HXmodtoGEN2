@@ -68,6 +68,10 @@ func (a *App) executeUnlock(forceRoot bool) UnlockResult {
 		if !gpuFound {
 			msg := "Không tìm thấy card CMP tương thích trên bus PCI. Vui lòng kiểm tra nguồn phụ và khe cắm."
 			a.Log("[!] " + msg)
+			_ = hxcore.WriteStructuredGen2Status(hxcore.StatusContract{
+				StatusCode: hxcore.StatusNoGPU, ErrorCode: "GPU_NOT_FOUND",
+				Details: []string{msg},
+			})
 			result = UnlockResult{Success: false, Message: msg}
 			return nil
 		}
@@ -100,12 +104,23 @@ func (a *App) executeUnlock(forceRoot bool) UnlockResult {
 		verdict, negErr := negotiator.ExecuteNegotiation(gpuBDF, gpuProfile, opts)
 		if negErr != nil {
 			a.Log(fmt.Sprintf("[PCIe][!] Lỗi đàm phán liên kết: %v", negErr))
+			_ = hxcore.WriteStructuredGen2Status(hxcore.StatusContract{
+				StatusCode: hxcore.StatusDrvFail, ErrorCode: "NEGOTIATION_FAILED",
+				TLSTarget: targetGen, Details: []string{negErr.Error()},
+			})
 			result = UnlockResult{Success: false, Message: negErr.Error()}
 			return nil
 		}
 
+		_ = hxcore.WriteStructuredGen2Status(verdict.StatusContract)
 		a.Log(fmt.Sprintf("[PCIe] Kết quả: Tốc độ hiện tại Gen%d, Độ rộng x%d | Kết luận: %s",
 			verdict.CurrentSpeed, verdict.CurrentWidth, verdict.Verdict))
+
+		if verdict.Success {
+			if err := bus.RestartNVDisplay(); err != nil {
+				a.Log(fmt.Sprintf("[PCIe] Cảnh báo: khởi động lại dịch vụ NVIDIA thất bại: %v", err))
+			}
+		}
 
 		result = UnlockResult{
 			Success: verdict.CurrentSpeed >= 2,
@@ -176,16 +191,24 @@ func (a *App) UnregisterAutostartTask() error {
 	return nil
 }
 
-// SavePolicy lưu thiết lập chiến lược driver và chu kỳ retry
-func (a *App) SavePolicy(strategy, retryCount, retryInterval, autoHard int) error {
-	if err := hxcore.SetConfigInt("DriverStrategy", strategy); err != nil {
+// PolicyConfig gom các thiết lập chiến lược driver và chu kỳ retry.
+type PolicyConfig struct {
+	Strategy      int `json:"strategy"`
+	RetryCount    int `json:"retryCount"`
+	RetryInterval int `json:"retryInterval"`
+	AutoHard      int `json:"autoHard"`
+}
+
+// SavePolicy lưu thiết lập chiến lược driver và chu kỳ retry.
+func (a *App) SavePolicy(cfg PolicyConfig) error {
+	if err := hxcore.SetConfigInt("DriverStrategy", cfg.Strategy); err != nil {
 		return fmt.Errorf("lưu DriverStrategy thất bại: %w", err)
 	}
-	_ = hxcore.SetConfigInt("Gen2AutoHard", autoHard)
-	_ = hxcore.SetConfigInt("Gen2RetryCount", retryCount)
-	_ = hxcore.SetConfigInt("Gen2RetryIntervalMin", retryInterval)
+	_ = hxcore.SetConfigInt("Gen2AutoHard", cfg.AutoHard)
+	_ = hxcore.SetConfigInt("Gen2RetryCount", cfg.RetryCount)
+	_ = hxcore.SetConfigInt("Gen2RetryIntervalMin", cfg.RetryInterval)
 
 	a.Log(fmt.Sprintf("[Cấu hình] Đã lưu chính sách: Chiến lược=%d, Tự động Stage2=%d, Thử lại=%d lần / Giãn cách=%d phút",
-		strategy, autoHard, retryCount, retryInterval))
+		cfg.Strategy, cfg.AutoHard, cfg.RetryCount, cfg.RetryInterval))
 	return nil
 }
