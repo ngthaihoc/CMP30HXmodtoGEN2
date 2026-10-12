@@ -12,6 +12,7 @@ import (
 // App struct chính điều phối toàn bộ binding giữa Wails và Go Core
 type App struct {
 	ctx             context.Context
+	isWails         bool
 	opMu            sync.Mutex
 	busyBy          string
 	telemetryCancel context.CancelFunc
@@ -24,6 +25,7 @@ func NewApp() *App {
 
 // startup được Wails gọi khi ứng dụng khởi chạy
 func (a *App) startup(ctx context.Context) {
+	a.isWails = true
 	a.ctx = ctx
 	InitEmbeddedDriverHook()
 	a.Log("[KHỞI ĐỘNG] CMP Unlock Control Center AIO v3.0.0 sẵn sàng.")
@@ -32,6 +34,7 @@ func (a *App) startup(ctx context.Context) {
 
 // shutdown được Wails gọi khi ứng dụng đóng
 func (a *App) shutdown(ctx context.Context) {
+	a.isWails = false
 	if a.telemetryCancel != nil {
 		a.telemetryCancel()
 	}
@@ -58,11 +61,12 @@ func (a *App) releaseOp() {
 	a.busyBy = ""
 }
 
-// Log đẩy thông điệp nhật ký thời gian thực sang giao diện Wails
+// Log đẩy thông điệp nhật ký thời gian thực sang giao diện Wails hoặc Web SSE
 func (a *App) Log(line string) {
-	if a.ctx != nil {
+	if a.isWails && a.ctx != nil {
 		runtime.EventsEmit(a.ctx, "log:entry", line)
 	}
+	broadcastEvent("log:entry", line)
 }
 
 // GetAppVersion trả về phiên bản hiện tại

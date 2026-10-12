@@ -8,6 +8,7 @@ import (
 
 	hxcore "40hxcore"
 
+	"github.com/wailsapp/go-webview2/webviewloader"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -18,6 +19,16 @@ import (
 var assets embed.FS
 
 func main() {
+	app := NewApp()
+
+	// 0. Hỗ trợ wails build sinh bindings tự động
+	if os.Getenv("tsoutputtype") != "" {
+		_ = wails.Run(&options.App{
+			Bind: []interface{}{app},
+		})
+		return
+	}
+
 	// 1. Xử lý các cờ dòng lệnh (CLI mode cho tác vụ tự chạy khi Logon và kịch bản)
 	if len(os.Args) > 1 {
 		handleCLIArgs()
@@ -30,7 +41,13 @@ func main() {
 		return
 	}
 
-	app := NewApp()
+	// 3. Kiểm tra tính khả dụng của WebView2 Runtime
+	wv2Ver, errVer := webviewloader.GetAvailableCoreWebView2BrowserVersionString("")
+	if errVer != nil || wv2Ver == "" {
+		// Thiếu WebView2 Runtime -> Kích hoạt Hybrid Fallback Web UI (mở trình duyệt mặc định, không popup)
+		runFallbackWebServer(app)
+		return
+	}
 
 	err := wails.Run(&options.App{
 		Title:             "CMP Unlock Control Center AIO — NVIDIA 30HX & 40HX",

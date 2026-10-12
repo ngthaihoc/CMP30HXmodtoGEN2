@@ -82,11 +82,11 @@ func (a *App) startTelemetryLoop() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if a.ctx == nil {
-					continue
-				}
 				data := a.gatherTelemetry()
-				runtime.EventsEmit(a.ctx, "telemetry:tick", data)
+				if a.isWails && a.ctx != nil {
+					runtime.EventsEmit(a.ctx, "telemetry:tick", data)
+				}
+				broadcastEvent("telemetry:tick", data)
 			}
 		}
 	}()
