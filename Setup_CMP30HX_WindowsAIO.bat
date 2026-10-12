@@ -528,9 +528,9 @@ if exist "%FINAL_DIR%\scripts\Set-GpuPreference.ps1" (
 
 :: Goi UnlockRiotGame che do im lang de don dep driver BYOVD tranh loi Vanguard 1067
 if exist "%FINAL_DIR%\UnlockRiotGame.exe" (
-    "%FINAL_DIR%\UnlockRiotGame.exe" -silent -optimize >nul 2>&1
+    "%FINAL_DIR%\UnlockRiotGame.exe" -silent -optimize -y >nul 2>&1
 ) else if defined SRC_RIOT (
-    "%SRC_RIOT%" -silent -optimize >nul 2>&1
+    "%SRC_RIOT%" -silent -optimize -y >nul 2>&1
 )
 exit /b 0
 

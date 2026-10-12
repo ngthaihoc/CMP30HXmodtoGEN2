@@ -202,5 +202,5 @@ Write-Output "$hasBattery|$model"
 			return false, model
 		}
 	}
-	return false, "Desktop PC"
+	return false, "Máy tính để bàn (PC)"
 }

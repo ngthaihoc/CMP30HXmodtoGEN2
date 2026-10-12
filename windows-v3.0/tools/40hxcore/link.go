@@ -28,6 +28,8 @@ type HardwareBus interface {
 	WriteMMIO(physAddr uint64, val uint32) error
 	PnpResetDevice(devID uint16) bool
 	RestartNVDisplay() error
+	LinkSpeed(bdf uint32) uint32
+	LinkWidth(bdf uint32) uint32
 }
 
 // MMIORegWrite: Bản ghi thiết lập thanh ghi MMIO chuẩn hoá
@@ -91,11 +93,11 @@ type NegotiationResult struct {
 
 // NegotiationOptions thiết lập tham số cho quy trình đàm phán hoàn chỉnh
 type NegotiationOptions struct {
-	TargetGen    uint32
-	AllowGen3    bool
-	ForceRoot    bool
-	AllowStage2  bool
-	UserIsAdmin  bool
+	TargetGen   uint32
+	AllowGen3   bool
+	ForceRoot   bool
+	AllowStage2 bool
+	UserIsAdmin bool
 }
 
 // NegotiationVerdict trả về kết quả đàm phán hoàn chỉnh kèm StatusContract và chỉ dẫn Retry
@@ -938,6 +940,30 @@ func (p *ProductionBus) PnpResetDevice(devID uint16) bool {
 		}
 	}
 	return success
+}
+
+func (p *ProductionBus) LinkSpeed(bdf uint32) uint32 {
+	cap := PcieCap(p.wh, bdf)
+	if cap == 0 {
+		return 0
+	}
+	v, err := p.ReadPCIConfig(bdf, cap+0x12)
+	if err != nil {
+		return 0
+	}
+	return v & 0xF
+}
+
+func (p *ProductionBus) LinkWidth(bdf uint32) uint32 {
+	cap := PcieCap(p.wh, bdf)
+	if cap == 0 {
+		return 0
+	}
+	v, err := p.ReadPCIConfig(bdf, cap+0x12)
+	if err != nil {
+		return 0
+	}
+	return (v >> 4) & 0x3F
 }
 
 func (p *ProductionBus) RestartNVDisplay() error {
