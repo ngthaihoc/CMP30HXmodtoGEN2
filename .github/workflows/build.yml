@@ -37,6 +37,13 @@ jobs:
           cd windows-v3.0/tools/unlockriot
           go build -ldflags "-s -w -H=windowsgui" -o "../../release/UnlockRiotGame.exe" .
 
+      - name: Build All-In-One (UnlockAIO.exe)
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+          cd windows-v3.0/tools/aio
+          wails build -clean -s -webview2 download -ldflags "-s -w -H=windowsgui" -o UnlockAIO.exe
+          cp build/bin/UnlockAIO.exe ../../release/UnlockAIO.exe
+
       - name: Upload Release Binaries
         uses: actions/upload-artifact@v4
         with:

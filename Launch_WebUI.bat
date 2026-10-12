@@ -51,9 +51,14 @@ exit /b 1
 
 :run_app
 cd /d "%~dp0windows-v3.0\release"
+if exist "UnlockAIO.exe" (
+    echo [*] Đang khởi chạy CMP Control Center AIO (Wails v2)...
+    start "" "UnlockAIO.exe"
+    exit /b 0
+)
+
 if not exist "40HXInstaller.exe" (
-    echo [!] Khong tim thay file windows-v3.0\release\40HXInstaller.exe
-    echo [*] Vui long chay Build_WebUI.bat de bien dich ung dung truoc.
+    echo [!] Khong tim thay file windows-v3.0\release\UnlockAIO.exe hoac 40HXInstaller.exe
     pause
     exit /b 1
 )

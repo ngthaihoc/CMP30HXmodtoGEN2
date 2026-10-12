@@ -28,6 +28,11 @@ jobs:
           cd windows-v3.0/tools/unlockriot
           go test -v ./...
 
+      - name: Run AIO Tests (aio)
+        run: |
+          cd windows-v3.0/tools/aio
+          go test -v ./...
+
       - name: Verify Builds
         run: |
           cd windows-v3.0/tools/inst40hx
@@ -38,3 +43,7 @@ jobs:
           go build -ldflags "-s -w -H=windowsgui" -o "../../release/40HXUninstaller.exe" .
           cd ../unlockriot
           go build -ldflags "-s -w -H=windowsgui" -o "../../release/UnlockRiotGame.exe" .
+          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+          cd ../aio
+          wails build -clean -s -webview2 download -ldflags "-s -w -H=windowsgui" -o UnlockAIO.exe
+          cp build/bin/UnlockAIO.exe ../../release/UnlockAIO.exe

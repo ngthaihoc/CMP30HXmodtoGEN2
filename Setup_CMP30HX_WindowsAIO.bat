@@ -262,16 +262,22 @@ exit /b %FINAL_EXIT%
 :: ================================================================
 :DeployInstallerFiles
 set "SRC_INSTALLER="
-if exist "%~dp0windows-v3.0\release\40HXInstaller.exe" (
+if exist "%~dp0windows-v3.0\release\UnlockAIO.exe" (
+    set "SRC_INSTALLER=%~dp0windows-v3.0\release\UnlockAIO.exe"
+) else if exist "%~dp0windows-v3.0\release\40HXInstaller.exe" (
     set "SRC_INSTALLER=%~dp0windows-v3.0\release\40HXInstaller.exe"
+) else if exist "%~dp0release\UnlockAIO.exe" (
+    set "SRC_INSTALLER=%~dp0release\UnlockAIO.exe"
 ) else if exist "%~dp0release\40HXInstaller.exe" (
     set "SRC_INSTALLER=%~dp0release\40HXInstaller.exe"
+) else if exist "%~dp0UnlockAIO.exe" (
+    set "SRC_INSTALLER=%~dp0UnlockAIO.exe"
 ) else if exist "%~dp040HXInstaller.exe" (
     set "SRC_INSTALLER=%~dp040HXInstaller.exe"
 )
 
 if not defined SRC_INSTALLER (
-    echo [X] LOI: Khong tim thay 40HXInstaller.exe!
+    echo [X] LOI: Khong tim thay UnlockAIO.exe hoac 40HXInstaller.exe!
     echo Vui long dam bao ban da giai nen day du thu muc repository.
     echo.
     pause
@@ -279,19 +285,31 @@ if not defined SRC_INSTALLER (
 )
 
 set "SRC_CHECK="
-if exist "%~dp0windows-v3.0\release\40HXCheck.exe" (
+if exist "%~dp0windows-v3.0\release\UnlockAIO.exe" (
+    set "SRC_CHECK=%~dp0windows-v3.0\release\UnlockAIO.exe"
+) else if exist "%~dp0windows-v3.0\release\40HXCheck.exe" (
     set "SRC_CHECK=%~dp0windows-v3.0\release\40HXCheck.exe"
+) else if exist "%~dp0release\UnlockAIO.exe" (
+    set "SRC_CHECK=%~dp0release\UnlockAIO.exe"
 ) else if exist "%~dp0release\40HXCheck.exe" (
     set "SRC_CHECK=%~dp0release\40HXCheck.exe"
+) else if exist "%~dp0UnlockAIO.exe" (
+    set "SRC_CHECK=%~dp0UnlockAIO.exe"
 ) else if exist "%~dp040HXCheck.exe" (
     set "SRC_CHECK=%~dp040HXCheck.exe"
 )
 
 set "SRC_RIOT="
-if exist "%~dp0windows-v3.0\release\UnlockRiotGame.exe" (
+if exist "%~dp0windows-v3.0\release\UnlockAIO.exe" (
+    set "SRC_RIOT=%~dp0windows-v3.0\release\UnlockAIO.exe"
+) else if exist "%~dp0windows-v3.0\release\UnlockRiotGame.exe" (
     set "SRC_RIOT=%~dp0windows-v3.0\release\UnlockRiotGame.exe"
+) else if exist "%~dp0release\UnlockAIO.exe" (
+    set "SRC_RIOT=%~dp0release\UnlockAIO.exe"
 ) else if exist "%~dp0release\UnlockRiotGame.exe" (
     set "SRC_RIOT=%~dp0release\UnlockRiotGame.exe"
+) else if exist "%~dp0UnlockAIO.exe" (
+    set "SRC_RIOT=%~dp0UnlockAIO.exe"
 ) else if exist "%~dp0UnlockRiotGame.exe" (
     set "SRC_RIOT=%~dp0UnlockRiotGame.exe"
 )

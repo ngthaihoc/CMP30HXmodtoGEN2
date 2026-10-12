@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CMP Unlock Control Center AIO</title>
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/hud.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/panels.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand-section">
+        <div class="brand-title">
+          <span>CMP UNLOCK</span>
+          <span class="brand-badge mono">AIO v3.0.0</span>
+        </div>
+        <div class="brand-subtitle">NVIDIA CMP 30HX & 40HX · PCIe Gen2 x16 & Riot Vanguard</div>
+      </div>
+      <div class="header-status">
+        <div class="admin-shield mono">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <span>QUYỀN QUẢN TRỊ (ADMIN)</span>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-ghost btn-sm" id="btnRefreshScan" title="Quét lại hệ thống">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+            <span>Quét lại</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Top Telemetry HUD -->
+    <section class="hero-hud">
+      <!-- Hardware Specs & 16-Lane Matrix -->
+      <div class="hud-card">
+        <div class="hud-header">
+          <span class="hud-title">PHẦN CỨNG & BÁN DẪN</span>
+          <span class="hud-gpu-badge mono" id="hudGpuBadge">Đang quét...</span>
+        </div>
+        <div class="specs-grid">
+          <div class="spec-item">
+            <span class="spec-label">Bus PCIe:</span>
+            <span class="spec-value mono" id="specBusId">--</span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-label">Firmware GSP:</span>
+            <span class="spec-value" id="specGspStatus">Đang kiểm tra...</span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-label">DEVCTL MRRS:</span>
+            <span class="spec-value mono" id="specMrrsVal">128B</span>
+          </div>
+          <div class="spec-item">
+            <span class="spec-label">Chiến lược Driver:</span>
+            <span class="spec-value" id="specStratVal">Đang tải...</span>
+          </div>
+        </div>
+        <div class="lane-matrix-box">
+          <div class="lane-matrix-header">
+            <span class="lane-matrix-title">16 LÀN PCIE VẬT LÝ</span>
+            <span class="lane-matrix-count mono" id="laneCountText">--/16 Làn</span>
+          </div>
+          <div class="lane-pins-grid" id="lanePinsGrid"></div>
+        </div>
+      </div>
+
+      <!-- Throughput Bandwidth -->
+      <div class="hud-card">
+        <div class="hud-header">
+          <span class="hud-title">BĂNG THÔNG LIÊN KẾT PCIE</span>
+          <span class="boost-tag mono" id="boostTag">--</span>
+        </div>
+        <div class="throughput-display">
+          <div class="throughput-val-group">
+            <div class="throughput-number mono" id="throughputNumber">-- <span class="throughput-unit">MB/s</span></div>
+            <div class="throughput-subtext mono" id="throughputSubtext">Đang kiểm tra...</div>
+          </div>
+        </div>
+        <div class="gauge-track">
+          <div class="gauge-fill" id="gaugeFill" style="width: 4%;"></div>
+        </div>
+        <div class="gauge-markers mono">
+          <span>0</span>
+          <span>Gen1 x1 (250MB/s)</span>
+          <span>Gen2 x8 (3.2GB/s)</span>
+          <span style="color: var(--accent-emerald);">Gen2 x16 (6.4GB/s)</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Two-Column Dashboard -->
+    <main class="dashboard-grid">
+      <!-- Left Column: Tool Panels & Tabs -->
+      <div class="col-left">
+        <nav class="tools-tabs">
+          <button class="tab-btn active" data-tab="unlock">⚡ Mở Khóa Gen2</button>
+          <button class="tab-btn" data-tab="diag">🔍 Chẩn Đoán</button>
+          <button class="tab-btn" data-tab="riot">🎮 Riot & 3D</button>
+          <button class="tab-btn" data-tab="subtools">🛠️ Công Cụ Phụ</button>
+          <button class="tab-btn" data-tab="uninstall">🗑️ Gỡ Cài Đặt</button>
+        </nav>
+
+        <div class="tab-content-area">
+          <!-- Tab 1: Unlock Gen2 -->
+          <div class="tool-panel active" id="panel_unlock">
+            <div class="panel-card">
+              <div class="panel-card-header">
+                <div>
+                  <h3 class="panel-card-title">Mở Khóa Tốc Độ PCIe Gen2 x16</h3>
+                  <div class="panel-card-desc">Huấn luyện lại liên kết PCIe và tối ưu Max Read Request Size (MRRS 512B)</div>
+                </div>
+              </div>
+              <div class="action-grid">
+                <button class="action-card-btn" id="btnUnlockGen2">
+                  <div class="action-card-title highlight-emerald">⚡ 1-Click Mở Khóa Gen2</div>
+                  <div class="action-card-sub">Kích hoạt tức thì cho phiên làm việc hiện tại</div>
+                </button>
+                <button class="action-card-btn" id="btnForceRootGen2">
+                  <div class="action-card-title" style="color: var(--accent-amber);">🔄 Ép Mở Khóa Root Port</div>
+                  <div class="action-card-sub">Nạp MMIO TU106/116 Shadow và ép Root Port retrain</div>
+                </button>
+              </div>
+            </div>
+
+            <div class="panel-card">
+              <div class="panel-card-header">
+                <div>
+                  <h3 class="panel-card-title">Tự Động Mở Khóa Khi Khởi Động Máy</h3>
+                  <div class="panel-card-desc">Đăng ký tác vụ SYSTEM và Registry Run Key tự chạy khi đăng nhập</div>
+                </div>
+              </div>
+              <div style="display: flex; gap: 10px;">
+                <button class="btn btn-secondary" id="btnRegisterTask">
+                  <span>Đăng ký tự mở khóa (Logon)</span>
+                </button>
+                <button class="btn btn-ghost" id="btnUnregisterTask">
+                  <span>Gỡ tác vụ</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 2: Chẩn Đoán -->
+          <div class="tool-panel" id="panel_diag">
+            <!-- HVCI Warning Callout -->
+            <div id="hvciAlertBox" style="display: none; background: rgba(255, 176, 32, 0.1); border: 1px solid var(--accent-amber); border-radius: var(--radius-sm); padding: 12px; flex-direction: column; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--accent-amber);" id="hvciStatusText">
+                Memory Integrity (HVCI) ĐANG BẬT
+              </div>
+              <div style="font-size: 12px; color: var(--text-secondary); white-space: pre-line;" id="hvciGuideText"></div>
+              <div>
+                <button class="btn btn-amber btn-sm" id="btnOpenHvciSettings">Mở Windows Security (Core Isolation)</button>
+              </div>
+            </div>
+
+            <div class="panel-card">
+              <div class="panel-card-header">
+                <div>
+                  <h3 class="panel-card-title">Môi Trường Hệ Thống</h3>
+                  <div class="panel-card-desc">Tự động đối soát cấu hình BIOS, bảo mật và nguồn điện</div>
+                </div>
+              </div>
+              <div class="audit-items-list" id="auditItemsList">
+                <div style="color: var(--text-muted); font-size: 11px;">Đang tải danh sách kiểm tra...</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 3: Riot Games & 3D Router -->
+          <div class="tool-panel" id="panel_riot">
+            <div class="panel-card">
+              <div class="panel-card-header">
+                <div>
+                  <h3 class="panel-card-title">Tương Thích Riot Games & DirectX</h3>
+                  <div class="panel-card-desc">MSHybrid CASO · DirectX High-Performance Router · LoL Borderless DX11</div>
+                </div>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div style="background: var(--bg-app); border: 1px solid var(--border-subtle); padding: 10px; border-radius: var(--radius-xs);">
+                  <div style="font-size: 11px; color: var(--text-muted);">LIÊN MINH HUYỀN THOẠI / TFT</div>
+                  <div style="font-size: 14px; font-weight: 700; color: var(--accent-emerald);" id="riotLolStatus">✓ Sẵn sàng</div>
+                  <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">MSHybrid CASO + Borderless Windowed (DX11)</div>
+                </div>
+                <div style="background: var(--bg-app); border: 1px solid var(--border-subtle); padding: 10px; border-radius: var(--radius-xs);">
+                  <div style="font-size: 11px; color: var(--text-muted);">VALORANT (VANGUARD)</div>
+                  <div style="font-size: 14px; font-weight: 700;" id="riotValStatus">Đang kiểm tra...</div>
+                  <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Dọn dẹp driver can thiệp kernel, kiểm tra Secure Boot</div>
+                </div>
+              </div>
+
+              <div style="background: #141b24; padding: 10px; border-radius: var(--radius-xs); border: 1px solid var(--border-subtle);">
+                <span class="mono" style="font-size: 11px; color: var(--accent-cyan); font-weight: 700;">KHUYẾN NGHỊ: </span>
+                <span style="font-size: 12px; color: var(--text-secondary);" id="riotRecText">Đang phân tích...</span>
+              </div>
+
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="btn btn-riot" id="btnRiotOptimize">
+                  <span>⚡ 1-Click Tối Ưu Riot</span>
+                </button>
+                <button class="btn btn-ghost" id="btnRiotRevert">
+                  <span>Hoàn tác tối ưu</span>
+                </button>
+                <button class="btn btn-secondary" id="btnRiotSignEFI">
+                  <span>🔐 Ký Chữ Ký Số EFI</span>
+                </button>
+                <button class="btn btn-ghost" id="btnRebootBIOS">
+                  <span>Khởi động vào BIOS</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 4: Công Cụ Phụ Trợ -->
+          <div class="tool-panel" id="panel_subtools">
+            <div class="panel-card">
+              <div class="panel-card-header">
+                <div>
+                  <h3 class="panel-card-title">Sửa Lỗi CSM Legacy & Code 43</h3>
+                  <div class="panel-card-desc">Khắc phục xung đột tài nguyên bo mạch chủ khi bật CSM Legacy</div>
+                </div>
+              </div>
+              <p style="font-size: 12px; color: var(--text-secondary);">
+                Tự động khoá trạng thái D3Cold, tăng thời gian chờ TDR lên 10 giây và quét lại bus PCI để kích hoạt card khi bị ẩn.
+              </p>
+              <div>
+                <button class="btn btn-secondary" id="btnFixCSM">Sửa Lỗi CSM Code 43</button>
+              </div>
+            </div>
+
+            <div class="panel-card">
+              <div class="panel-card-header">
+                <div>
+                  <h3 class="panel-card-title">Cấu Hình Turing Resizable BAR (ReBAR)</h3>
+                  <div class="panel-card-desc">Mở rộng thanh ghi VRAM qua NvStrapsReBar & Profile Inspector</div>
+                </div>
+              </div>
+              <p style="font-size: 12px; color: var(--text-secondary);">
+                Tối ưu hoá kích thước BAR lên 6GB. Công cụ tích hợp khóa an toàn tự động phát hiện Laptop và chặn can thiệp để bảo vệ bo mạch chủ.
+              </p>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-secondary" id="btnSetupReBar">Bật Resizable BAR (6GB)</button>
+                <button class="btn btn-ghost" id="btnRevertReBar">Hoàn tác ReBAR</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 5: Gỡ Cài Đặt -->
+          <div class="tool-panel" id="panel_uninstall">
+            <div class="panel-card" style="border-color: rgba(255, 59, 87, 0.3);">
+              <div class="panel-card-header">
+                <div>
+                  <h3 class="panel-card-title" style="color: var(--accent-crimson);">Gỡ Bỏ Toàn Bộ (Uninstall All)</h3>
+                  <div class="panel-card-desc">Dọn sạch hệ thống, xoá bỏ toàn bộ file, tác vụ và khóa registry</div>
+                </div>
+              </div>
+              <p style="font-size: 12px; color: var(--text-secondary);">
+                Thao tác sẽ xoá sạch các tác vụ Scheduled Task, khoá tự chạy Registry Run, mục khởi động UEFI trong BIOS và dọn dẹp thư mục driver System32.
+              </p>
+              <div>
+                <button class="btn btn-crimson" id="btnUninstallAll">Gỡ Bỏ Toàn Bộ Cài Đặt</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Resident Guard & Realtime Log Terminal -->
+      <div class="col-right">
+        <!-- Resident Guard Status -->
+        <div class="resident-guard-box">
+          <div class="guard-info">
+            <span class="guard-title">Resident Guard (Canh Giữ Tốc Độ)</span>
+            <span class="guard-desc" id="guardStatusText">Đang kiểm tra...</span>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="btnToggleGuard" onclick="document.querySelector('[data-tab=\'unlock\']').click();">Cấu hình</button>
+        </div>
+
+        <!-- Realtime Terminal -->
+        <div class="terminal-card">
+          <div class="terminal-header">
+            <div class="terminal-title-group">
+              <span class="terminal-dot"></span>
+              <span class="mono">NHẬT KÝ THỜI GIAN THỰC</span>
+            </div>
+            <div class="terminal-filters">
+              <button class="term-filter-btn active" data-filter="all">ALL</button>
+              <button class="term-filter-btn" data-filter="pcie">PCIE</button>
+              <button class="term-filter-btn" data-filter="warn">WARN</button>
+              <button class="term-filter-btn" data-filter="sys">SYS</button>
+            </div>
+          </div>
+          <div class="terminal-body" id="terminalBody">
+            <div class="log-line sys">[00:00:00] Khởi động CMP Unlock Control Center AIO v3.0.0...</div>
+          </div>
+          <div class="terminal-footer">
+            <span id="logCountText">1 dòng</span>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-ghost btn-sm" id="btnClearLog" style="padding: 2px 6px;">Xoá</button>
+              <button class="btn btn-ghost btn-sm" id="btnCopyLog" style="padding: 2px 6px;">Sao chép</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Safety Confirmation Modal -->
+  <div class="modal-backdrop hidden" id="riskModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-icon-badge amber" id="modalIconBadge">⚠️</div>
+        <div class="modal-title-group">
+          <span class="modal-title" id="modalTitle">Cảnh Báo An Toàn</span>
+          <span class="modal-subtitle" id="modalSubtitle">Vui lòng đọc kỹ thông tin trước khi thực thi</span>
+        </div>
+      </div>
+      <div class="modal-body" id="modalDescription"></div>
+      <div class="modal-rollback-note mono" id="modalRollback"></div>
+      <div id="modalPhraseBox" style="display: none;">
+        <label style="font-size: 11px; color: var(--accent-crimson); font-weight: 700; display: block; margin-bottom: 6px;">
+          GÕ CỤM TỪ XÁC NHẬN: "XAC NHAN KY EFI"
+        </label>
+        <input type="text" class="modal-confirm-input" id="modalPhraseInput" placeholder="XAC NHAN KY EFI">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="modalBtnCancel">Hủy bỏ</button>
+        <button class="btn btn-primary" id="modalBtnConfirm" disabled>Xác nhận</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/modals.js"></script>
+  <script src="js/logger.js"></script>
+  <script src="js/telemetry.js"></script>
+  <script src="js/actions.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

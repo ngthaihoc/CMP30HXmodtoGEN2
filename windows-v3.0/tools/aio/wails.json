@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "UnlockAIO",
+  "outputfilename": "UnlockAIO.exe",
+  "frontend:dir": "frontend",
+  "author": {
+    "name": "ngthaihoc",
+    "email": "ngthaihoc"
+  },
+  "info": {
+    "companyName": "CMP40HX Unlock Team",
+    "productName": "CMP Unlock Control Center AIO",
+    "productVersion": "3.0.0",
+    "copyright": "Copyright (c) 2026",
+    "comments": "NVIDIA CMP 30HX & 40HX PCIe Gen2 x16 and Riot Optimization All-In-One"
+  }
+}

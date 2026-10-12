@@ -1,0 +1,189 @@
+/* HUD Telemetry Section */
+.hero-hud {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 12px;
+}
+
+.hud-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hud-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.hud-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+}
+
+.hud-gpu-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-emerald);
+  background: var(--accent-emerald-glow);
+  border: 1px solid rgba(0, 229, 153, 0.4);
+  padding: 2px 8px;
+  border-radius: var(--radius-xs);
+}
+
+.specs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 12px;
+  font-size: 12px;
+}
+
+.spec-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.spec-label {
+  color: var(--text-muted);
+}
+
+.spec-value {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+/* 16-Lane PCIe Matrix */
+.lane-matrix-box {
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lane-matrix-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+
+.lane-matrix-title {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.lane-matrix-count {
+  color: var(--accent-emerald);
+  font-weight: 700;
+}
+
+.lane-pins-grid {
+  display: grid;
+  grid-template-columns: repeat(16, 1fr);
+  gap: 3px;
+}
+
+.lane-pin {
+  height: 22px;
+  background: #192230;
+  border: 1px solid #233042;
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+  transition: all 0.2s ease;
+}
+
+.lane-pin.active {
+  background: rgba(0, 229, 153, 0.2);
+  border-color: var(--accent-emerald);
+  color: var(--accent-emerald);
+  box-shadow: 0 0 6px rgba(0, 229, 153, 0.25);
+}
+
+/* Throughput & Speed Gauges */
+.throughput-display {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 4px 0;
+}
+
+.throughput-val-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.throughput-number {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: #fff;
+}
+
+.throughput-unit {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-emerald);
+  margin-left: 4px;
+}
+
+.throughput-subtext {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.boost-tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--accent-amber-glow);
+  border: 1px solid rgba(255, 176, 32, 0.4);
+  color: var(--accent-amber);
+}
+
+.boost-tag.max {
+  background: var(--accent-emerald-glow);
+  border-color: var(--accent-emerald);
+  color: var(--accent-emerald);
+}
+
+/* Gauge Bar */
+.gauge-track {
+  height: 10px;
+  background: #192230;
+  border-radius: 5px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+}
+
+.gauge-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6 0%, var(--accent-emerald) 100%);
+  border-radius: 4px;
+  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.gauge-markers {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-muted);
+}
