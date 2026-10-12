@@ -73,7 +73,7 @@ func runFallbackWebServer(app *App) {
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
-			http.Error(w, "SSE not supported", http.StatusInternalServerError)
+			http.Error(w, "Trình duyệt không hỗ trợ luồng sự kiện SSE", http.StatusInternalServerError)
 			return
 		}
 
@@ -128,15 +128,13 @@ func runFallbackWebServer(app *App) {
 		jsonResp(w, map[string]interface{}{"success": err == nil, "error": fmt.Sprint(err)})
 	})
 	mux.HandleFunc("/api/save-policy", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Strategy      int `json:"strategy"`
-			RetryCount    int `json:"retryCount"`
-			RetryInterval int `json:"retryInterval"`
-			AutoHard      int `json:"autoHard"`
+		var req PolicyConfig
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonResp(w, map[string]interface{}{"success": false, "error": "Dữ liệu chính sách không hợp lệ."})
+			return
 		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		err := app.SavePolicy(req.Strategy, req.RetryCount, req.RetryInterval, req.AutoHard)
-		jsonResp(w, map[string]interface{}{"success": err == nil})
+		err := app.SavePolicy(req)
+		jsonResp(w, map[string]interface{}{"success": err == nil, "error": fmt.Sprint(err)})
 	})
 	mux.HandleFunc("/api/scan", func(w http.ResponseWriter, r *http.Request) {
 		jsonResp(w, app.ScanEnvironment())
@@ -152,7 +150,14 @@ func runFallbackWebServer(app *App) {
 		jsonResp(w, app.GetRiotStatus())
 	})
 	mux.HandleFunc("/api/riot-optimize", func(w http.ResponseWriter, r *http.Request) {
-		err := app.RiotOptimize()
+		var req struct {
+			Confirmed bool `json:"confirmed"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !req.Confirmed {
+			jsonResp(w, map[string]interface{}{"success": false, "error": "Cần xác nhận cảnh báo rủi ro trước khi thay đổi cấu hình bảo mật."})
+			return
+		}
+		err := app.RiotOptimize(true)
 		jsonResp(w, map[string]interface{}{"success": err == nil, "error": fmt.Sprint(err)})
 	})
 	mux.HandleFunc("/api/riot-revert", func(w http.ResponseWriter, r *http.Request) {

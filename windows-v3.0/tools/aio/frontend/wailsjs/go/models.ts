@@ -1,5 +1,23 @@
 export namespace main {
-	
+
+	export class PolicyConfig {
+	    strategy: number;
+	    retryCount: number;
+	    retryInterval: number;
+	    autoHard: number;
+
+	    static createFrom(source: any = {}) {
+	        return new PolicyConfig(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.strategy = source["strategy"];
+	        this.retryCount = source["retryCount"];
+	        this.retryInterval = source["retryInterval"];
+	        this.autoHard = source["autoHard"];
+	    }
+	}
 	export class EnvCheckItem {
 	    name: string;
 	    ok: boolean;
@@ -16,7 +34,17 @@ export namespace main {
 	        this.note = source["note"];
 	    }
 	}
-	export class EnvironmentReport {
+	export class ComputeReport {
+    status: string;
+    unlocked: boolean;
+    ss0: number;
+    ss1: number;
+    bar0: number;
+    boot0: number;
+    verdict: string;
+}
+export class EnvironmentReport {
+    compute?: ComputeReport;
 	    gpuDetected: boolean;
 	    gpuName: string;
 	    pciBusId: string;
@@ -39,7 +67,8 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.gpuDetected = source["gpuDetected"];
+	        this.compute = source["compute"];
+		        this.gpuDetected = source["gpuDetected"];
 	        this.gpuName = source["gpuName"];
 	        this.pciBusId = source["pciBusId"];
 	        this.detectedModel = source["detectedModel"];
