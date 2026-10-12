@@ -20,6 +20,7 @@ type CLIOptions struct {
 	CheckSig    bool
 	Gen2Warning bool
 	JSONStatus  bool
+	Confirmed   bool
 }
 
 // ParseFlags phân tích cờ dòng lệnh từ mảng chuỗi
@@ -34,6 +35,8 @@ func ParseFlags(args []string) (CLIOptions, error) {
 	fs.BoolVar(&opts.CheckSig, "check-sig", false, "Kiểm tra chữ ký số driver user-mode nvwgf2umx.dll")
 	fs.BoolVar(&opts.Gen2Warning, "gen2-warning", false, "Hiển thị thông tin kiểm tra PCIe Gen 2.0 ASPM")
 	fs.BoolVar(&opts.JSONStatus, "json-status", false, "Xuất thông tin trạng thái Riot dưới dạng JSON")
+	fs.BoolVar(&opts.Confirmed, "y", false, "Xác nhận thay đổi cấu hình bảo mật hệ thống")
+	fs.BoolVar(&opts.Confirmed, "confirm-riot", false, "Xác nhận thay đổi cấu hình bảo mật hệ thống")
 
 	err := fs.Parse(args)
 	return opts, err
@@ -72,6 +75,10 @@ func RunCLI(opts CLIOptions, log io.Writer, uefiMgr UEFIManager) error {
 	}
 
 	if opts.Optimize {
+		if !opts.Confirmed {
+			fmt.Fprintln(log, "CẢNH BÁO: Tối ưu Riot sẽ thay đổi cấu hình bảo mật hệ thống. Thêm -y để xác nhận.")
+			return nil
+		}
 		runOptimization(log, is40HX, is30HX, sbOn, isWin11)
 	}
 

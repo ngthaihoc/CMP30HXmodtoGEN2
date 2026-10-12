@@ -20,12 +20,12 @@ func TestIsWindows11(t *testing.T) {
 }
 
 func TestParseFlags(t *testing.T) {
-	args := []string{"-silent", "-optimize", "-auto-sign"}
+	args := []string{"-silent", "-optimize", "-auto-sign", "-y"}
 	opts, err := ParseFlags(args)
 	if err != nil {
 		t.Fatalf("ParseFlags failed: %v", err)
 	}
-	if !opts.Silent || !opts.Optimize || !opts.AutoSign {
+	if !opts.Silent || !opts.Optimize || !opts.AutoSign || !opts.Confirmed {
 		t.Errorf("Unexpected opts: %+v", opts)
 	}
 }
@@ -46,6 +46,16 @@ func (m *mockUEFIManager) PrepareAndSignEFI(ctx context.Context, log io.Writer) 
 func (m *mockUEFIManager) RebootToFirmware(ctx context.Context) error {
 	m.rebootCalled = true
 	return nil
+}
+
+func TestRunCLI_OptimizeRequiresConfirmation(t *testing.T) {
+	var buf bytes.Buffer
+	if err := RunCLI(CLIOptions{Optimize: true}, &buf, nil); err != nil {
+		t.Fatalf("RunCLI failed: %v", err)
+	}
+	if !strings.Contains(buf.String(), "Thêm -y") {
+		t.Fatalf("missing confirmation warning: %s", buf.String())
+	}
 }
 
 func TestRunCLI_AutoSign(t *testing.T) {
@@ -97,5 +107,3 @@ func TestRunCLI_JSONStatus(t *testing.T) {
 		t.Errorf("Log missing expected JSON status fields: %s", out)
 	}
 }
-
-
