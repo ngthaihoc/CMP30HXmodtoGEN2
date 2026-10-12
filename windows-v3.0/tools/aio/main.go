@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -60,25 +61,32 @@ func main() {
 
 func handleCLIArgs() {
 	InitEmbeddedDriverHook()
+	defer CleanupToolAssets()
+	defer hxcore.CleanupByovd()
+
 	app := NewApp()
 
 	for _, a := range os.Args[1:] {
 		switch a {
 		case "-gen2", "-gen2-30hx", "-force-root-gen2":
 			res := app.UnlockGen2Now()
-			fmt.Printf("Gen2 Result: %v (Speed=%d, Width=%d): %s\n", res.Success, res.Speed, res.Width, res.Message)
+			fmt.Printf("Kết quả mở khoá Gen2: %v (Tốc độ=%d, Độ rộng=%d): %s\n", res.Success, res.Speed, res.Width, res.Message)
 			return
 		case "-optimize":
 			_ = app.RiotOptimize()
-			fmt.Println("Riot Optimization completed.")
+			fmt.Println("Đã hoàn tất tối ưu hoá Riot Games.")
+			return
+		case "-json-status":
+			st := app.GetRiotStatus()
+			_ = json.NewEncoder(os.Stdout).Encode(st)
 			return
 		case "-uninstall":
 			res := app.UninstallAll()
-			fmt.Printf("Uninstall completed: %s\n", res.Message)
+			fmt.Printf("Gỡ cài đặt hoàn tất: %s\n", res.Message)
 			return
 		case "-status":
 			rep := app.ScanEnvironment()
-			fmt.Printf("GPU: %s (Detected: %v, Gen2: %v)\n", rep.GPUName, rep.GPUDetected, rep.IsGen2)
+			fmt.Printf("GPU: %s (Phát hiện: %v, Gen2: %v)\n", rep.GPUName, rep.GPUDetected, rep.IsGen2)
 			for _, it := range rep.Items {
 				statusStr := "✗"
 				if it.Ok {

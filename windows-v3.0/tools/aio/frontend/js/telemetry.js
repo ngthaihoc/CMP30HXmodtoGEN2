@@ -56,6 +56,15 @@ const Telemetry = {
       mrrsEl.style.color = data.mrrs === 512 ? "var(--accent-emerald)" : "var(--accent-amber)";
     }
 
+    const clockTempEl = document.getElementById('specClockTempVal');
+    if (clockTempEl) {
+      if (data.clockMHz > 0 || data.temperatureC > 0) {
+        clockTempEl.textContent = `${data.clockMHz || '--'} MHz / ${data.temperatureC || '--'} °C`;
+      } else {
+        clockTempEl.textContent = `Chế độ chờ (Idle)`;
+      }
+    }
+
     const stratEl = document.getElementById('specStratVal');
     if (stratEl) {
       const stratNames = ["Dùng xong gỡ ngay", "Tự thử lại khi lỗi", "Thường trú (Resident Guard)"];

@@ -16,21 +16,23 @@ import (
 
 // TelemetryData chứa thông số trạng thái thời gian thực được đẩy qua event
 type TelemetryData struct {
-	GPUDetected   bool     `json:"gpuDetected"`
-	GPUName       string   `json:"gpuName"`
-	PCIBusID      string   `json:"pciBusId"`
-	DeviceID      uint16   `json:"deviceId"`
-	Is30HX        bool     `json:"is30HX"`
-	Is40HX        bool     `json:"is40HX"`
-	GSPActive     bool     `json:"gspActive"`
-	IsGen2        bool     `json:"isGen2"`
-	LinkSpeed     uint32   `json:"linkSpeed"`
-	LinkWidth     uint32   `json:"linkWidth"`
-	ThroughputMBs uint32   `json:"throughputMBs"`
-	Lanes         [16]bool `json:"lanes"`
-	MRRS          uint32   `json:"mrrs"`
-	DriverStrategy int     `json:"driverStrategy"`
-	Timestamp     string   `json:"timestamp"`
+	GPUDetected    bool     `json:"gpuDetected"`
+	GPUName        string   `json:"gpuName"`
+	PCIBusID       string   `json:"pciBusId"`
+	DeviceID       uint16   `json:"deviceId"`
+	Is30HX         bool     `json:"is30HX"`
+	Is40HX         bool     `json:"is40HX"`
+	GSPActive      bool     `json:"gspActive"`
+	IsGen2         bool     `json:"isGen2"`
+	LinkSpeed      uint32   `json:"linkSpeed"`
+	LinkWidth      uint32   `json:"linkWidth"`
+	ThroughputMBs  uint32   `json:"throughputMBs"`
+	ClockMHz       uint32   `json:"clockMHz"`
+	TemperatureC   uint32   `json:"temperatureC"`
+	Lanes          [16]bool `json:"lanes"`
+	MRRS           uint32   `json:"mrrs"`
+	DriverStrategy int      `json:"driverStrategy"`
+	Timestamp      string   `json:"timestamp"`
 }
 
 // EnvCheckItem mô tả từng mục kiểm tra môi trường
@@ -157,6 +159,11 @@ func (a *App) gatherTelemetry() TelemetryData {
 		data.Lanes[i] = i < width
 	}
 
+	// Đọc xung nhịp và nhiệt độ GPU
+	clock, temp := queryGPUSensors()
+	data.ClockMHz = clock
+	data.TemperatureC = temp
+
 	return data
 }
 
@@ -166,6 +173,17 @@ func (a *App) ScanEnvironment() EnvironmentReport {
 	sbOn := hxcore.SecureBootOn()
 	gpuProf, gpuFound := hxcore.FindGPUWithProfile()
 	gspOK := hxcore.GspEnabled()
+
+	// Kiểm tra trạng thái Microsoft Vulnerable Driver Blocklist
+	blocklistDisabled := false
+	kCi, errCi := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\CI\Config`, registry.QUERY_VALUE)
+	if errCi == nil {
+		v, _, errVal := kCi.GetIntegerValue("VulnerableDriverBlocklistEnable")
+		if errVal == nil && v == 0 {
+			blocklistDisabled = true
+		}
+		kCi.Close()
+	}
 
 	items := []EnvCheckItem{
 		{
@@ -177,6 +195,11 @@ func (a *App) ScanEnvironment() EnvironmentReport {
 			Name: "Secure Boot",
 			Ok:   !sbOn,
 			Note: map[bool]string{true: "Đang Bật (Cần kiểm tra tương thích key)", false: "Đã Tắt (OK)"}[sbOn],
+		},
+		{
+			Name: "Danh sách đen driver (Blocklist)",
+			Ok:   blocklistDisabled,
+			Note: map[bool]string{true: "Đã Tắt (VulnerableDriverBlocklistEnable=0 — nạp driver mod OK)", false: "Đang Bật (Có thể chặn driver mod và công cụ can thiệp)"}[blocklistDisabled],
 		},
 		{
 			Name: "Card đồ hoạ",
@@ -311,5 +334,29 @@ func (a *App) CheckHVCIStatus() HVCIReport {
 // OpenCoreIsolationSettings mở trang cài đặt Core Isolation của Windows
 func (a *App) OpenCoreIsolationSettings() error {
 	cmd := exec.Command("cmd.exe", "/c", "start", "windowsdefender://coreisolation")
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("không thể mở cài đặt Core Isolation: %w", err)
+	}
+	return nil
+}
+
+func queryGPUSensors() (uint32, uint32) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "nvidia-smi.exe", "--query-gpu=clocks.current.graphics,temperature.gpu", "--format=csv,noheader,nounits")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, 0
+	}
+
+	parts := strings.Split(strings.TrimSpace(string(out)), ",")
+	if len(parts) >= 2 {
+		var clock, temp uint32
+		fmt.Sscanf(strings.TrimSpace(parts[0]), "%d", &clock)
+		fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &temp)
+		return clock, temp
+	}
+
+	return 0, 0
 }

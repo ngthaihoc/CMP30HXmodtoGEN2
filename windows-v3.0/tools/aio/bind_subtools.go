@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	hxcore "40hxcore"
 	"golang.org/x/sys/windows/registry"
@@ -113,7 +115,9 @@ func (a *App) SetupReBar(barSizeGB int) SubtoolResult {
 	// 3. Nạp Profile Turing ReBAR vào driver NVIDIA
 	a.Log("[*] Bước 3/3: Kích hoạt cờ Resizable BAR Turing trong NVIDIA driver...")
 	if fileExists(inspectorExe) && fileExists(profileNip) {
-		cmdInspect := exec.Command(inspectorExe, profileNip, "-silent")
+		ctxInspect, cancelInspect := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancelInspect()
+		cmdInspect := exec.CommandContext(ctxInspect, inspectorExe, profileNip, "-silent")
 		if err := cmdInspect.Run(); err == nil {
 			a.Log("  [✓] Đã nạp profile Enable_ReBAR_Turing.nip vào NVIDIA Profile.")
 		} else {
@@ -124,8 +128,9 @@ func (a *App) SetupReBar(barSizeGB int) SubtoolResult {
 	// 4. Gọi NvStrapsReBar cấu hình kích thước BAR nếu được yêu cầu
 	if fileExists(nvStrapsExe) && barSizeGB > 0 {
 		a.Log(fmt.Sprintf("  [*] Đang cấu hình NvStrapsReBar mục tiêu %d GB...", barSizeGB))
-		// NvStrapsReBar chạy cấu hình UEFI NVRAM
-		cmdRebar := exec.Command(nvStrapsExe, fmt.Sprintf("%d", barSizeGB))
+		ctxRebar, cancelRebar := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancelRebar()
+		cmdRebar := exec.CommandContext(ctxRebar, nvStrapsExe, fmt.Sprintf("%d", barSizeGB))
 		out, err := cmdRebar.CombinedOutput()
 		if err == nil {
 			a.Log(fmt.Sprintf("  [✓] NvStrapsReBar hoàn tất: %s", strings.TrimSpace(string(out))))
@@ -171,7 +176,9 @@ $cs = Get-CimInstance Win32_ComputerSystem
 $model = "$($cs.Manufacturer) $($cs.Model)"
 Write-Output "$hasBattery|$model"
 `
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-Command", psCheck)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-Command", psCheck)
 	out, err := cmd.Output()
 	if err == nil {
 		parts := strings.Split(strings.TrimSpace(string(out)), "|")

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"os"
@@ -94,8 +95,10 @@ func CleanupToolAssets() {
 
 // applySecureACL khoá quyền truy cập thư mục tạm, chỉ cho phép Administrators và SYSTEM
 func applySecureACL(path string) error {
-	// Dùng SID chuẩn độc lập với ngôn ngữ hệ điều hành
-	cmd := exec.Command(
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(
+		ctx,
 		"icacls.exe",
 		path,
 		"/inheritance:r",
@@ -104,5 +107,8 @@ func applySecureACL(path string) error {
 		"/grant:r",
 		"*S-1-5-18:(OI)(CI)F",
 	)
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("thiết lập ACL thư mục tạm thất bại: %w", err)
+	}
+	return nil
 }
