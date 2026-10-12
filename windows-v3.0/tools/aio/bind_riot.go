@@ -107,8 +107,11 @@ func (a *App) GetRiotStatus() RiotStatusReport {
 	return st
 }
 
-// RiotOptimize tối ưu hoá hệ thống cho Riot Games
-func (a *App) RiotOptimize() error {
+// RiotOptimize tối ưu hoá hệ thống cho Riot Games sau khi người dùng xác nhận rủi ro.
+func (a *App) RiotOptimize(confirmed bool) error {
+	if !confirmed {
+		return fmt.Errorf("cần xác nhận rủi ro trước khi thay đổi cấu hình bảo mật hệ thống")
+	}
 	if !a.tryAcquire("Tối ưu Riot Games") {
 		return fmt.Errorf("hệ thống đang bận thao tác khác")
 	}
@@ -326,11 +329,11 @@ func applyLoLCfg(path string) error {
 
 	// Cập nhật hoặc thêm WindowMode=2, BorderlessWindow=1, DX11Support=1
 	updates := map[string]string{
-		"WindowMode":           "2",
-		"BorderlessWindow":     "1",
-		"PreferDX9LegacyMode":  "0",
-		"DX11Support":          "1",
-		"WaitforVerticalSync":  "0",
+		"WindowMode":          "2",
+		"BorderlessWindow":    "1",
+		"PreferDX9LegacyMode": "0",
+		"DX11Support":         "1",
+		"WaitforVerticalSync": "0",
 	}
 
 	lines := strings.Split(content, "\n")

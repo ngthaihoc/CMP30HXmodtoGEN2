@@ -1,3 +1,32 @@
+export namespace hxcore {
+	
+	export class ComputeReport {
+	    Status: string;
+	    Unlocked: boolean;
+	    SS0: number;
+	    SS1: number;
+	    BAR0: number;
+	    Boot0: number;
+	    Verdict: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ComputeReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Status = source["Status"];
+	        this.Unlocked = source["Unlocked"];
+	        this.SS0 = source["SS0"];
+	        this.SS1 = source["SS1"];
+	        this.BAR0 = source["BAR0"];
+	        this.Boot0 = source["Boot0"];
+	        this.Verdict = source["Verdict"];
+	    }
+	}
+
+}
+
 export namespace main {
 	
 	export class EnvCheckItem {
@@ -32,6 +61,7 @@ export namespace main {
 	    retryInterval: number;
 	    items: EnvCheckItem[];
 	    recommendations: Record<string, boolean>;
+	    compute?: hxcore.ComputeReport;
 	
 	    static createFrom(source: any = {}) {
 	        return new EnvironmentReport(source);
@@ -54,6 +84,7 @@ export namespace main {
 	        this.retryInterval = source["retryInterval"];
 	        this.items = this.convertValues(source["items"], EnvCheckItem);
 	        this.recommendations = source["recommendations"];
+	        this.compute = this.convertValues(source["compute"], hxcore.ComputeReport);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -90,6 +121,24 @@ export namespace main {
 	        this.statusText = source["statusText"];
 	        this.guideText = source["guideText"];
 	        this.canAutoTurn = source["canAutoTurn"];
+	    }
+	}
+	export class PolicyConfig {
+	    strategy: number;
+	    retryCount: number;
+	    retryInterval: number;
+	    autoHard: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PolicyConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.strategy = source["strategy"];
+	        this.retryCount = source["retryCount"];
+	        this.retryInterval = source["retryInterval"];
+	        this.autoHard = source["autoHard"];
 	    }
 	}
 	export class RiotStatusReport {

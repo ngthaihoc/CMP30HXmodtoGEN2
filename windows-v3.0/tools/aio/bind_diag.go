@@ -44,21 +44,22 @@ type EnvCheckItem struct {
 
 // EnvironmentReport chứa toàn bộ báo cáo chẩn đoán môi trường
 type EnvironmentReport struct {
-	GPUDetected     bool           `json:"gpuDetected"`
-	GPUName         string         `json:"gpuName"`
-	PCIBusID        string         `json:"pciBusId"`
-	DetectedModel   string         `json:"detectedModel"`
-	DeviceID        uint16         `json:"deviceId"`
-	Is30HX          bool           `json:"is30HX"`
-	Is40HX          bool           `json:"is40HX"`
-	GSPActive       bool           `json:"gspActive"`
-	IsGen2          bool           `json:"isGen2"`
-	DriverStrategy  int            `json:"driverStrategy"`
-	AutoHard        bool           `json:"autoHard"`
-	RetryCount      int            `json:"retryCount"`
-	RetryInterval   int            `json:"retryInterval"`
-	Items           []EnvCheckItem `json:"items"`
-	Recommendations map[string]bool `json:"recommendations"`
+	GPUDetected     bool                  `json:"gpuDetected"`
+	GPUName         string                `json:"gpuName"`
+	PCIBusID        string                `json:"pciBusId"`
+	DetectedModel   string                `json:"detectedModel"`
+	DeviceID        uint16                `json:"deviceId"`
+	Is30HX          bool                  `json:"is30HX"`
+	Is40HX          bool                  `json:"is40HX"`
+	GSPActive       bool                  `json:"gspActive"`
+	IsGen2          bool                  `json:"isGen2"`
+	DriverStrategy  int                   `json:"driverStrategy"`
+	AutoHard        bool                  `json:"autoHard"`
+	RetryCount      int                   `json:"retryCount"`
+	RetryInterval   int                   `json:"retryInterval"`
+	Items           []EnvCheckItem        `json:"items"`
+	Recommendations map[string]bool       `json:"recommendations"`
+	Compute         *hxcore.ComputeReport `json:"compute,omitempty"`
 }
 
 // HVCIReport phản hồi trạng thái Memory Integrity (HVCI)
@@ -115,32 +116,34 @@ func (a *App) gatherTelemetry() TelemetryData {
 	data.Is30HX = prof.DeviceID == 0x2189 || prof.Family == "TU116"
 	data.Is40HX = prof.DeviceID == 0x1F0B || prof.Family == "TU106"
 
-	// Đọc trạng thái tốc độ link thực tế từ StatusContract hoặc Task
-	taskOK, _, _ := hxcore.TaskInfo("CMP30HX_Gen2_Unlock")
-	if !taskOK {
-		taskOK, _, _ = hxcore.TaskInfo("40HX PCIe Gen2 Bring-up")
+	// Đọc trạng thái từ hợp đồng máy; task tồn tại không chứng minh link đã đạt Gen2.
+	statusText := hxcore.ReadGen2Status()
+	status := hxcore.ParseStatus(statusText)
+	speed := status.SpeedCurrent
+	width := status.WidthCurrent
+	if width == 0 {
+		width = 16
 	}
-
-	// Mặc định an toàn là Gen1 hoặc Gen2 theo cờ cấu hình
-	speed := uint32(1)
-	width := uint32(16)
-
-	// Phân tích trạng thái gen2_status.txt nếu có
-	statusPath := filepath.Join(os.Getenv("ProgramData"), "40HXUnlock", "gen2_status.txt")
-	if content, err := os.ReadFile(statusPath); err == nil {
-		text := string(content)
-		if strings.Contains(text, "STATUS_CODE=GEN2_SUCCESS") || strings.Contains(text, "SPEED_CURRENT=2") {
-			speed = 2
-		}
-		if strings.Contains(text, "DEVCTL MRRS=512B") || strings.Contains(text, "MRRS 512B") {
-			data.MRRS = 512
-		}
-	} else if taskOK {
-		speed = 2
+	if strings.Contains(statusText, "DEVCTL MRRS=512B") || strings.Contains(statusText, "MRRS 512B") {
+		data.MRRS = 512
 	}
 
 	data.LinkSpeed = speed
 	data.LinkWidth = width
+	data.IsGen2 = speed >= 2
+	if status.TLSTarget >= 2 && !data.IsGen2 {
+		// Đã cấu hình mục tiêu Gen2 nhưng đang hạ link do trạng thái tiết kiệm điện.
+		data.LinkSpeed = speed
+	} else if status.StatusCode == hxcore.StatusGen1Stuck {
+		data.LinkSpeed = 1
+	}
+
+	// Không nạp BYOVD trong telemetry nền; đọc phần cứng chỉ ở thao tác chủ động.
+	if data.LinkWidth == 0 {
+		data.LinkWidth = 16
+	}
+	width = data.LinkWidth
+	speed = data.LinkSpeed
 	data.IsGen2 = speed >= 2
 
 	// Tính toán băng thông thực tế tương đối
@@ -276,6 +279,26 @@ func (a *App) ScanEnvironment() EnvironmentReport {
 		deviceID = gpuProf.DeviceID
 	}
 
+	var computeReport *hxcore.ComputeReport
+	if gpuFound && gpuProf.FirmwareUnlock {
+		_ = hxcore.RunScoped(gpuProf, func(bus hxcore.HardwareBus) error {
+			bdf, _, ok := hxcore.FindGPUPCIWithBus(bus)
+			if !ok {
+				return nil
+			}
+			computeReport, _ = hxcore.NewComputeInspector(bus).InspectCompute(bdf, gpuProf)
+			return nil
+		})
+		if computeReport != nil {
+			items = append(items, EnvCheckItem{
+				Name: "Tensor Core / Compute",
+				Ok:   computeReport.Status == hxcore.ComputeStatusUnlocked,
+				Note: computeReport.Verdict,
+			})
+		}
+	}
+	status := hxcore.ParseStatus(hxcore.ReadGen2Status())
+
 	return EnvironmentReport{
 		GPUDetected:    gpuFound,
 		GPUName:        gpuName,
@@ -285,20 +308,21 @@ func (a *App) ScanEnvironment() EnvironmentReport {
 		Is30HX:         deviceID == 0x2189,
 		Is40HX:         deviceID == 0x1F0B,
 		GSPActive:      gspOK,
-		IsGen2:         taskOK,
+		IsGen2:         status.SpeedCurrent >= 2 && status.StatusCode != hxcore.StatusGen1Stuck,
+		Compute:        computeReport,
 		DriverStrategy: strat,
 		AutoHard:       autoHard,
 		RetryCount:     cnt,
 		RetryInterval:  interval,
 		Items:          items,
 		Recommendations: map[string]bool{
-			"gsp":    !gspOK,
-			"drv":    hxcore.Gen2DriversNeedDeploy(),
-			"efi":    !espEFI,
-			"task":   !taskOK,
-			"fast":   !fastOK,
-			"aspm":   !aspmOK,
-			"perf":   !hxcore.HighPerfPlanActive(),
+			"gsp":  !gspOK,
+			"drv":  hxcore.Gen2DriversNeedDeploy(),
+			"efi":  !espEFI,
+			"task": !taskOK,
+			"fast": !fastOK,
+			"aspm": !aspmOK,
+			"perf": !hxcore.HighPerfPlanActive(),
 		},
 	}
 }

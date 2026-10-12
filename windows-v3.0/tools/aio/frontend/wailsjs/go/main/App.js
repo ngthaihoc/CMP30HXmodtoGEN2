@@ -42,8 +42,8 @@ export function RevertReBar() {
   return window['go']['main']['App']['RevertReBar']();
 }
 
-export function RiotOptimize() {
-  return window['go']['main']['App']['RiotOptimize']();
+export function RiotOptimize(arg1) {
+  return window['go']['main']['App']['RiotOptimize'](arg1);
 }
 
 export function RiotRevertOptimization() {
@@ -54,8 +54,8 @@ export function RiotSignEFI(arg1) {
   return window['go']['main']['App']['RiotSignEFI'](arg1);
 }
 
-export function SavePolicy(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['SavePolicy'](arg1, arg2, arg3, arg4);
+export function SavePolicy(arg1) {
+  return window['go']['main']['App']['SavePolicy'](arg1);
 }
 
 export function ScanEnvironment() {
