@@ -1,23 +1,34 @@
-export namespace main {
-
-	export class PolicyConfig {
-	    strategy: number;
-	    retryCount: number;
-	    retryInterval: number;
-	    autoHard: number;
-
+export namespace hxcore {
+	
+	export class ComputeReport {
+	    Status: string;
+	    Unlocked: boolean;
+	    SS0: number;
+	    SS1: number;
+	    BAR0: number;
+	    Boot0: number;
+	    Verdict: string;
+	
 	    static createFrom(source: any = {}) {
-	        return new PolicyConfig(source);
+	        return new ComputeReport(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.strategy = source["strategy"];
-	        this.retryCount = source["retryCount"];
-	        this.retryInterval = source["retryInterval"];
-	        this.autoHard = source["autoHard"];
+	        this.Status = source["Status"];
+	        this.Unlocked = source["Unlocked"];
+	        this.SS0 = source["SS0"];
+	        this.SS1 = source["SS1"];
+	        this.BAR0 = source["BAR0"];
+	        this.Boot0 = source["Boot0"];
+	        this.Verdict = source["Verdict"];
 	    }
 	}
+
+}
+
+export namespace main {
+	
 	export class EnvCheckItem {
 	    name: string;
 	    ok: boolean;
@@ -34,32 +45,7 @@ export namespace main {
 	        this.note = source["note"];
 	    }
 	}
-	export class ComputeReport {
-    status: string;
-    unlocked: boolean;
-    ss0: number;
-    ss1: number;
-    bar0: number;
-    boot0: number;
-    verdict: string;
-
-    static createFrom(source: any = {}) {
-        return new ComputeReport(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.status = source["status"];
-        this.unlocked = source["unlocked"];
-        this.ss0 = source["ss0"];
-        this.ss1 = source["ss1"];
-        this.bar0 = source["bar0"];
-        this.boot0 = source["boot0"];
-        this.verdict = source["verdict"];
-    }
-}
-export class EnvironmentReport {
-    compute?: ComputeReport;
+	export class EnvironmentReport {
 	    gpuDetected: boolean;
 	    gpuName: string;
 	    pciBusId: string;
@@ -75,6 +61,7 @@ export class EnvironmentReport {
 	    retryInterval: number;
 	    items: EnvCheckItem[];
 	    recommendations: Record<string, boolean>;
+	    compute?: hxcore.ComputeReport;
 	
 	    static createFrom(source: any = {}) {
 	        return new EnvironmentReport(source);
@@ -82,8 +69,7 @@ export class EnvironmentReport {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.compute = this.convertValues(source["compute"], ComputeReport);
-		        this.gpuDetected = source["gpuDetected"];
+	        this.gpuDetected = source["gpuDetected"];
 	        this.gpuName = source["gpuName"];
 	        this.pciBusId = source["pciBusId"];
 	        this.detectedModel = source["detectedModel"];
@@ -98,6 +84,7 @@ export class EnvironmentReport {
 	        this.retryInterval = source["retryInterval"];
 	        this.items = this.convertValues(source["items"], EnvCheckItem);
 	        this.recommendations = source["recommendations"];
+	        this.compute = this.convertValues(source["compute"], hxcore.ComputeReport);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -134,6 +121,24 @@ export class EnvironmentReport {
 	        this.statusText = source["statusText"];
 	        this.guideText = source["guideText"];
 	        this.canAutoTurn = source["canAutoTurn"];
+	    }
+	}
+	export class PolicyConfig {
+	    strategy: number;
+	    retryCount: number;
+	    retryInterval: number;
+	    autoHard: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PolicyConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.strategy = source["strategy"];
+	        this.retryCount = source["retryCount"];
+	        this.retryInterval = source["retryInterval"];
+	        this.autoHard = source["autoHard"];
 	    }
 	}
 	export class RiotStatusReport {
