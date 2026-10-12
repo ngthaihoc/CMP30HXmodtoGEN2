@@ -130,7 +130,7 @@ func (a *App) gatherTelemetry() TelemetryData {
 
 	data.LinkSpeed = speed
 	data.LinkWidth = width
-	data.IsGen2 = speed >= 2 && status.StatusCode != hxcore.StatusGen1Stuck
+	data.IsGen2 = speed >= 2
 	if status.TLSTarget >= 2 && !data.IsGen2 {
 		// Đã cấu hình mục tiêu Gen2 nhưng đang hạ link do trạng thái tiết kiệm điện.
 		data.LinkSpeed = speed
@@ -138,27 +138,13 @@ func (a *App) gatherTelemetry() TelemetryData {
 		data.LinkSpeed = 1
 	}
 
-	// StatusContract là nguồn fallback; khi có driver bus, đọc LNKSTA thực tế.
-	_ = hxcore.RunScopedBus(false, func(bus hxcore.HardwareBus) error {
-		bdf, _, ok := hxcore.FindGPUPCIWithBus(bus)
-		if !ok {
-			return fmt.Errorf("không tìm thấy GPU trên bus PCI")
-		}
-		if actual := bus.LinkSpeed(bdf); actual > 0 {
-			data.LinkSpeed = actual
-			data.IsGen2 = actual >= 2
-		}
-		if actual := bus.LinkWidth(bdf); actual > 0 {
-			data.LinkWidth = actual
-		}
-		return nil
-	})
+	// Không nạp BYOVD trong telemetry nền; đọc phần cứng chỉ ở thao tác chủ động.
 	if data.LinkWidth == 0 {
 		data.LinkWidth = 16
 	}
-	data.IsGen2 = data.LinkSpeed >= 2 && status.StatusCode != hxcore.StatusGen1Stuck
 	width = data.LinkWidth
 	speed = data.LinkSpeed
+	data.IsGen2 = speed >= 2
 
 	// Tính toán băng thông thực tế tương đối
 	// Gen1: 250 MB/s mỗi lane; Gen2: 500 MB/s mỗi lane

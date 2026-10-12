@@ -42,6 +42,21 @@ export namespace main {
     bar0: number;
     boot0: number;
     verdict: string;
+
+    static createFrom(source: any = {}) {
+        return new ComputeReport(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.status = source["status"];
+        this.unlocked = source["unlocked"];
+        this.ss0 = source["ss0"];
+        this.ss1 = source["ss1"];
+        this.bar0 = source["bar0"];
+        this.boot0 = source["boot0"];
+        this.verdict = source["verdict"];
+    }
 }
 export class EnvironmentReport {
     compute?: ComputeReport;
@@ -67,7 +82,7 @@ export class EnvironmentReport {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.compute = source["compute"];
+	        this.compute = this.convertValues(source["compute"], ComputeReport);
 		        this.gpuDetected = source["gpuDetected"];
 	        this.gpuName = source["gpuName"];
 	        this.pciBusId = source["pciBusId"];

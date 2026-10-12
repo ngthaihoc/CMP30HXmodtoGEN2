@@ -83,7 +83,7 @@ func handleCLIArgs() {
 
 	app := NewApp()
 
-	for i, a := range os.Args[1:] {
+	for _, a := range os.Args[1:] {
 		switch a {
 		case "-gen2", "-gen2-30hx":
 			res := app.UnlockGen2Now()
@@ -95,7 +95,7 @@ func handleCLIArgs() {
 			return
 		case "-optimize":
 			confirmed := false
-			for _, flag := range os.Args[i+2:] {
+			for _, flag := range os.Args[1:] {
 				if flag == "-y" || flag == "-confirm-riot" {
 					confirmed = true
 					break
