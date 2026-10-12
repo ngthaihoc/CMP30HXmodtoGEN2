@@ -1,2 +1,42 @@
+# Normalize scripts for each target shell.
 *.sh text eol=lf
 *.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Keep developer-only files out of git archive/Download ZIP packages.
+.github export-ignore
+.claude export-ignore
+.local export-ignore
+.hermes export-ignore
+.agents export-ignore
+.tours export-ignore
+.vscode export-ignore
+windows-v3.0/tools/40hxcore export-ignore
+windows-v3.0/tools/aio export-ignore
+windows-v3.0/tools/check40x export-ignore
+windows-v3.0/tools/fix30hxcsm export-ignore
+windows-v3.0/tools/inst40hx export-ignore
+windows-v3.0/tools/uninstall40x export-ignore
+windows-v3.0/tools/unlock40x export-ignore
+windows-v3.0/tools/unlockriot export-ignore
+docs export-ignore
+build.ps1 export-ignore
+Build_WebUI.bat export-ignore
+Test_Mock_CMP30HX.bat export-ignore
+Test_Mock_CMP30HX_Linux.sh export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore
+CLAUDE.md export-ignore
+PROJECT_CONTEXT.md export-ignore
+AGENTS.md export-ignore
+CONTEXT.md export-ignore
+skills-lock.json export-ignore
+*.zip export-ignore
+NewFeature.txt export-ignore
+CodeReview.md export-ignore
+IDEA.md export-ignore
+
+# Keep documented Linux unlock files in the user package.
+linux-mmio export-ignore=false
+Setup_CMP30HX_LinuxAIO.sh export-ignore=false
+select_default_GPU export-ignore
