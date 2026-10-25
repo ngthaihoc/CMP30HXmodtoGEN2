@@ -29,6 +29,42 @@ type StatusContract struct {
 	TLSTarget    uint32
 	ErrorCode    string
 	Details      []string
+	DeviceID     uint16
+	MRRS         uint32
+	ObservedAt   time.Time
+}
+
+// LinkState là kết quả lần chạy gần nhất, không phải phép đo phần cứng trực tiếp.
+type LinkState struct {
+	Configured    bool
+	Speed         uint32
+	Width         uint32
+	MRRS          uint32
+	ThroughputMBs uint32
+	ObservedAt    time.Time
+}
+
+// LinkState tập trung cách diễn giải bằng chứng, giữ số 0 khi chưa biết.
+func (c StatusContract) LinkState(deviceID uint16) LinkState {
+	if (c.DeviceID != 0 && c.DeviceID != deviceID) || c.StatusCode == StatusUnknown || c.StatusCode == StatusNoGPU || c.StatusCode == StatusGen2Skipped {
+		return LinkState{}
+	}
+	s := LinkState{Speed: c.SpeedCurrent, Width: c.WidthCurrent, MRRS: c.MRRS, ObservedAt: c.ObservedAt}
+	if s.Speed > 6 {
+		s.Speed = 0
+	}
+	if s.Width > 16 {
+		s.Width = 0
+	}
+	if s.MRRS < 128 || s.MRRS > 4096 || s.MRRS&(s.MRRS-1) != 0 {
+		s.MRRS = 0
+	}
+	s.Configured = c.StatusCode == StatusGen2Success && ((c.TLSTarget >= 2 && c.TLSTarget <= 6) || s.Speed >= 2)
+	// Băng thông lý thuyết một chiều, đã trừ mã hóa đường truyền.
+	if s.Speed == 1 || s.Speed == 2 {
+		s.ThroughputMBs = 250 * s.Speed * s.Width
+	}
+	return s
 }
 
 // FormatStatus định dạng cấu trúc trạng thái thành tệp văn bản có Header định kiểu
@@ -44,6 +80,15 @@ func FormatStatus(c StatusContract) string {
 		errCode = "NONE"
 	}
 	sb.WriteString(fmt.Sprintf("ERROR_CODE=%s\n", errCode))
+	if c.DeviceID != 0 {
+		sb.WriteString(fmt.Sprintf("DEVICE_ID=%04X\n", c.DeviceID))
+	}
+	if c.MRRS != 0 {
+		sb.WriteString(fmt.Sprintf("MRRS_BYTES=%d\n", c.MRRS))
+	}
+	if !c.ObservedAt.IsZero() {
+		sb.WriteString("OBSERVED_AT=" + c.ObservedAt.UTC().Format(time.RFC3339Nano) + "\n")
+	}
 
 	// 2. Human-readable Body
 	sb.WriteString("==== 40HX Gen2 Ket qua " + time.Now().Format("2006-01-02 15:04:05") + " ====\n")
@@ -85,13 +130,21 @@ func ParseStatus(content string) StatusContract {
 			}
 		} else if strings.HasPrefix(line, "ERROR_CODE=") {
 			res.ErrorCode = strings.TrimPrefix(line, "ERROR_CODE=")
+		} else if strings.HasPrefix(line, "DEVICE_ID=") {
+			v, _ := strconv.ParseUint(strings.TrimPrefix(line, "DEVICE_ID="), 16, 16)
+			res.DeviceID = uint16(v)
+		} else if strings.HasPrefix(line, "MRRS_BYTES=") {
+			v, _ := strconv.ParseUint(strings.TrimPrefix(line, "MRRS_BYTES="), 10, 32)
+			res.MRRS = uint32(v)
+		} else if strings.HasPrefix(line, "OBSERVED_AT=") {
+			res.ObservedAt, _ = time.Parse(time.RFC3339Nano, strings.TrimPrefix(line, "OBSERVED_AT="))
 		} else {
 			res.Details = append(res.Details, line)
 		}
 	}
 
-	// Legacy pattern fallback nếu không có header STATUS_CODE hoặc header rỗng
-	if !hasHeader || res.StatusCode == StatusUnknown || res.StatusCode == "" {
+	// Chỉ đọc văn bản legacy khi không có header STATUS_CODE.
+	if !hasHeader {
 		low := strings.ToLower(content)
 		switch {
 		case strings.Contains(low, "winring0") || strings.Contains(low, "throttlestop") ||
@@ -104,15 +157,22 @@ func ParseStatus(content string) StatusContract {
 			res.StatusCode = StatusNoGPU
 			res.ErrorCode = "GPU_NOT_FOUND"
 		case strings.Contains(low, "da dat muc tieu gen2 thanh cong") ||
-			strings.Contains(low, "đã đạt mục tiêu gen2 thành công") ||
-			strings.Contains(content, "TLS=Gen2"):
+			strings.Contains(low, "đã đạt mục tiêu gen2 thành công"):
 			res.StatusCode = StatusGen2Success
 			res.SpeedCurrent = 2
+		case strings.Contains(content, "TLS=Gen2"):
+			res.StatusCode = StatusGen2Success
+			res.TLSTarget = 2
 		case strings.Contains(low, "gpu tls=gen1") || strings.Contains(low, "chua dat") ||
 			strings.Contains(low, "chưa đạt"):
 			res.StatusCode = StatusGen1Stuck
 			res.SpeedCurrent = 1
 		}
+	}
+	switch res.StatusCode {
+	case StatusGen2Success, StatusGen2Skipped, StatusGen1Stuck, StatusHwLimit, StatusDrvFail, StatusNoGPU:
+	default:
+		res.StatusCode = StatusUnknown
 	}
 
 	return res

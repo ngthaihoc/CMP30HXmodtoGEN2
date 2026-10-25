@@ -220,9 +220,9 @@ func runWebGUI() {
 			deviceID = prof.DeviceID
 		}
 
-		isGen2 := false
-		if gpuFound {
-			isGen2 = gen2Succeeded || flags["Tác vụ tự khởi động"]
+		state := hxcore.ParseStatus(hxcore.ReadGen2Status()).LinkState(deviceID)
+		if !gpuFound {
+			state = hxcore.LinkState{}
 		}
 
 		aspmOK := true
@@ -255,7 +255,12 @@ func runWebGUI() {
 			"is30HX":         deviceID == 0x2189,
 			"is40HX":         deviceID == 0x1F0B,
 			"gspActive":      gspActive,
-			"isGen2":         isGen2,
+			"isGen2":         state.Configured,
+			"linkSpeed":      state.Speed,
+			"linkWidth":      state.Width,
+			"mrrs":           state.MRRS,
+			"throughputMBs":  state.ThroughputMBs,
+			"observedAt":     state.ObservedAt,
 			"driverStrategy": strat,
 			"autoHard":       autoHard,
 			"retryCount":     cnt,

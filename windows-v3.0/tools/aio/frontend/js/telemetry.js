@@ -52,7 +52,7 @@ const Telemetry = {
 
     const mrrsEl = document.getElementById('specMrrsVal');
     if (mrrsEl) {
-      mrrsEl.textContent = `${data.mrrs || 128} Bytes`;
+      mrrsEl.textContent = data.mrrs ? `${data.mrrs} Bytes` : "Chưa biết";
       mrrsEl.style.color = data.mrrs === 512 ? "var(--accent-emerald)" : "var(--accent-amber)";
     }
 
@@ -98,7 +98,7 @@ const Telemetry = {
     const gaugeFill = document.getElementById('gaugeFill');
     const boostTag = document.getElementById('boostTag');
 
-    const mb = data.throughputMBs || 250;
+    const mb = data.throughputMBs || 0;
     if (tpNumber) {
       if (mb >= 1000) {
         tpNumber.innerHTML = `${(mb / 1000).toFixed(1)} <span class="throughput-unit">GB/s</span>`;
@@ -108,21 +108,21 @@ const Telemetry = {
     }
 
     if (tpSub) {
-      tpSub.textContent = `PCIe Gen${data.linkSpeed || 1} x${data.linkWidth || 1} · MRRS ${data.mrrs || 128}B`;
+      tpSub.textContent = `Kết quả trước: Gen${data.linkSpeed || "?"} x${data.linkWidth || "?"} · ${data.timestamp || "Không rõ thời điểm"} · Băng thông lý thuyết`;
     }
 
-    // Tỉ lệ thanh đo (Max Gen2 x16 là 6400 MB/s = 100%)
-    const pct = Math.min(100, Math.max(4, Math.round((mb / 6400) * 100)));
+    // Tỉ lệ thanh đo (Gen2 x16 lý thuyết là 8000 MB/s = 100%)
+    const pct = Math.min(100, Math.max(0, Math.round((mb / 8000) * 100)));
     if (gaugeFill) {
       gaugeFill.style.width = `${pct}%`;
     }
 
     if (boostTag) {
-      if (data.isGen2 && data.linkWidth === 16) {
+      if (data.isGen2 && data.linkSpeed >= 2 && data.linkWidth === 16) {
         boostTag.textContent = "✓ TỐI ĐA GEN2 x16";
         boostTag.className = "boost-tag max";
       } else {
-        boostTag.textContent = "⚡ CHƯA MỞ KHOÁ";
+        boostTag.textContent = data.isGen2 ? "ĐÃ CẤU HÌNH GEN2" : "CHƯA CÓ KẾT QUẢ GEN2";
         boostTag.className = "boost-tag";
       }
     }

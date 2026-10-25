@@ -1139,63 +1139,33 @@ func gen2Main() {
 	// Tránh xung đột với quá trình khởi động driver (thay thế delay cố định 30s).
 	waitForNvDriver(60 * time.Second)
 
-	// Chạy toàn bộ chu trình truy cập phần cứng và huấn luyện PCIe trong DriverSession khép kín (RAII)
-	// Tự động giải phóng handle và dọn sạch driver BYOVD khi kết thúc
 	err := hxcore.RunScopedBus(true, func(bus hxcore.HardwareBus) error {
-		// Định vị GPU được hỗ trợ (40HX/30HX), không cố định BDF
-		var gpuBDF uint32
-		var gpuProfile hxcore.GPUProfile
-		gpuFound := false
-		for attempt := 1; attempt <= 3; attempt++ {
-			gpuBDF, gpuProfile, gpuFound = hxcore.FindGPUPCIWithBus(bus)
-			if gpuFound {
-				break
-			}
-			if attempt < 3 {
-				fmt.Printf("[Gen2] Chưa định vị được GPU được hỗ trợ, thử lại sau 2s (%d/3)...\n", attempt)
-				time.Sleep(2 * time.Second)
-			}
-		}
-		if !gpuFound {
-			fmt.Println("[Gen2] Không thể định vị GPU được hỗ trợ (40HX/30HX). Vui lòng gửi file log.")
-			gen2StatusFail("Không tìm thấy GPU được hỗ trợ trên bus PCI")
-			gen2Notify("Không tìm thấy GPU được hỗ trợ trên bus PCI.\nVui lòng kiểm tra lại card và driver.")
-			return nil
-		}
-
-		if gpuProfile.HasSafePL0 {
-			ensureGspSilent()
-		}
-
 		targetGen := uint32(2)
 		if hasArg("-gen3") || hasArg("-gen3-30hx") || hasArg("-force-root-gen3") {
-			if gpuProfile.MaxSupportedGen >= 3 {
-				targetGen = 3
-			} else {
-				fmt.Printf("[Gen] Profile %s giới hạn phần cứng tối đa Gen%d (eFuse lock), tự động chuyển về chế độ Gen%d\n", gpuProfile.Name, gpuProfile.MaxSupportedGen, gpuProfile.MaxSupportedGen)
-				targetGen = gpuProfile.MaxSupportedGen
-			}
+			targetGen = 3
 		}
-
-		gpuBus := (gpuBDF >> 8) & 0xFF
-		fmt.Printf("[Gen%d] %s tại %02x:%02x.%x\n", targetGen, gpuProfile.Name, gpuBus, (gpuBDF>>3)&0x1F, gpuBDF&7)
-
-		negotiator := hxcore.NewLinkNegotiator(bus)
-		forceRoot := hasArg("-force-root-gen2") || hasArg("-force-root-gen3") || hasArg("-gen2-30hx") || hasArg("-gen3-30hx") || gpuProfile.DeviceID == 0x2189 || gpuProfile.DeviceID == 0x1F0B || gpuProfile.RequiresMMIO
-		allowStage2 := hasArg("-hard") || (gpuProfile.DeviceID != 0x2189 && gen2AutoHardEnabled())
-
-		fmt.Printf("[Gen%d] Khởi chạy LinkNegotiator cho %s (DEV_%04X)...\n", targetGen, gpuProfile.Name, gpuProfile.DeviceID)
-		opts := hxcore.NegotiationOptions{
+		verdict, negErr := hxcore.NewLinkNegotiator(bus).Unlock(hxcore.NegotiationOptions{
 			TargetGen:   targetGen,
-			ForceRoot:   forceRoot,
-			AllowStage2: allowStage2,
+			ForceRoot:   hasArg("-force-root-gen2") || hasArg("-force-root-gen3"),
+			AllowStage2: hasArg("-hard") || gen2AutoHardEnabled(),
 			UserIsAdmin: isAdmin(),
+			Prepare: func(prof hxcore.GPUProfile) {
+				if prof.HasSafePL0 {
+					ensureGspSilent()
+				}
+			},
+		})
+		if err := hxcore.WriteStructuredGen2Status(verdict.StatusContract); err != nil {
+			fmt.Printf("[Gen2] Ghi file trạng thái thất bại: %v\n", err)
 		}
-
-		verdict, err := negotiator.ExecuteNegotiation(gpuBDF, gpuProfile, opts)
-		if err != nil {
-			fmt.Printf("[Gen%d][!] Lỗi thương lượng link: %v\n", targetGen, err)
-			gen2StatusFail(fmt.Sprintf("Lỗi thương lượng link: %v", err))
+		if negErr != nil {
+			fmt.Printf("[Gen2][!] Lỗi thương lượng link: %v\n", negErr)
+			return nil
+		}
+		gpuProfile := verdict.Profile
+		targetGen = verdict.TargetGen
+		if verdict.StatusContract.StatusCode == hxcore.StatusNoGPU {
+			gen2Notify(verdict.Verdict)
 			return nil
 		}
 
@@ -1207,9 +1177,6 @@ func gen2Main() {
 		}
 
 		fmt.Printf("[Gen%d] %s\n", verdict.TargetGen, verdict.Verdict)
-		if err := hxcore.WriteStructuredGen2Status(verdict.StatusContract); err != nil {
-			fmt.Printf("[Gen%d] Ghi file trạng thái thất bại: %v\n", verdict.TargetGen, err)
-		}
 
 		if verdict.Success {
 			gen2Notify(fmt.Sprintf("%s PCIe đã đạt Gen%d, không cần thao tác thêm.", gpuProfile.Name, verdict.CurrentSpeed))

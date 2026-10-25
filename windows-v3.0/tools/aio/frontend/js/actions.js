@@ -304,8 +304,9 @@ const Actions = {
 
     const guardStatus = document.getElementById('guardStatusText');
     if (guardStatus) {
-      guardStatus.textContent = rep.isGen2 ? "Đang bật (Tự mở khóa khi Logon)" : "Chưa đăng ký";
-      guardStatus.style.color = rep.isGen2 ? "var(--accent-emerald)" : "var(--accent-muted)";
+      const taskRegistered = (rep.items || []).some(item => item.name === "Tác vụ tự khởi động" && item.ok);
+      guardStatus.textContent = taskRegistered ? "Đang bật (Tự mở khóa khi Logon)" : "Chưa đăng ký";
+      guardStatus.style.color = taskRegistered ? "var(--accent-emerald)" : "var(--accent-muted)";
     }
   },
 

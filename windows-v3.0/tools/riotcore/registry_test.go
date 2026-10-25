@@ -1,4 +1,4 @@
-package main
+package riotcore
 
 import (
 	"bytes"
@@ -75,8 +75,9 @@ func TestClassifyAdapter(t *testing.T) {
 }
 
 func TestConfigureDriverClassRegistry_Execution(t *testing.T) {
+	graphicsFixture(t)
 	buf := &bytes.Buffer{}
-	res, err := ConfigureDriverClassRegistry(buf, GPUModelCMP40HX)
+	res, err := ConfigureDriverClassRegistry(buf, 0x2189)
 	if err != nil {
 		t.Fatalf("ConfigureDriverClassRegistry returned error: %v", err)
 	}
@@ -97,6 +98,7 @@ func TestConfigureDriverClassRegistry_Execution(t *testing.T) {
 }
 
 func TestConfigureDirectXGlobalRouting(t *testing.T) {
+	graphicsFixture(t)
 	buf := &bytes.Buffer{}
 	err := ConfigureDirectXGlobalRouting(buf, "10DE&1F0B")
 	if err != nil {
@@ -105,6 +107,7 @@ func TestConfigureDirectXGlobalRouting(t *testing.T) {
 }
 
 func TestDisableVulnerableDriverBlocklist(t *testing.T) {
+	graphicsFixture(t)
 	buf := &bytes.Buffer{}
 	// Hàm yêu cầu quyền admin nếu thực thi thật trên máy, test đảm bảo không panic
 	_ = DisableVulnerableDriverBlocklist(buf)
