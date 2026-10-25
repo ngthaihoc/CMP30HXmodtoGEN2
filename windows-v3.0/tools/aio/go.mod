@@ -3,6 +3,7 @@ module unlockaio
 go 1.26.5
 
 require (
+	riotcore v0.0.0
 	40hxcore v0.0.0
 	github.com/wailsapp/go-webview2 v1.0.22
 	github.com/wailsapp/wails/v2 v2.16.0
@@ -39,3 +40,5 @@ require (
 )
 
 replace 40hxcore => ../40hxcore
+
+replace riotcore => ../riotcore

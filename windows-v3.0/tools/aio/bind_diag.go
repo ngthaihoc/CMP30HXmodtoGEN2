@@ -14,6 +14,11 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
+var (
+	findGPUProfile = hxcore.FindGPUWithProfile
+	mountESP       = hxcore.MountESP
+)
+
 // TelemetryData chứa thông số trạng thái thời gian thực được đẩy qua event
 type TelemetryData struct {
 	GPUDetected    bool     `json:"gpuDetected"`
@@ -94,7 +99,7 @@ func (a *App) startTelemetryLoop() {
 }
 
 func (a *App) gatherTelemetry() TelemetryData {
-	prof, found := hxcore.FindGPUWithProfile()
+	prof, found := findGPUProfile()
 	data := TelemetryData{
 		GPUDetected:    found,
 		GPUName:        "Chưa phát hiện GPU CMP",
@@ -103,7 +108,6 @@ func (a *App) gatherTelemetry() TelemetryData {
 		GSPActive:      hxcore.GspEnabled(),
 		DriverStrategy: hxcore.DriverStrategy(),
 		Timestamp:      time.Now().Format("15:04:05"),
-		MRRS:           128,
 	}
 
 	if !found {
@@ -116,50 +120,15 @@ func (a *App) gatherTelemetry() TelemetryData {
 	data.Is30HX = prof.DeviceID == 0x2189 || prof.Family == "TU116"
 	data.Is40HX = prof.DeviceID == 0x1F0B || prof.Family == "TU106"
 
-	// Đọc trạng thái từ hợp đồng máy; task tồn tại không chứng minh link đã đạt Gen2.
-	statusText := hxcore.ReadGen2Status()
-	status := hxcore.ParseStatus(statusText)
-	speed := status.SpeedCurrent
-	width := status.WidthCurrent
-	if width == 0 {
-		width = 16
+	state := hxcore.ParseStatus(hxcore.ReadGen2Status()).LinkState(prof.DeviceID)
+	data.LinkSpeed, data.LinkWidth, data.MRRS = state.Speed, state.Width, state.MRRS
+	data.IsGen2, data.ThroughputMBs = state.Configured, state.ThroughputMBs
+	data.Timestamp = "Không rõ thời điểm"
+	if !state.ObservedAt.IsZero() {
+		data.Timestamp = state.ObservedAt.Local().Format("02/01/2006 15:04:05")
 	}
-	if strings.Contains(statusText, "DEVCTL MRRS=512B") || strings.Contains(statusText, "MRRS 512B") {
-		data.MRRS = 512
-	}
-
-	data.LinkSpeed = speed
-	data.LinkWidth = width
-	data.IsGen2 = speed >= 2
-	if status.TLSTarget >= 2 && !data.IsGen2 {
-		// Đã cấu hình mục tiêu Gen2 nhưng đang hạ link do trạng thái tiết kiệm điện.
-		data.LinkSpeed = speed
-	} else if status.StatusCode == hxcore.StatusGen1Stuck {
-		data.LinkSpeed = 1
-	}
-
-	// Không nạp BYOVD trong telemetry nền; đọc phần cứng chỉ ở thao tác chủ động.
-	if data.LinkWidth == 0 {
-		data.LinkWidth = 16
-	}
-	width = data.LinkWidth
-	speed = data.LinkSpeed
-	data.IsGen2 = speed >= 2
-
-	// Tính toán băng thông thực tế tương đối
-	// Gen1: 250 MB/s mỗi lane; Gen2: 500 MB/s mỗi lane
-	perLane := uint32(250)
-	if speed >= 2 {
-		perLane = 500
-	}
-	data.ThroughputMBs = perLane * width
-	if speed >= 2 && width == 16 && data.MRRS == 512 {
-		data.ThroughputMBs = 6400 // ~6.4 GB/s tối đa
-	}
-
-	// Ma trận 16 làn vật lý
-	for i := uint32(0); i < 16; i++ {
-		data.Lanes[i] = i < width
+	for i := range data.Lanes {
+		data.Lanes[i] = uint32(i) < state.Width
 	}
 
 	// Đọc xung nhịp và nhiệt độ GPU
@@ -174,7 +143,7 @@ func (a *App) gatherTelemetry() TelemetryData {
 func (a *App) ScanEnvironment() EnvironmentReport {
 	legacy := hxcore.FirmwareIsLegacy()
 	sbOn := hxcore.SecureBootOn()
-	gpuProf, gpuFound := hxcore.FindGPUWithProfile()
+	gpuProf, gpuFound := findGPUProfile()
 	gspOK := hxcore.GspEnabled()
 
 	// Kiểm tra trạng thái Microsoft Vulnerable Driver Blocklist
@@ -218,7 +187,7 @@ func (a *App) ScanEnvironment() EnvironmentReport {
 
 	// Kiểm tra ESP EFI
 	espEFI := false
-	if esp := hxcore.MountESP(); esp != "" {
+	if esp := mountESP(); esp != "" {
 		if _, err := os.Stat(filepath.Join(esp, "EFI", "40HX", "40HXUNLK.EFI")); err == nil {
 			espEFI = true
 		}
@@ -297,7 +266,7 @@ func (a *App) ScanEnvironment() EnvironmentReport {
 			})
 		}
 	}
-	status := hxcore.ParseStatus(hxcore.ReadGen2Status())
+	state := hxcore.ParseStatus(hxcore.ReadGen2Status()).LinkState(deviceID)
 
 	return EnvironmentReport{
 		GPUDetected:    gpuFound,
@@ -308,7 +277,7 @@ func (a *App) ScanEnvironment() EnvironmentReport {
 		Is30HX:         deviceID == 0x2189,
 		Is40HX:         deviceID == 0x1F0B,
 		GSPActive:      gspOK,
-		IsGen2:         status.SpeedCurrent >= 2 && status.StatusCode != hxcore.StatusGen1Stuck,
+		IsGen2:         gpuFound && state.Configured,
 		Compute:        computeReport,
 		DriverStrategy: strat,
 		AutoHard:       autoHard,

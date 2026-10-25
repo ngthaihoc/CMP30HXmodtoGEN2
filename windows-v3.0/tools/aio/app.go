@@ -9,6 +9,8 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+var cleanupKernelDrivers = hxcore.CleanupByovd
+
 // App struct chính điều phối toàn bộ binding giữa Wails và Go Core
 type App struct {
 	ctx             context.Context
@@ -39,7 +41,7 @@ func (a *App) shutdown(ctx context.Context) {
 		a.telemetryCancel()
 	}
 	CleanupToolAssets()
-	hxcore.CleanupByovd()
+	cleanupKernelDrivers()
 }
 
 // tryAcquire chiếm quyền thực thi thao tác phần cứng (chống xung đột song song)

@@ -11,6 +11,7 @@ import (
 
 	hxcore "40hxcore"
 	"golang.org/x/sys/windows/registry"
+	"riotcore"
 )
 
 // RiotStatusReport phản hồi trạng thái tương thích game Riot và Vanguard
@@ -122,7 +123,7 @@ func (a *App) RiotOptimize(confirmed bool) error {
 	a.Log("==============================================")
 
 	// 1. Dọn dẹp driver tạm thời trong kernel
-	a.Log("[*] Bước 1/4: Dọn dẹp driver kernel tạm thời (WinRing0 / ThrottleStop)...")
+	a.Log("[*] Bước 1/3: Dọn dẹp driver kernel tạm thời (WinRing0 / ThrottleStop)...")
 	_ = exec.Command("sc.exe", "stop", "WinRing0_1_2_0").Run()
 	_ = exec.Command("sc.exe", "delete", "WinRing0_1_2_0").Run()
 	_ = exec.Command("sc.exe", "stop", "ThrottleStop").Run()
@@ -136,47 +137,17 @@ func (a *App) RiotOptimize(confirmed bool) error {
 	_ = os.Remove(filepath.Join(sysRoot, "System32", "drivers", "ThrottleStop.sys"))
 	a.Log("  [✓] Đã giải phóng sạch sẽ dịch vụ và file driver kernel khỏi hệ thống.")
 
-	// 2. Tắt Microsoft Vulnerable Driver Blocklist
-	a.Log("[*] Bước 2/4: Cấu hình VulnerableDriverBlocklistEnable=0...")
-	kCi, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\CI\Config`, registry.SET_VALUE)
-	if err == nil {
-		_ = kCi.SetDWordValue("VulnerableDriverBlocklistEnable", 0)
-		kCi.Close()
-		a.Log("  [✓] Đã tắt VulnerableDriverBlocklist (ngăn chặn lỗi nạp driver mod 5xx/6xx).")
-	} else {
-		a.Log(fmt.Sprintf("  [!] Lỗi ghi Registry CI\\Config: %v", err))
-	}
-
-	// 3. Cấu hình DirectX Global Routing và TDR Delay
-	a.Log("[*] Bước 3/4: Thiết lập định tuyến DirectX High-Performance cho CMP...")
-	prof, found := hxcore.FindGPUWithProfile()
-	shortDID := "10DE&2189"
-	if found && prof.DeviceID != 0 {
-		shortDID = fmt.Sprintf("10DE&%04X", prof.DeviceID)
-	}
-
-	if gsKey, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\DirectX\UserGpuPreferences`, registry.QUERY_VALUE|registry.SET_VALUE); err == nil {
-		current, _, _ := gsKey.GetStringValue("DirectXUserGlobalSettings")
-		swap := "SwapEffectUpgradeEnable=1;"
-		if strings.Contains(current, "SwapEffectUpgradeEnable=0") {
-			swap = "SwapEffectUpgradeEnable=0;"
-		}
-		newSetting := fmt.Sprintf("HighPerfAdapter=%s;%s", shortDID, swap)
-		_ = gsKey.SetStringValue("DirectXUserGlobalSettings", newSetting)
-		gsKey.Close()
-		a.Log(fmt.Sprintf("  [✓] Đã gán HighPerfAdapter toàn cục cho DirectX: %s", shortDID))
-	}
-
-	// Tăng TDR Delay lên 10 giây tránh crash timeout
-	if tdrKey, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\GraphicsDrivers`, registry.SET_VALUE); err == nil {
-		_ = tdrKey.SetDWordValue("TdrDelay", 10)
-		_ = tdrKey.SetDWordValue("TdrDdiDelay", 10)
-		tdrKey.Close()
-		a.Log("  [✓] Đã tăng thời gian chờ TDR lên 10 giây (ngăn crash khi chuyển frame qua PCIe).")
+	// Cùng GPUTopologyDetector, MSHybrid/CASO và DirectX Global Router với công cụ độc lập.
+	a.Log("[*] Bước 2/3: Cấu hình MSHybrid, CASO và DirectX...")
+	prof, _ := hxcore.FindGPUWithProfile()
+	res, graphicsErr := riotcore.ConfigureDriverClassRegistry(appLogWriter{a}, prof.DeviceID)
+	if graphicsErr != nil {
+		a.Log(fmt.Sprintf("[!] Cấu hình đồ họa chưa hoàn tất: %v", graphicsErr))
+		return fmt.Errorf("cấu hình đồ họa chưa hoàn tất (GPU %s): %w", res.HighPerfDID, graphicsErr)
 	}
 
 	// 4. Quét và cấu hình Liên Minh Huyền Thoại (WindowMode=2, DX11Support=1)
-	a.Log("[*] Bước 4/4: Tự động cấu hình game.cfg Liên Minh Huyền Thoại...")
+	a.Log("[*] Bước 3/3: Tự động cấu hình game.cfg Liên Minh Huyền Thoại...")
 	cfgCount := a.optimizeLeagueConfigs()
 	if cfgCount > 0 {
 		a.Log(fmt.Sprintf("  [✓] Đã tối ưu %d cấu hình game.cfg (WindowMode=2, Borderless=1, DX11Support=1).", cfgCount))
@@ -199,19 +170,9 @@ func (a *App) RiotRevertOptimization() error {
 
 	a.Log("[Riot] Bắt đầu hoàn tác cấu hình bảo mật...")
 
-	// Bật lại Blocklist
-	kCi, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\CI\Config`, registry.SET_VALUE)
-	if err == nil {
-		_ = kCi.SetDWordValue("VulnerableDriverBlocklistEnable", 1)
-		kCi.Close()
-		a.Log("  [✓] Đã bật lại VulnerableDriverBlocklistEnable=1 (khôi phục bảo vệ mặc định của Windows).")
-	}
-
-	// Xoá cấu hình DirectX HighPerfAdapter
-	if gsKey, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\DirectX\UserGpuPreferences`, registry.SET_VALUE); err == nil {
-		_ = gsKey.DeleteValue("DirectXUserGlobalSettings")
-		gsKey.Close()
-		a.Log("  [✓] Đã xoá bỏ định tuyến HighPerfAdapter toàn cục.")
+	if err := riotcore.RevertGraphicsOptimization(appLogWriter{a}); err != nil {
+		a.Log(fmt.Sprintf("[!] Hoàn tác cấu hình Riot chưa hoàn tất: %v", err))
+		return fmt.Errorf("hoàn tác cấu hình Riot chưa hoàn tất: %w", err)
 	}
 
 	a.Log("[Riot] Hoàn tác cấu hình hoàn thành.")
@@ -404,4 +365,16 @@ func getLogicalDrives() []string {
 func fileExists(path string) bool {
 	fi, err := os.Stat(path)
 	return err == nil && !fi.IsDir()
+}
+
+// appLogWriter nối nhật ký của module dùng chung tới giao diện hiện tại.
+type appLogWriter struct{ app *App }
+
+func (w appLogWriter) Write(p []byte) (int, error) {
+	for _, line := range strings.Split(strings.TrimSpace(string(p)), "\n") {
+		if line != "" {
+			w.app.Log(line)
+		}
+	}
+	return len(p), nil
 }

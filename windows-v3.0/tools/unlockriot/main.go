@@ -11,6 +11,7 @@ import (
 	"time"
 
 	hxcore "40hxcore"
+	"riotcore"
 
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
@@ -326,7 +327,16 @@ func main() {
 								}
 							})
 							go func() {
-								runOptimization(logSink, is40HX, is30HX, sbOn, isWin11)
+								if err := runOptimization(logSink, is40HX, is30HX, sbOn, isWin11); err != nil {
+									fmt.Fprintf(logSink, "[!] %v\n", err)
+									mw.Synchronize(func() {
+										pbRun.SetEnabled(true)
+										if lblLogStatus != nil {
+											lblLogStatus.SetText("Tối ưu chưa hoàn tất. Xem nhật ký lỗi.")
+										}
+									})
+									return
+								}
 								mw.Synchronize(func() {
 									pbRun.SetEnabled(true)
 									if lblLogStatus != nil {
@@ -478,7 +488,7 @@ func getLogicalDrives() []string {
 	return drives
 }
 
-func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) {
+func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) error {
 	fmt.Fprintln(log, "==============================================")
 	fmt.Fprintln(log, "  UnlockRiotGame: Dọn Dẹp Driver & Tối Ưu Riot")
 	fmt.Fprintln(log, "==============================================")
@@ -546,14 +556,14 @@ func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) {
 	}
 
 	fmt.Fprintln(log, "\n[*] BƯỚC 3: Cấu hình Registry Driver Class MSHybrid & CASO (Zero-Driver-Reinstall)...")
-	var model GPUModel = GPUModelUnknown
+	var deviceID uint16
 	if is40HX {
-		model = GPUModelCMP40HX
+		deviceID = 0x1F0B
 	} else if is30HX {
-		model = GPUModelCMP30HX
+		deviceID = 0x2189
 	}
-	if _, err := ConfigureDriverClassRegistry(log, model); err != nil {
-		fmt.Fprintf(log, "[!] Cảnh báo cấu hình Driver Class Registry: %v\n", err)
+	if _, err := riotcore.ConfigureDriverClassRegistry(log, deviceID); err != nil {
+		return fmt.Errorf("cấu hình đồ họa chưa hoàn tất: %w", err)
 	}
 
 	fmt.Fprintln(log, "\n[*] BƯỚC 4: Cấu hình Registry DirectX ưu tiên GPU hiệu năng cao cho Riot Games...")
@@ -597,7 +607,10 @@ func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) {
 
 	fmt.Fprintln(log, "\n[*] BƯỚC 5: Cấu hình Borderless Windowed cho League of Legends...")
 	modifiedCfgs, err := FindAndConfigureLeagueConfigs(getLogicalDrives())
-	if err != nil || len(modifiedCfgs) == 0 {
+	if err != nil {
+		return fmt.Errorf("cấu hình game.cfg chưa hoàn tất: %w", err)
+	}
+	if len(modifiedCfgs) == 0 {
 		fmt.Fprintln(log, "  -> Không tìm thấy file game.cfg nào trên các ổ đĩa để sửa tự động.")
 	} else {
 		for _, cfg := range modifiedCfgs {
@@ -616,4 +629,5 @@ func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) {
 		}
 	}
 	fmt.Fprintln(log, "==============================================")
+	return nil
 }
