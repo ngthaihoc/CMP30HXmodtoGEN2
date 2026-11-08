@@ -38,7 +38,6 @@ Kho lưu trữ này chứa toàn bộ mã nguồn công cụ mở khoá **CMP 40
 
 - **Sử dụng trực tiếp:** Tải tệp thực thi tại [`release/`](release/) bao gồm `40HXInstaller.exe`, `40HXUninstaller.exe`, `40HXCheck.exe`.
 - **Mã nguồn Firmware EFI:** `tools/unlock40x/` (`unlock40x_v70.c` + script build `build_v70.sh`).
-- **Tài liệu bối cảnh kỹ thuật chi tiết:** [../PROJECT_CONTEXT.md](../PROJECT_CONTEXT.md)
 
 **Biên dịch từ mã nguồn** (Yêu cầu Go 1.20+, chạy trong thư mục `tools/`):
 
