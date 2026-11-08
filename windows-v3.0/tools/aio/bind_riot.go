@@ -148,7 +148,11 @@ func (a *App) RiotOptimize(confirmed bool) error {
 
 	// 4. Quét và cấu hình Liên Minh Huyền Thoại (WindowMode=2, DX11Support=1)
 	a.Log("[*] Bước 3/3: Tự động cấu hình game.cfg Liên Minh Huyền Thoại...")
-	cfgCount := a.optimizeLeagueConfigs()
+	modifiedCfgs, cfgErr := riotcore.FindAndConfigureLeagueConfigs(getLogicalDrives())
+	cfgCount := len(modifiedCfgs)
+	if cfgErr != nil {
+		a.Log(fmt.Sprintf("[!] Lỗi cấu hình game.cfg: %v", cfgErr))
+	}
 	if cfgCount > 0 {
 		a.Log(fmt.Sprintf("  [✓] Đã tối ưu %d cấu hình game.cfg (WindowMode=2, Borderless=1, DX11Support=1).", cfgCount))
 	} else {
@@ -258,82 +262,6 @@ func (a *App) RebootToBIOS() error {
 		return exec.Command("shutdown.exe", "/r", "/t", "3").Run()
 	}
 	return nil
-}
-
-func (a *App) optimizeLeagueConfigs() int {
-	drives := getLogicalDrives()
-	count := 0
-
-	for _, d := range drives {
-		candidates := []string{
-			filepath.Join(d, "Riot Games", "League of Legends", "Config", "game.cfg"),
-			filepath.Join(d, "Games", "League of Legends", "Config", "game.cfg"),
-			filepath.Join(d, "LienMinhHuyenThoai", "GameData", "Apps", "lolVN", "Game", "Config", "game.cfg"),
-		}
-		for _, cfg := range candidates {
-			if fileExists(cfg) {
-				if err := applyLoLCfg(cfg); err == nil {
-					count++
-				}
-			}
-		}
-	}
-	return count
-}
-
-func applyLoLCfg(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	content := string(data)
-
-	// Cập nhật hoặc thêm WindowMode=2, BorderlessWindow=1, DX11Support=1
-	updates := map[string]string{
-		"WindowMode":          "2",
-		"BorderlessWindow":    "1",
-		"PreferDX9LegacyMode": "0",
-		"DX11Support":         "1",
-		"WaitforVerticalSync": "0",
-	}
-
-	lines := strings.Split(content, "\n")
-	hasGeneral := false
-	newLines := []string{}
-	foundKeys := map[string]bool{}
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.EqualFold(trimmed, "[General]") {
-			hasGeneral = true
-			newLines = append(newLines, line)
-			continue
-		}
-		replaced := false
-		for k, v := range updates {
-			if strings.HasPrefix(trimmed, k+"=") || strings.HasPrefix(trimmed, k+" =") {
-				newLines = append(newLines, fmt.Sprintf("%s=%s", k, v))
-				foundKeys[k] = true
-				replaced = true
-				break
-			}
-		}
-		if !replaced {
-			newLines = append(newLines, line)
-		}
-	}
-
-	if !hasGeneral {
-		newLines = append([]string{"[General]"}, newLines...)
-	}
-
-	for k, v := range updates {
-		if !foundKeys[k] {
-			newLines = append(newLines, fmt.Sprintf("%s=%s", k, v))
-		}
-	}
-
-	return os.WriteFile(path, []byte(strings.Join(newLines, "\n")), 0o644)
 }
 
 func isWindows11OS() bool {

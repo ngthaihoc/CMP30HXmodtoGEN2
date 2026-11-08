@@ -3,10 +3,10 @@ module unlockriot
 go 1.26.5
 
 require (
-	riotcore v0.0.0
-	40hxcore v0.0.0-00010101000000-000000000000
+	40hxcore v0.0.0
 	github.com/lxn/walk v0.0.0-20210112085537-c389da54e794
 	golang.org/x/sys v0.47.0
+	riotcore v0.0.0
 )
 
 require (

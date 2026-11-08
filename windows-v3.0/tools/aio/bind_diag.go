@@ -89,13 +89,17 @@ func (a *App) startTelemetryLoop() {
 				return
 			case <-ticker.C:
 				data := a.gatherTelemetry()
-				if a.isWails && a.ctx != nil {
-					runtime.EventsEmit(a.ctx, "telemetry:tick", data)
-				}
-				broadcastEvent("telemetry:tick", data)
+				a.emitEvent("telemetry:tick", data)
 			}
 		}
 	}()
+}
+
+func (a *App) emitEvent(event string, data interface{}) {
+	if a.isWails && a.ctx != nil {
+		runtime.EventsEmit(a.ctx, event, data)
+	}
+	broadcastEvent(event, data)
 }
 
 func (a *App) gatherTelemetry() TelemetryData {
@@ -248,24 +252,9 @@ func (a *App) ScanEnvironment() EnvironmentReport {
 		deviceID = gpuProf.DeviceID
 	}
 
+	// ScanEnvironment remains read-only: RunScoped loads kernel drivers, so this
+	// environment summary deliberately omits live compute inspection.
 	var computeReport *hxcore.ComputeReport
-	if gpuFound && gpuProf.FirmwareUnlock {
-		_ = hxcore.RunScoped(gpuProf, func(bus hxcore.HardwareBus) error {
-			bdf, _, ok := hxcore.FindGPUPCIWithBus(bus)
-			if !ok {
-				return nil
-			}
-			computeReport, _ = hxcore.NewComputeInspector(bus).InspectCompute(bdf, gpuProf)
-			return nil
-		})
-		if computeReport != nil {
-			items = append(items, EnvCheckItem{
-				Name: "Tensor Core / Compute",
-				Ok:   computeReport.Status == hxcore.ComputeStatusUnlocked,
-				Note: computeReport.Verdict,
-			})
-		}
-	}
 	state := hxcore.ParseStatus(hxcore.ReadGen2Status()).LinkState(deviceID)
 
 	return EnvironmentReport{

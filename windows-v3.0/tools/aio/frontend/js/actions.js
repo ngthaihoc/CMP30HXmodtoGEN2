@@ -219,7 +219,7 @@ const Actions = {
           onConfirm: () => {
             if (window.go && window.go.main && window.go.main.App) {
               window.go.main.App.SetupReBar(6).then(res => {
-                Logger.append(`[ReBAR] ${res.message}`);
+                Logger.append(`[ReBAR] ${res.message}${res.error ? ` | Lỗi: ${res.error}` : ''}${res.rollbackError ? ` | Lỗi hoàn tác: ${res.rollbackError}` : ''}`);
               });
             }
           }
@@ -230,11 +230,20 @@ const Actions = {
     const btnRevertRebar = document.getElementById('btnRevertReBar');
     if (btnRevertRebar) {
       btnRevertRebar.addEventListener('click', () => {
-        if (window.go && window.go.main && window.go.main.App) {
-          window.go.main.App.RevertReBar().then(res => {
-            Logger.append(`[ReBAR] ${res.message}`);
-          });
-        }
+        Modal.show({
+          title: "Hoàn Tác Resizable BAR",
+          subtitle: "Xác nhận riêng trước khi đổi cấu hình hệ thống",
+          level: "crimson",
+          description: "Thao tác chạy NvStrapsReBar để khôi phục cấu hình ReBAR mặc định. Đây là thay đổi cấu hình hệ thống; kết quả lệnh không xác minh trạng thái phần cứng. Cần khởi động lại rồi kiểm tra bằng GPU-Z.",
+          rollback: "Chạy lại thiết lập ReBAR sau khi xác minh tương thích.",
+          onConfirm: () => {
+            if (window.go && window.go.main && window.go.main.App) {
+              window.go.main.App.RevertReBar().then(res => {
+                Logger.append(`[ReBAR] ${res.message}${res.error ? ` | Lỗi: ${res.error}` : ''}${res.rollbackError ? ` | Lỗi hoàn tác: ${res.rollbackError}` : ''}`);
+              });
+            }
+          }
+        });
       });
     }
 
@@ -304,9 +313,8 @@ const Actions = {
 
     const guardStatus = document.getElementById('guardStatusText');
     if (guardStatus) {
-      const taskRegistered = (rep.items || []).some(item => item.name === "Tác vụ tự khởi động" && item.ok);
-      guardStatus.textContent = taskRegistered ? "Đang bật (Tự mở khóa khi Logon)" : "Chưa đăng ký";
-      guardStatus.style.color = taskRegistered ? "var(--accent-emerald)" : "var(--accent-muted)";
+      guardStatus.textContent = rep.isGen2 ? "Đang bật (Tự mở khóa khi Logon)" : "Chưa đăng ký";
+      guardStatus.style.color = rep.isGen2 ? "var(--accent-emerald)" : "var(--accent-muted)";
     }
   },
 

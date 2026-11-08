@@ -3,7 +3,28 @@ package hxcore
 import (
 	"errors"
 	"testing"
+	"time"
 )
+
+func TestNewLinkNegotiatorDefaultsToProductionWait(t *testing.T) {
+	if NewLinkNegotiator(NewMockHardwareBus()).sleepFn == nil {
+		t.Fatal("expected production wait function")
+	}
+}
+
+func TestLinkNegotiatorUsesInjectedWait(t *testing.T) {
+	var waits []time.Duration
+	n := newLinkNegotiator(NewMockHardwareBus(), func(d time.Duration) {
+		waits = append(waits, d)
+	})
+
+	n.sleep(75 * time.Millisecond)
+	n.sleep(2 * time.Second)
+
+	if len(waits) != 2 || waits[0] != 75*time.Millisecond || waits[1] != 2*time.Second {
+		t.Fatalf("unexpected wait sequence: %v", waits)
+	}
+}
 
 func TestLinkNegotiator_TU116_EFuseClamp(t *testing.T) {
 	// Arrange: TU116 (CMP 30HX) has silicon eFuse bit 3 blown; must clamp target to Gen2
@@ -25,7 +46,7 @@ func TestLinkNegotiator_TU116_EFuseClamp(t *testing.T) {
 	bar0 := uint64(0xF6000000)
 	bus.SetMMIO(bar0+0x00, 0x17000000) // BOOT_0: TU116
 
-	negotiator := NewLinkNegotiator(bus)
+	negotiator := newLinkNegotiator(bus, func(time.Duration) {})
 
 	// Act: request Gen3 on CMP 30HX
 	res, err := negotiator.Negotiate(bdf, prof, 0xFFFFFFFF, 3, false)
@@ -57,7 +78,7 @@ func TestLinkNegotiator_DEVCTL_MRRS_512B_Optimization(t *testing.T) {
 	bus.SetPCIConfig(bdf, 0x10, 0xF6000000)
 	bus.SetMMIO(0xF6000000+0x00, 0x17000000)
 
-	negotiator := NewLinkNegotiator(bus)
+	negotiator := newLinkNegotiator(bus, func(time.Duration) {})
 
 	// Act
 	_, err := negotiator.Negotiate(bdf, prof, 0xFFFFFFFF, 2, false)
@@ -91,7 +112,7 @@ func TestLinkNegotiator_MMIO_ShadowRegisterSequence(t *testing.T) {
 	bus.SetMMIO(bar0+0x00, 0x17000000)           // BOOT_0 TU116
 	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000021) // Gen2 attained
 
-	negotiator := NewLinkNegotiator(bus)
+	negotiator := newLinkNegotiator(bus, func(time.Duration) {})
 
 	// Act
 	res, err := negotiator.Negotiate(bdf, prof, 0xFFFFFFFF, 2, false)
@@ -149,7 +170,7 @@ func TestLinkNegotiator_Stage2_PnPRecovery(t *testing.T) {
 		return true
 	}
 
-	negotiator := NewLinkNegotiator(bus)
+	negotiator := newLinkNegotiator(bus, func(time.Duration) {})
 
 	// Act
 	res, err := negotiator.Negotiate(bdf, prof, 0xFFFFFFFF, 2, true)
@@ -196,7 +217,7 @@ func TestLinkNegotiator_Stage2_40HX_RootLinkDisableAndPnP(t *testing.T) {
 		return true
 	}
 
-	negotiator := NewLinkNegotiator(bus)
+	negotiator := newLinkNegotiator(bus, func(time.Duration) {})
 
 	// Act
 	res, err := negotiator.Negotiate(gpuBDF, prof, rootBDF, 2, true)
@@ -233,7 +254,7 @@ func TestLinkNegotiator_TU116_DisallowsStage2(t *testing.T) {
 	bus.SetMMIO(0xF6000000+0x00, 0x17000000)
 	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000011) // Stuck at Gen1
 
-	negotiator := NewLinkNegotiator(bus)
+	negotiator := newLinkNegotiator(bus, func(time.Duration) {})
 
 	// Act: pass allowStage2 = true
 	res, err := negotiator.Negotiate(bdf, prof, 0xFFFFFFFF, 2, true)
@@ -266,7 +287,7 @@ func TestLinkNegotiator_BOOT0_FamilyMismatch_Guarded(t *testing.T) {
 	bus.SetPCIConfig(bdf, 0x10, 0xF6000000)
 	bus.SetMMIO(0xF6000000+0x00, 0x99000000) // Foreign family byte 0x99
 
-	negotiator := NewLinkNegotiator(bus)
+	negotiator := newLinkNegotiator(bus, func(time.Duration) {})
 
 	// Act
 	_, err := negotiator.Negotiate(bdf, prof, 0xFFFFFFFF, 2, false)
@@ -297,7 +318,7 @@ func TestLinkNegotiator_BOOT0_TU106_Mismatch_Guarded(t *testing.T) {
 	bus.SetPCIConfig(bdf, 0x10, 0xF6000000)
 	bus.SetMMIO(0xF6000000+0x00, 0x21000000) // TU116 family byte 0x21, mismatch for TU106
 
-	negotiator := NewLinkNegotiator(bus)
+	negotiator := newLinkNegotiator(bus, func(time.Duration) {})
 
 	// Act
 	_, err := negotiator.Negotiate(bdf, prof, 0xFFFFFFFF, 2, false)
@@ -328,7 +349,7 @@ func TestLinkNegotiator_RestartNVDisplay_InvokedOnSuccess(t *testing.T) {
 	bus.SetMMIO(0xF6000000+0x00, 0x17000000)
 	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000022) // Gen2 already negotiated
 
-	negotiator := NewLinkNegotiator(bus)
+	negotiator := newLinkNegotiator(bus, func(time.Duration) {})
 
 	// Act
 	res, err := negotiator.Negotiate(bdf, prof, 0xFFFFFFFF, 2, false)
@@ -389,7 +410,7 @@ func TestLinkNegotiator_RootLinkDisable_Sequencing(t *testing.T) {
 		}
 	}
 
-	negotiator := NewLinkNegotiator(bus)
+	negotiator := newLinkNegotiator(bus, func(time.Duration) {})
 
 	// Act
 	negotiator.rootLinkDisable(rootBDF, gpuBDF, 0xF6000000, prof, 2)
@@ -427,7 +448,7 @@ func TestLinkNegotiator_EnsuresMemorySpaceEnable(t *testing.T) {
 
 	bus.SetMMIO(0xDE000000, 0x16800000) // BOOT_0 TU116
 
-	negotiator := NewLinkNegotiator(bus)
+	negotiator := newLinkNegotiator(bus, func(time.Duration) {})
 	res, err := negotiator.Negotiate(bdf, prof, 0xFFFFFFFF, 2, false)
 	if err != nil {
 		t.Fatalf("Negotiate failed: %v", err)
@@ -501,7 +522,7 @@ func TestLinkNegotiator_TU106_MMIO_RMWSequence(t *testing.T) {
 
 	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000021) // Gen2 attained
 
-	negotiator := NewLinkNegotiator(bus)
+	negotiator := newLinkNegotiator(bus, func(time.Duration) {})
 	res, err := negotiator.Negotiate(bdf, prof, 0xFFFFFFFF, 2, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -536,7 +557,7 @@ func TestLinkNegotiator_ExecuteNegotiation_FastPathSuccess(t *testing.T) {
 	bus.SetPCICap(bdf, 0x40)
 	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000022) // Gen2 attained
 
-	negotiator := NewLinkNegotiator(bus)
+	negotiator := newLinkNegotiator(bus, func(time.Duration) {})
 	opts := NegotiationOptions{
 		TargetGen: 2,
 	}
@@ -575,7 +596,7 @@ func TestLinkNegotiator_ExecuteNegotiation_HardwareLimitGuarded(t *testing.T) {
 	bus.SetPCIConfig(bdf, 0x40+0x0C, 0x00000001) // LNKCAP: Gen1 max
 	bus.SetPCIConfig(bdf, 0x40+0x12, 0x00000011) // LNKSTA: Gen1
 
-	negotiator := NewLinkNegotiator(bus)
+	negotiator := newLinkNegotiator(bus, func(time.Duration) {})
 	opts := NegotiationOptions{
 		TargetGen: 2,
 		ForceRoot: false,
@@ -629,7 +650,7 @@ func TestLinkNegotiator_ExecuteNegotiation_CMP40HX_UnlockedViaMMIOWhenEndpointLN
 	bus.SetPCIConfig(rootBDF, 0x08, 0x06040000)      // Bridge class
 	bus.SetPCIConfig(rootBDF, 0x18, 0x00010100)      // Secondary bus = 1
 
-	negotiator := NewLinkNegotiator(bus)
+	negotiator := newLinkNegotiator(bus, func(time.Duration) {})
 	opts := NegotiationOptions{
 		TargetGen:   2,
 		ForceRoot:   false, // Not manually forced; should auto-allow via canUnlockViaMMIO
@@ -669,7 +690,7 @@ func TestLinkNegotiator_ExecuteNegotiation_FullSuccess(t *testing.T) {
 	bus.SetPCIConfig(bdf, 0x10, 0xF6000000)
 	bus.SetMMIO(0xF6000000+0x00, 0x17000000)
 
-	negotiator := NewLinkNegotiator(bus)
+	negotiator := newLinkNegotiator(bus, func(time.Duration) {})
 	opts := NegotiationOptions{
 		TargetGen: 2,
 	}
