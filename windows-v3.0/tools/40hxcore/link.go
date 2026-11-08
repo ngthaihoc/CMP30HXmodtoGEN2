@@ -98,10 +98,14 @@ type NegotiationOptions struct {
 	ForceRoot   bool
 	AllowStage2 bool
 	UserIsAdmin bool
+	// Prepare chạy với GPU Profile đã dò được, trước mọi bước đàm phán.
+	Prepare func(GPUProfile)
 }
 
 // NegotiationVerdict trả về kết quả đàm phán hoàn chỉnh kèm StatusContract và chỉ dẫn Retry
 type NegotiationVerdict struct {
+	Profile          GPUProfile
+	GPUBDF           uint32
 	Success          bool
 	CurrentSpeed     uint32
 	CurrentWidth     uint32
@@ -121,21 +125,11 @@ type LinkNegotiator struct {
 
 // NewLinkNegotiator khởi tạo LinkNegotiator với HardwareBus adapter
 func NewLinkNegotiator(bus HardwareBus) *LinkNegotiator {
-	n := &LinkNegotiator{
-		bus:     bus,
-		sleepFn: time.Sleep,
-	}
-	if _, isMock := bus.(*MockHardwareBus); isMock {
-		n.sleepFn = func(time.Duration) {} // Fast simulation for unit tests
-	}
-	return n
+	return newLinkNegotiator(bus, time.Sleep)
 }
 
-// SetSleepFn cho phép tùy biến hàm delay (phục vụ mô phỏng test hoặc tốc độ cao)
-func (n *LinkNegotiator) SetSleepFn(fn func(time.Duration)) {
-	if fn != nil {
-		n.sleepFn = fn
-	}
+func newLinkNegotiator(bus HardwareBus, wait func(time.Duration)) *LinkNegotiator {
+	return &LinkNegotiator{bus: bus, sleepFn: wait}
 }
 
 func (n *LinkNegotiator) sleep(d time.Duration) {
@@ -168,13 +162,10 @@ func (n *LinkNegotiator) Negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint3
 		return res, ErrPCIeCapMissing
 	}
 
-	// 2. Tối ưu Device Control MRRS -> 512B (cap+0x08)
-	if dctl, err := n.bus.ReadPCIConfig(gpuBDF, cap+0x08); err == nil {
-		mrrs := (dctl >> 12) & 0x7
-		if mrrs < 2 {
-			newDctl := uint16((dctl &^ 0x7000) | (2 << 12)) // 0x2000 = 512 bytes
-			_ = n.bus.WritePCIConfig(gpuBDF, cap+0x08, []byte{byte(newDctl), byte(newDctl >> 8)})
-		}
+	// 2. Tối ưu Device Control MRRS -> đúng 512B (cap+0x08).
+	mrrsChanged, err := n.ensureMRRS512(gpuBDF, cap)
+	if err != nil {
+		return res, err
 	}
 
 	// 2.5. Đảm bảo PCI Command Register bật Memory Space Enable (bit 1) & Bus Master Enable (bit 2)
@@ -262,6 +253,9 @@ func (n *LinkNegotiator) Negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint3
 	} else if res.TargetTLS >= targetGen {
 		res.Success = true
 		res.Verdict = fmt.Sprintf("🟢 Gen%d đã cấu hình (TLS=Gen%d): Hiện đang Gen%d x%d do trạng thái tiết kiệm điện PCIe rảnh", targetGen, res.TargetTLS, res.CurrentSpeed, res.CurrentWidth)
+		if mrrsChanged {
+			_ = n.bus.RestartNVDisplay()
+		}
 	} else {
 		res.Success = false
 		res.Verdict = fmt.Sprintf("❌ Gen%d chưa đạt: Vẫn đang ở Gen%d x%d (GPU TLS=Gen%d, Root TLS=Gen%d)", targetGen, res.CurrentSpeed, res.CurrentWidth, res.TargetTLS, res.RootTLS)
@@ -511,14 +505,66 @@ func (n *LinkNegotiator) findRootPort(gpuBus uint32) uint32 {
 	return 0xFFFFFFFF
 }
 
-// ExecuteNegotiation: Deep API thực hiện toàn bộ quy trình từ kiểm tra năng lực,
+func (n *LinkNegotiator) ensureMRRS512(bdf, cap uint32) (bool, error) {
+	dctl, err := n.bus.ReadPCIConfig(bdf, cap+0x08)
+	if err != nil {
+		return false, fmt.Errorf("đọc DEVCTL MRRS: %w", err)
+	}
+	if (dctl>>12)&7 == 2 {
+		return false, nil
+	}
+	value := uint16((dctl &^ 0x7000) | 0x2000)
+	if err := n.bus.WritePCIConfig(bdf, cap+0x08, []byte{byte(value), byte(value >> 8)}); err != nil {
+		return false, fmt.Errorf("ghi DEVCTL MRRS 512B: %w", err)
+	}
+	return true, nil
+}
+
+// Unlock dò GPU và thực hiện chính sách mở khóa chung cho các caller.
+func (n *LinkNegotiator) Unlock(opts NegotiationOptions) (*NegotiationVerdict, error) {
+	for attempt := 0; attempt < 3; attempt++ {
+		bdf, prof, found := FindGPUPCIWithBus(n.bus)
+		if found {
+			if opts.TargetGen == 0 {
+				opts.TargetGen = 2
+			}
+			if prof.MaxSupportedGen != 0 && opts.TargetGen > prof.MaxSupportedGen {
+				opts.TargetGen = prof.MaxSupportedGen
+			}
+			opts.ForceRoot = opts.ForceRoot || prof.RequiresMMIO || prof.HasSafePL0 || prof.DeviceID == 0x2189
+			verdict, err := n.ExecuteNegotiation(bdf, prof, opts)
+			verdict.Profile, verdict.GPUBDF = prof, bdf
+			verdict.StatusContract.DeviceID = prof.DeviceID
+			verdict.StatusContract.ObservedAt = time.Now().UTC()
+			if cap := n.findPcieCap(bdf); cap != 0 {
+				if dctl, readErr := n.bus.ReadPCIConfig(bdf, cap+0x08); readErr == nil {
+					verdict.StatusContract.MRRS = 128 << ((dctl >> 12) & 7)
+				}
+			}
+			return verdict, err
+		}
+		if attempt < 2 {
+			n.sleep(2 * time.Second)
+		}
+	}
+	msg := "Không tìm thấy GPU CMP được hỗ trợ trên bus PCI."
+	return &NegotiationVerdict{
+		Verdict:        msg,
+		StatusContract: StatusContract{StatusCode: StatusNoGPU, ErrorCode: "GPU_NOT_FOUND", Details: []string{msg}},
+	}, nil
+}
+
+// ExecuteNegotiation thực hiện toàn bộ quy trình từ kiểm tra năng lực,
 // đàm phán link, khôi phục Stage 2, đến xuất bản StatusContract hoàn chỉnh và tư vấn retry.
 func (n *LinkNegotiator) ExecuteNegotiation(gpuBDF uint32, prof GPUProfile, opts NegotiationOptions) (*NegotiationVerdict, error) {
+	if opts.Prepare != nil {
+		opts.Prepare(prof)
+	}
 	targetGen := opts.TargetGen
 	if targetGen == 0 {
 		targetGen = 2
 	}
-	if prof.DeviceID == 0x2189 && targetGen > 2 {
+	if (prof.DeviceID == 0x2189 || prof.Family == "TU116") && targetGen > 2 {
 		targetGen = 2
 	}
 
@@ -544,6 +590,14 @@ func (n *LinkNegotiator) ExecuteNegotiation(gpuBDF uint32, prof GPUProfile, opts
 
 	// 1. Kiểm tra trạng thái đã đạt sẵn (Fast-path)
 	if cur >= targetGen {
+		changed, err := n.ensureMRRS512(gpuBDF, cap)
+		if err != nil {
+			return &NegotiationVerdict{TargetGen: targetGen, CurrentSpeed: cur, CurrentWidth: curWidth, Verdict: err.Error(),
+				StatusContract: StatusContract{StatusCode: StatusDrvFail, ErrorCode: "MRRS_OPTIMIZATION_FAILED", SpeedCurrent: cur, WidthCurrent: curWidth, TLSTarget: targetGen, Details: []string{err.Error()}}}, err
+		}
+		if changed {
+			_ = n.bus.RestartNVDisplay()
+		}
 		st := StatusContract{
 			StatusCode:   StatusGen2Success,
 			SpeedCurrent: cur,

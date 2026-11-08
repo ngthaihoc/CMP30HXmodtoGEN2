@@ -79,7 +79,9 @@ func RunCLI(opts CLIOptions, log io.Writer, uefiMgr UEFIManager) error {
 			fmt.Fprintln(log, "CẢNH BÁO: Tối ưu Riot sẽ thay đổi cấu hình bảo mật hệ thống. Thêm -y để xác nhận.")
 			return nil
 		}
-		runOptimization(log, is40HX, is30HX, sbOn, isWin11)
+		if err := runOptimization(log, is40HX, is30HX, sbOn, isWin11); err != nil {
+			return err
+		}
 	}
 
 	if opts.CheckSig {

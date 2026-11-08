@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	hxcore "40hxcore"
 	"golang.org/x/sys/windows/registry"
@@ -48,95 +47,32 @@ func (a *App) ForceRootGen2() UnlockResult {
 
 func (a *App) executeUnlock(forceRoot bool) UnlockResult {
 	var result UnlockResult
-
 	err := hxcore.RunScopedBus(true, func(bus hxcore.HardwareBus) error {
-		var gpuBDF uint32
-		var gpuProfile hxcore.GPUProfile
-		gpuFound := false
-
-		for attempt := 1; attempt <= 3; attempt++ {
-			gpuBDF, gpuProfile, gpuFound = hxcore.FindGPUPCIWithBus(bus)
-			if gpuFound {
-				break
-			}
-			if attempt < 3 {
-				a.Log(fmt.Sprintf("[PCIe] Chưa định vị được GPU trên bus PCI, thử lại sau 2s (%d/3)...", attempt))
-				time.Sleep(2 * time.Second)
-			}
-		}
-
-		if !gpuFound {
-			msg := "Không tìm thấy card CMP tương thích trên bus PCI. Vui lòng kiểm tra nguồn phụ và khe cắm."
-			a.Log("[!] " + msg)
-			_ = hxcore.WriteStructuredGen2Status(hxcore.StatusContract{
-				StatusCode: hxcore.StatusNoGPU, ErrorCode: "GPU_NOT_FOUND",
-				Details: []string{msg},
-			})
-			result = UnlockResult{Success: false, Message: msg}
-			return nil
-		}
-
-		a.Log(fmt.Sprintf("[PCIe] 🛡️ Nhận diện phần cứng: %s [%s] (DEV_%04X tại Bus %02X)",
-			gpuProfile.Name, gpuProfile.Family, gpuProfile.DeviceID, (gpuBDF>>8)&0xFF))
-
-		targetGen := uint32(2)
-		if gpuProfile.MaxSupportedGen < 2 {
-			targetGen = gpuProfile.MaxSupportedGen
-		}
-
-		// Ranh giới an toàn phần cứng: TU116 (30HX) kẹp eFuse tuyệt đối tại Gen2
-		allowStage2 := gpuProfile.DeviceID != 0x2189 && hxcore.ConfigInt("Gen2AutoHard", 1) != 0
-
-		if gpuProfile.DeviceID == 0x2189 {
-			a.Log("[PCIe] 🔒 Kích hoạt ranh giới bảo vệ CMP 30HX: Khóa cứng Gen2 (5.0 GT/s), cấm reset PnP nguy hiểm.")
-		} else {
-			a.Log("[PCIe] ⚡ Chế độ mở khóa CMP 40HX: Nạp MMIO TU106 shadow và tối ưu MRRS 512B.")
-		}
-
-		negotiator := hxcore.NewLinkNegotiator(bus)
-		opts := hxcore.NegotiationOptions{
-			TargetGen:   targetGen,
-			ForceRoot:   forceRoot || gpuProfile.RequiresMMIO,
-			AllowStage2: allowStage2,
+		verdict, negErr := hxcore.NewLinkNegotiator(bus).Unlock(hxcore.NegotiationOptions{
+			TargetGen: 2, ForceRoot: forceRoot,
+			AllowStage2: hxcore.ConfigInt("Gen2AutoHard", 1) != 0,
 			UserIsAdmin: hxcore.IsAdmin(),
+		})
+		if err := hxcore.WriteStructuredGen2Status(verdict.StatusContract); err != nil {
+			a.Log(fmt.Sprintf("[!] Không thể lưu trạng thái mở khóa: %v", err))
 		}
-
-		verdict, negErr := negotiator.ExecuteNegotiation(gpuBDF, gpuProfile, opts)
 		if negErr != nil {
 			a.Log(fmt.Sprintf("[PCIe][!] Lỗi đàm phán liên kết: %v", negErr))
-			_ = hxcore.WriteStructuredGen2Status(hxcore.StatusContract{
-				StatusCode: hxcore.StatusDrvFail, ErrorCode: "NEGOTIATION_FAILED",
-				TLSTarget: targetGen, Details: []string{negErr.Error()},
-			})
-			result = UnlockResult{Success: false, Message: negErr.Error()}
-			return nil
 		}
-
-		_ = hxcore.WriteStructuredGen2Status(verdict.StatusContract)
-		a.Log(fmt.Sprintf("[PCIe] Kết quả: Tốc độ hiện tại Gen%d, Độ rộng x%d | Kết luận: %s",
-			verdict.CurrentSpeed, verdict.CurrentWidth, verdict.Verdict))
-
-		if verdict.Success {
-			if err := bus.RestartNVDisplay(); err != nil {
-				a.Log(fmt.Sprintf("[PCIe] Cảnh báo: khởi động lại dịch vụ NVIDIA thất bại: %v", err))
-			}
-		}
-
-		result = UnlockResult{
-			Success: verdict.CurrentSpeed >= 2,
-			Speed:   verdict.CurrentSpeed,
-			Width:   verdict.CurrentWidth,
-			Message: verdict.Verdict,
-		}
-
+		a.Log("[PCIe] " + verdict.Verdict)
+		result = UnlockResult{Success: verdict.Success, Speed: verdict.CurrentSpeed,
+			Width: verdict.CurrentWidth, Message: verdict.Verdict}
 		return nil
 	})
-
 	if err != nil {
 		a.Log(fmt.Sprintf("[!] Lỗi nạp phiên driver: %v", err))
-		return UnlockResult{Success: false, Message: err.Error()}
+		if writeErr := hxcore.WriteStructuredGen2Status(hxcore.StatusContract{
+			StatusCode: hxcore.StatusDrvFail, ErrorCode: "DRIVER_SESSION_FAILED", Details: []string{err.Error()},
+		}); writeErr != nil {
+			a.Log(fmt.Sprintf("[!] Không thể lưu trạng thái lỗi driver: %v", writeErr))
+		}
+		return UnlockResult{Message: err.Error()}
 	}
-
 	return result
 }
 

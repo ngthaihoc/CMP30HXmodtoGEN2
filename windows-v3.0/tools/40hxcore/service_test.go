@@ -1,6 +1,8 @@
 package hxcore
 
 import (
+	"errors"
+	"golang.org/x/sys/windows/svc/mgr"
 	"testing"
 )
 
@@ -12,7 +14,12 @@ func TestServiceInfo_NonExistentService(t *testing.T) {
 }
 
 func TestEnsureNvidiaControlPanelHealthy_RunsWithoutPanic(t *testing.T) {
-	// Should complete gracefully even in mock/test environments
+	previous := nvidiaControlPanelService
+	t.Cleanup(func() { nvidiaControlPanelService = previous })
+	denied := errors.New("không có quyền mở dịch vụ NVIDIA")
+	nvidiaControlPanelService = func(name string, fn func(*mgr.Service) error) error { return denied }
 	err := EnsureNvidiaControlPanelHealthy()
-	_ = err
+	if !errors.Is(err, denied) {
+		t.Fatalf("Phải trả lại lỗi dịch vụ: %v", err)
+	}
 }

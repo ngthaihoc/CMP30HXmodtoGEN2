@@ -157,7 +157,7 @@
       const data = await res.json();
       renderStatus(data);
     } catch {
-      renderStatus(getMockStatus());
+      renderStatus({ gpuDetected: false, items: [{ name: "Kết nối trạng thái", ok: false, note: "Không thể đọc trạng thái từ công cụ." }] });
     }
     fetchRiotStatus();
   }
@@ -247,53 +247,19 @@
     if ($('neRetryMin') && typeof data.retryInterval !== 'undefined') $('neRetryMin').value = data.retryInterval;
 
     // PCIe Link status & gauge
-    const isGen2 = data.isGen2 || false;
-    const gpuDetected = data.gpuDetected || false;
     const throughput = $('currentThroughput');
     const gauge = $('gaugeBarFill');
     const speedSub = $('currentSpeedSub');
     const boostRatio = $('boostRatio');
-
-    if (gpuDetected && isGen2) {
-      initLaneMatrix(16);
-      if (throughput) throughput.innerHTML = `~6.4 <span class="unit">GB/s</span>`;
-      if (gauge) gauge.style.width = '100%';
-      if (speedSub) {
-        speedSub.textContent = "Gen2 x16 @ 5.0 GT/s";
-        speedSub.style.color = "var(--text-secondary)";
-      }
-      if (boostRatio) {
-        boostRatio.textContent = "25.6x BOOST";
-        boostRatio.style.color = "var(--accent-phosphor)";
-        boostRatio.style.borderColor = "var(--accent-phosphor)";
-      }
-    } else if (gpuDetected) {
-      initLaneMatrix(1);
-      if (throughput) throughput.innerHTML = `250 <span class="unit">MB/s</span>`;
-      if (gauge) gauge.style.width = '4%';
-      if (speedSub) {
-        speedSub.textContent = "Gen1 x1 @ 2.5 GT/s";
-        speedSub.style.color = "var(--text-muted)";
-      }
-      if (boostRatio) {
-        boostRatio.textContent = "1.0x (Khóa eFuse)";
-        boostRatio.style.color = "var(--text-muted)";
-        boostRatio.style.borderColor = "var(--border-medium)";
-      }
-    } else {
-      initLaneMatrix(0);
-      if (throughput) throughput.innerHTML = `0 <span class="unit">MB/s</span>`;
-      if (gauge) gauge.style.width = '0%';
-      if (speedSub) {
-        speedSub.textContent = "Chưa phát hiện GPU";
-        speedSub.style.color = "var(--accent-crimson)";
-      }
-      if (boostRatio) {
-        boostRatio.textContent = "-- BOOST";
-        boostRatio.style.color = "var(--text-muted)";
-        boostRatio.style.borderColor = "var(--border-medium)";
-      }
-    }
+    const width = data.gpuDetected ? (data.linkWidth || 0) : 0;
+    const mb = data.gpuDetected ? (data.throughputMBs || 0) : 0;
+    initLaneMatrix(width);
+    if (throughput) throughput.innerHTML = `${mb >= 1000 ? (mb / 1000).toFixed(1) : mb} <span class="unit">${mb >= 1000 ? 'GB/s' : 'MB/s'}</span>`;
+    if (gauge) gauge.style.width = `${Math.min(100, mb / 8000 * 100)}%`;
+    if (speedSub) speedSub.textContent = data.gpuDetected
+      ? `Kết quả trước: Gen${data.linkSpeed || '?'} x${width || '?'} · Băng thông lý thuyết`
+      : 'Chưa có dữ liệu GPU';
+    if (boostRatio) boostRatio.textContent = data.isGen2 ? 'ĐÃ CẤU HÌNH GEN2' : 'CHƯA CÓ KẾT QUẢ GEN2';
 
     // Safe boundaries per card model (30HX vs 40HX)
     const is30HX = data.is30HX || (data.gpuName && (data.gpuName.includes("30HX") || data.gpuName.includes("TU116")));
@@ -523,44 +489,6 @@
       await sendAction('/api/riot/sign-efi', null, btnSignEfi);
       openBiosModal();
     });
-  }
-
-  // --- Fallback Mock Data ---
-  function getMockStatus() {
-    return {
-      gpuDetected: true,
-      gpuName: "CMP 40HX (Turing TU106)",
-      pciBusId: "VEN_10DE & DEV_1F0B",
-      gspActive: true,
-      isGen2: true,
-      driverStrategy: 0,
-      autoHard: true,
-      retryCount: 3,
-      retryInterval: 5,
-      items: [
-        { name: "Chế độ Boot", ok: true, note: "UEFI (OK)" },
-        { name: "Secure Boot", ok: true, note: "Đã Tắt (OK)" },
-        { name: "Card đồ hoạ", ok: true, note: "Đã phát hiện NVIDIA CMP 40HX" },
-        { name: "GSP (EnableGpuFirmware)", ok: true, note: "Đã bật (OK)" },
-        { name: "ESP EFI Mở khoá", ok: true, note: "\\EFI\\40HX\\40HXUNLK.EFI đã nạp" },
-        { name: "Mục khởi động BIOS", ok: true, note: "Tồn tại và nằm đầu tiên (displayorder)" },
-        { name: "Tác vụ tự khởi động", ok: true, note: "Trạng thái: Ready" },
-        { name: "Driver PCIe", ok: true, note: "Đã cài; Tự dọn dẹp sau khi chạy (Game safe)" },
-        { name: "Loại trừ Windows Defender", ok: true, note: "Đã thêm loại trừ cho file .sys" },
-        { name: "Khởi động nhanh (Fast Startup)", ok: true, note: "Đã Tắt (OK)" },
-        { name: "Tiết kiệm điện PCIe (ASPM)", ok: true, note: "Đã Tắt (OK)" }
-      ],
-      recommendations: {
-        gsp: false,
-        drv: false,
-        efi: false,
-        task: false,
-        fast: false,
-        aspm: false,
-        perf: false,
-        defoff: false
-      }
-    };
   }
 
   // --- Initialization ---

@@ -6,8 +6,9 @@ import (
 	"sync"
 
 	hxcore "40hxcore"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+var cleanupKernelDrivers = hxcore.CleanupByovd
 
 // App struct chính điều phối toàn bộ binding giữa Wails và Go Core
 type App struct {
@@ -16,6 +17,7 @@ type App struct {
 	opMu            sync.Mutex
 	busyBy          string
 	telemetryCancel context.CancelFunc
+	shutdownOnce    sync.Once
 }
 
 // NewApp khởi tạo thể hiện App
@@ -34,12 +36,14 @@ func (a *App) startup(ctx context.Context) {
 
 // shutdown được Wails gọi khi ứng dụng đóng
 func (a *App) shutdown(ctx context.Context) {
-	a.isWails = false
-	if a.telemetryCancel != nil {
-		a.telemetryCancel()
-	}
-	CleanupToolAssets()
-	hxcore.CleanupByovd()
+	a.shutdownOnce.Do(func() {
+		a.isWails = false
+		if a.telemetryCancel != nil {
+			a.telemetryCancel()
+		}
+		CleanupToolAssets()
+		cleanupKernelDrivers()
+	})
 }
 
 // tryAcquire chiếm quyền thực thi thao tác phần cứng (chống xung đột song song)
@@ -63,10 +67,7 @@ func (a *App) releaseOp() {
 
 // Log đẩy thông điệp nhật ký thời gian thực sang giao diện Wails hoặc Web SSE
 func (a *App) Log(line string) {
-	if a.isWails && a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "log:entry", line)
-	}
-	broadcastEvent("log:entry", line)
+	a.emitEvent("log:entry", line)
 }
 
 // GetAppVersion trả về phiên bản hiện tại
