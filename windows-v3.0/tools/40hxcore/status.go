@@ -184,3 +184,8 @@ func WriteStructuredGen2Status(c StatusContract) error {
 	_ = os.MkdirAll(filepath.Dir(p), 0o755)
 	return os.WriteFile(p, []byte(FormatStatus(c)), 0o644)
 }
+
+// ReadStructuredGen2Status đọc và phân tích trạng thái thành StatusContract có cấu trúc
+func ReadStructuredGen2Status() StatusContract {
+	return ParseStatus(ReadGen2Status())
+}

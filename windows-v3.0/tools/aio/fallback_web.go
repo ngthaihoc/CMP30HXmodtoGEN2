@@ -3,15 +3,21 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	hxcore "40hxcore"
 )
 
 type eventPayload struct {
@@ -34,6 +40,52 @@ func broadcastEvent(event string, data interface{}) {
 		default:
 		}
 	}
+}
+
+func validFallbackMutation(r *http.Request) bool {
+	if r.Method != http.MethodPost || r.Header.Get("Origin") == "" || r.Host == "" {
+		return false
+	}
+	origin, err := url.Parse(r.Header.Get("Origin"))
+	if err != nil || origin.Scheme != "http" || origin.Host != r.Host || origin.User != nil || origin.Path != "" && origin.Path != "/" || origin.RawQuery != "" || origin.Fragment != "" {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.Host)
+	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
+		return false
+	}
+	return true
+}
+
+func fallbackMutationGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/events/stream" && !validFallbackMutation(r) {
+			http.Error(w, "Yêu cầu API không hợp lệ hoặc khác nguồn", http.StatusForbidden)
+			return
+		}
+		if r.URL.Path == "/api/events/stream" {
+			host, _, err := net.SplitHostPort(r.Host)
+			ip := net.ParseIP(host)
+			origin := r.Header.Get("Origin")
+			if r.Method != http.MethodGet || err != nil || ip == nil || !ip.IsLoopback() || origin != "" && origin != "http://"+r.Host {
+				http.Error(w, "Yêu cầu luồng sự kiện không hợp lệ hoặc khác nguồn", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func confirmFallbackOperation(title, warning string) bool {
+	return hxcore.MsgBoxYesNo(title, warning+"\n\nBạn xác nhận tiếp tục?")
+}
+
+func requireFallbackConfirmation(w http.ResponseWriter, confirm func() bool) bool {
+	if confirm() {
+		return true
+	}
+	http.Error(w, "Thao tác đã bị hủy hoặc thiếu xác nhận riêng.", http.StatusForbidden)
+	return false
 }
 
 func runFallbackWebServer(app *App) {
@@ -69,7 +121,6 @@ func runFallbackWebServer(app *App) {
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -114,20 +165,45 @@ func runFallbackWebServer(app *App) {
 	}
 
 	mux.HandleFunc("/api/unlock-now", func(w http.ResponseWriter, r *http.Request) {
+		if !requireFallbackConfirmation(w, func() bool {
+			return confirmFallbackOperation("Mở khóa Gen2", "Thao tác thay đổi trạng thái phần cứng; không vượt giới hạn Gen2.")
+		}) {
+			return
+		}
 		jsonResp(w, app.UnlockGen2Now())
 	})
 	mux.HandleFunc("/api/force-root-gen2", func(w http.ResponseWriter, r *http.Request) {
+		if !requireFallbackConfirmation(w, func() bool {
+			return confirmFallbackOperation("Buộc root Gen2", "Thay đổi liên kết PCIe ở mức thấp; không thực hiện reset nguy hiểm trên CMP 30HX.")
+		}) {
+			return
+		}
 		jsonResp(w, app.ForceRootGen2())
 	})
 	mux.HandleFunc("/api/register-task", func(w http.ResponseWriter, r *http.Request) {
+		if !requireFallbackConfirmation(w, func() bool {
+			return confirmFallbackOperation("Đăng ký tự khởi động", "Tạo tác vụ Windows chạy với quyền cao khi đăng nhập.")
+		}) {
+			return
+		}
 		err := app.RegisterAutostartTask()
 		jsonResp(w, map[string]interface{}{"success": err == nil, "error": fmt.Sprint(err)})
 	})
 	mux.HandleFunc("/api/unregister-task", func(w http.ResponseWriter, r *http.Request) {
+		if !requireFallbackConfirmation(w, func() bool {
+			return confirmFallbackOperation("Gỡ tự khởi động", "Xóa tác vụ tự động mở khóa khi đăng nhập.")
+		}) {
+			return
+		}
 		err := app.UnregisterAutostartTask()
 		jsonResp(w, map[string]interface{}{"success": err == nil, "error": fmt.Sprint(err)})
 	})
 	mux.HandleFunc("/api/save-policy", func(w http.ResponseWriter, r *http.Request) {
+		if !requireFallbackConfirmation(w, func() bool {
+			return confirmFallbackOperation("Lưu chính sách", "Ghi thay đổi chính sách mở khóa vào cấu hình.")
+		}) {
+			return
+		}
 		var req PolicyConfig
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			jsonResp(w, map[string]interface{}{"success": false, "error": "Dữ liệu chính sách không hợp lệ."})
@@ -143,24 +219,30 @@ func runFallbackWebServer(app *App) {
 		jsonResp(w, app.CheckHVCIStatus())
 	})
 	mux.HandleFunc("/api/open-core-isolation", func(w http.ResponseWriter, r *http.Request) {
-		_ = app.OpenCoreIsolationSettings()
+		if err := app.OpenCoreIsolationSettings(); err != nil {
+			jsonResp(w, map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
 		jsonResp(w, map[string]bool{"success": true})
 	})
 	mux.HandleFunc("/api/riot-status", func(w http.ResponseWriter, r *http.Request) {
 		jsonResp(w, app.GetRiotStatus())
 	})
 	mux.HandleFunc("/api/riot-optimize", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Confirmed bool `json:"confirmed"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !req.Confirmed {
-			jsonResp(w, map[string]interface{}{"success": false, "error": "Cần xác nhận cảnh báo rủi ro trước khi thay đổi cấu hình bảo mật."})
+		if !requireFallbackConfirmation(w, func() bool {
+			return confirmFallbackOperation("Tối ưu Riot", "Thay đổi cấu hình bảo mật, dịch vụ và driver hệ thống.")
+		}) {
 			return
 		}
 		err := app.RiotOptimize(true)
 		jsonResp(w, map[string]interface{}{"success": err == nil, "error": fmt.Sprint(err)})
 	})
 	mux.HandleFunc("/api/riot-revert", func(w http.ResponseWriter, r *http.Request) {
+		if !requireFallbackConfirmation(w, func() bool {
+			return confirmFallbackOperation("Hoàn tác Riot", "Khôi phục cài đặt bảo mật và đồ họa Riot.")
+		}) {
+			return
+		}
 		err := app.RiotRevertOptimization()
 		jsonResp(w, map[string]interface{}{"success": err == nil, "error": fmt.Sprint(err)})
 	})
@@ -168,28 +250,68 @@ func runFallbackWebServer(app *App) {
 		var req struct {
 			Phrase string `json:"phrase"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonResp(w, map[string]interface{}{"success": false, "error": "Dữ liệu yêu cầu không hợp lệ."})
+			return
+		}
+		if !requireFallbackConfirmation(w, func() bool {
+			return confirmFallbackOperation("Ký EFI Riot", "Thay đổi EFI/driver có ảnh hưởng đến khởi động và chống gian lận.")
+		}) {
+			return
+		}
 		err := app.RiotSignEFI(req.Phrase)
 		jsonResp(w, map[string]interface{}{"success": err == nil, "error": fmt.Sprint(err)})
 	})
 	mux.HandleFunc("/api/reboot-bios", func(w http.ResponseWriter, r *http.Request) {
-		_ = app.RebootToBIOS()
+		if !requireFallbackConfirmation(w, func() bool {
+			return confirmFallbackOperation("Khởi động lại BIOS", "Máy sẽ khởi động lại ngay; hãy lưu công việc trước.")
+		}) {
+			return
+		}
+		if err := app.RebootToBIOS(); err != nil {
+			jsonResp(w, map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
 		jsonResp(w, map[string]bool{"success": true})
 	})
 	mux.HandleFunc("/api/fix-csm", func(w http.ResponseWriter, r *http.Request) {
+		if !requireFallbackConfirmation(w, func() bool {
+			return confirmFallbackOperation("Sửa CSM", "Thay đổi thiết lập nguồn PCIe và registry; tạo bản sao lưu hoặc ghi lại trạng thái trước.")
+		}) {
+			return
+		}
 		jsonResp(w, app.FixCSMError43())
 	})
 	mux.HandleFunc("/api/setup-rebar", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			BarSizeGB int `json:"barSizeGB"`
+			BarSizeGB int  `json:"barSizeGB"`
+			Confirmed bool `json:"confirmed"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonResp(w, map[string]interface{}{"success": false, "error": "Cần xác nhận cảnh báo rủi ro ReBAR trước khi thay đổi cấu hình."})
+			return
+		}
+		if !requireFallbackConfirmation(w, func() bool {
+			return confirmFallbackOperation("Thiết lập ReBAR", "Thay đổi cấu hình PCIe/firmware; cần reboot, xác minh bằng GPU-Z và giữ khả năng hoàn tác.")
+		}) {
+			return
+		}
 		jsonResp(w, app.SetupReBar(req.BarSizeGB))
 	})
 	mux.HandleFunc("/api/revert-rebar", func(w http.ResponseWriter, r *http.Request) {
+		if !requireFallbackConfirmation(w, func() bool {
+			return confirmFallbackOperation("Hoàn tác ReBAR", "Khôi phục cấu hình trước đó; cần reboot rồi xác minh trạng thái bằng GPU-Z.")
+		}) {
+			return
+		}
 		jsonResp(w, app.RevertReBar())
 	})
 	mux.HandleFunc("/api/uninstall", func(w http.ResponseWriter, r *http.Request) {
+		if !requireFallbackConfirmation(w, func() bool {
+			return confirmFallbackOperation("Gỡ cài đặt", "Xóa driver, tác vụ và các cấu hình đã cài bởi ứng dụng.")
+		}) {
+			return
+		}
 		jsonResp(w, app.UninstallAll())
 	})
 
@@ -219,8 +341,18 @@ func runFallbackWebServer(app *App) {
 		openBrowser(url)
 	}()
 
-	server := &http.Server{Handler: mux}
-	_ = server.Serve(listener)
+	server := &http.Server{Handler: fallbackMutationGuard(mux)}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		_ = server.Close()
+	}()
+
+	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		app.Log(fmt.Sprintf("[LỖI] Máy chủ web nội bộ dừng bất thường: %v", err))
+	}
 }
 
 func openBrowser(url string) {

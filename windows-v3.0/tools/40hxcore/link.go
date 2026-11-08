@@ -125,21 +125,11 @@ type LinkNegotiator struct {
 
 // NewLinkNegotiator khởi tạo LinkNegotiator với HardwareBus adapter
 func NewLinkNegotiator(bus HardwareBus) *LinkNegotiator {
-	n := &LinkNegotiator{
-		bus:     bus,
-		sleepFn: time.Sleep,
-	}
-	if _, isMock := bus.(*MockHardwareBus); isMock {
-		n.sleepFn = func(time.Duration) {} // Fast simulation for unit tests
-	}
-	return n
+	return newLinkNegotiator(bus, time.Sleep)
 }
 
-// SetSleepFn cho phép tùy biến hàm delay (phục vụ mô phỏng test hoặc tốc độ cao)
-func (n *LinkNegotiator) SetSleepFn(fn func(time.Duration)) {
-	if fn != nil {
-		n.sleepFn = fn
-	}
+func newLinkNegotiator(bus HardwareBus, wait func(time.Duration)) *LinkNegotiator {
+	return &LinkNegotiator{bus: bus, sleepFn: wait}
 }
 
 func (n *LinkNegotiator) sleep(d time.Duration) {

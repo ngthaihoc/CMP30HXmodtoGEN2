@@ -9,7 +9,7 @@ import (
 func TestLinkNegotiatorUnlockPreservesCapabilityFailure(t *testing.T) {
 	bus := NewMockHardwareBus()
 	bus.SetPCIConfig(0x0100, 0, 0x218910DE)
-	verdict, err := NewLinkNegotiator(bus).Unlock(NegotiationOptions{TargetGen: 3, AllowStage2: true})
+	verdict, err := newLinkNegotiator(bus, func(time.Duration) {}).Unlock(NegotiationOptions{TargetGen: 3, AllowStage2: true})
 	if !errors.Is(err, ErrPCIeCapMissing) || verdict.StatusContract.ErrorCode != "PCIE_CAP_MISSING" {
 		t.Fatalf("Phải giữ nguyên lỗi capability: verdict=%+v, err=%v", verdict, err)
 	}
@@ -24,7 +24,7 @@ func TestLinkNegotiatorUnlockIdleLinkKeepsConfiguredVerdict(t *testing.T) {
 	bus.SetPCICap(0x0100, 0x40)
 	bus.SetPCIConfig(0x0100, 0x4C, 2)
 	bus.SetPCIConfig(0x0100, 0x52, 0x101)
-	verdict, err := NewLinkNegotiator(bus).Unlock(NegotiationOptions{TargetGen: 3, AllowStage2: true})
+	verdict, err := newLinkNegotiator(bus, func(time.Duration) {}).Unlock(NegotiationOptions{TargetGen: 3, AllowStage2: true})
 	if err != nil || !verdict.Success || verdict.CurrentSpeed != 1 || verdict.StatusContract.TLSTarget != 2 || verdict.NeedsRetry {
 		t.Fatalf("TLS Gen2 khi nhàn rỗi phải giữ verdict thành công: %+v, %v", verdict, err)
 	}
@@ -35,8 +35,7 @@ func TestLinkNegotiatorUnlockIdleLinkKeepsConfiguredVerdict(t *testing.T) {
 
 func TestLinkNegotiatorUnlockRetriesDiscovery(t *testing.T) {
 	bus := NewMockHardwareBus()
-	n := NewLinkNegotiator(bus)
-	n.SetSleepFn(func(d time.Duration) {
+	n := newLinkNegotiator(bus, func(time.Duration) {
 		bus.SetPCIConfig(0x0100, 0, 0x218910DE)
 		bus.SetPCICap(0x0100, 0x40)
 		bus.SetPCIConfig(0x0100, 0x52, 0x102)
@@ -67,7 +66,7 @@ func TestLinkNegotiatorUnlockRestartsDisplayOnce(t *testing.T) {
 	}
 	restarts := 0
 	bus.OnRestartNVDisplay = func() error { restarts++; return nil }
-	verdict, err := NewLinkNegotiator(bus).Unlock(NegotiationOptions{})
+	verdict, err := newLinkNegotiator(bus, func(time.Duration) {}).Unlock(NegotiationOptions{})
 	if err != nil || !verdict.Success || restarts != 1 {
 		t.Fatalf("Mở khóa phải restart NVDisplay đúng một lần: %+v, %v, restart=%d", verdict, err, restarts)
 	}
@@ -78,7 +77,7 @@ func TestLinkNegotiatorUnlockAlreadyGen2StillAppliesMRRS512(t *testing.T) {
 	bus.SetPCIConfig(0x0100, 0, 0x218910DE)
 	bus.SetPCICap(0x0100, 0x40)
 	bus.SetPCIConfig(0x0100, 0x52, 0x102)
-	verdict, err := NewLinkNegotiator(bus).Unlock(NegotiationOptions{})
+	verdict, err := newLinkNegotiator(bus, func(time.Duration) {}).Unlock(NegotiationOptions{})
 	if err != nil || !verdict.Success || verdict.StatusContract.MRRS != 512 || !bus.RestartNVDisplayCalled {
 		t.Fatalf("Link đã Gen2 vẫn phải tối ưu MRRS 512B: %+v, %v", verdict, err)
 	}
@@ -86,8 +85,7 @@ func TestLinkNegotiatorUnlockAlreadyGen2StillAppliesMRRS512(t *testing.T) {
 
 func TestLinkNegotiatorUnlockPreparesActuallyDiscoveredProfile(t *testing.T) {
 	bus := NewMockHardwareBus()
-	n := NewLinkNegotiator(bus)
-	n.SetSleepFn(func(time.Duration) {
+	n := newLinkNegotiator(bus, func(time.Duration) {
 		bus.SetPCIConfig(0x0100, 0, 0x1F0B10DE)
 		bus.SetPCICap(0x0100, 0x40)
 		bus.SetPCIConfig(0x0100, 0x52, 0x102)

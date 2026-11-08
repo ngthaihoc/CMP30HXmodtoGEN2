@@ -574,7 +574,7 @@ func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) error {
 		defer k.Close()
 
 		drives := getLogicalDrives()
-		games := FindAllRiotGameTargets(drives)
+		games := riotcore.FindAllRiotGameTargets(drives)
 		found := 0
 
 		var allExes []string
@@ -586,7 +586,7 @@ func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) error {
 			allExes = append(allExes, filepath.Join(drive, `VNGGames\League of Legends\LeagueClient.exe`))
 			allExes = append(allExes, filepath.Join(drive, `Garena\Games\32787\Game\League of Legends.exe`))
 		}
-		allExes = uniquePaths(allExes)
+		allExes = riotcore.UniquePaths(allExes)
 
 		for _, fullPath := range allExes {
 			if fi, err := os.Stat(fullPath); err == nil && !fi.IsDir() {
@@ -606,7 +606,7 @@ func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) error {
 	}
 
 	fmt.Fprintln(log, "\n[*] BƯỚC 5: Cấu hình Borderless Windowed cho League of Legends...")
-	modifiedCfgs, err := FindAndConfigureLeagueConfigs(getLogicalDrives())
+	modifiedCfgs, err := riotcore.FindAndConfigureLeagueConfigs(getLogicalDrives())
 	if err != nil {
 		return fmt.Errorf("cấu hình game.cfg chưa hoàn tất: %w", err)
 	}

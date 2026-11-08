@@ -115,3 +115,9 @@ func TestApp_RiotStatus_NoUnverifiedClaims(t *testing.T) {
 		}
 	}
 }
+
+func TestApp_ShutdownIsIdempotent(t *testing.T) {
+	app := NewApp()
+	app.shutdown(nil)
+	app.shutdown(nil)
+}
