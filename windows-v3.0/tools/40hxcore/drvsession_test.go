@@ -34,6 +34,7 @@ func TestDriverFileProvider_HookCanBeRegistered(t *testing.T) {
 }
 
 func TestCleanupByovd_AlwaysPurgesWinRing0EvenIfThrottleStopRunning(t *testing.T) {
+	t.Setenv("SystemRoot", t.TempDir())
 	origRunner := driverCmdRunner
 	origAppRunning := isThrottleStopAppRunning
 	origStrategy := driverStrategyGetter
@@ -85,6 +86,7 @@ func TestCleanupByovd_AlwaysPurgesWinRing0EvenIfThrottleStopRunning(t *testing.T
 }
 
 func TestCleanupByovd_PurgesBothWhenThrottleStopNotRunning(t *testing.T) {
+	t.Setenv("SystemRoot", t.TempDir())
 	origRunner := driverCmdRunner
 	origAppRunning := isThrottleStopAppRunning
 	origStrategy := driverStrategyGetter
@@ -135,6 +137,7 @@ func TestCleanupByovd_PurgesBothWhenThrottleStopNotRunning(t *testing.T) {
 }
 
 func TestCleanupByovd_PreservesDriversWhenResidentStrategy(t *testing.T) {
+	t.Setenv("SystemRoot", t.TempDir())
 	origRunner := driverCmdRunner
 	origStrategy := driverStrategyGetter
 	defer func() {
@@ -157,6 +160,7 @@ func TestCleanupByovd_PreservesDriversWhenResidentStrategy(t *testing.T) {
 }
 
 func TestDriverSession_RunScopedBus_RAIICleanupOnClosureError(t *testing.T) {
+	t.Setenv("SystemRoot", t.TempDir())
 	origRunner := driverCmdRunner
 	origOpenWR := openWinRing0
 	origOpenTS := openThrottleStop
@@ -209,6 +213,7 @@ func TestDriverSession_RunScopedBus_RAIICleanupOnClosureError(t *testing.T) {
 }
 
 func TestDriverSession_RunScoped_EnablesMMIOForTU116(t *testing.T) {
+	t.Setenv("SystemRoot", t.TempDir())
 	origRunner := driverCmdRunner
 	origOpenWR := openWinRing0
 	origOpenTS := openThrottleStop
@@ -246,6 +251,7 @@ func TestDriverSession_RunScoped_EnablesMMIOForTU116(t *testing.T) {
 }
 
 func TestDriverSession_RunScopedBus_FallbackWhenThrottleStopFails(t *testing.T) {
+	t.Setenv("SystemRoot", t.TempDir())
 	origRunner := driverCmdRunner
 	origOpenWR := openWinRing0
 	origOpenTS := openThrottleStop
@@ -321,6 +327,7 @@ func TestProductionBus_MMIO_FallbackToWinRing0(t *testing.T) {
 }
 
 func TestDriverSession_RunScoped_Delegates(t *testing.T) {
+	t.Setenv("SystemRoot", t.TempDir())
 	origRunner := driverCmdRunner
 	origOpenWR := openWinRing0
 	origClose := driverCloseHandle

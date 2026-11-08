@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	hxcore "40hxcore"
+	"riotcore"
 )
 
 // GPUModel biểu thị dòng GPU NVIDIA được nhận diện
@@ -101,7 +102,7 @@ func EvaluateRiotStatus(deviceID uint16, gpuName string, sbOn, isWin11 bool) Rio
 		LoLDesc:                "✓ Sẵn sàng 100% (MSHybrid CASO + Borderless Windowed)",
 	}
 
-	if topo, err := ScanGPUTopology(); err == nil && topo != nil {
+	if topo, err := riotcore.ScanGPUTopology(); err == nil && topo != nil {
 		if len(topo.DisplayHosts) > 0 {
 			status.DisplayHostDesc = topo.DisplayHosts[0].Desc
 			banner += fmt.Sprintf("🖥️ GPU XUẤT HÌNH: %s\n", topo.DisplayHosts[0].Desc)

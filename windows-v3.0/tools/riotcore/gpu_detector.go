@@ -1,4 +1,4 @@
-package main
+package riotcore
 
 import (
 	"fmt"
@@ -132,7 +132,7 @@ func ScanGPUTopology() (*GPUTopology, error) {
 	topo := &GPUTopology{}
 	targets := GetActiveDisplayTargets()
 
-	baseKey, err := registry.OpenKey(registry.LOCAL_MACHINE, GpuClassPath, registry.ENUMERATE_SUB_KEYS|registry.QUERY_VALUE)
+	baseKey, err := graphicsRegistry.OpenKey(registry.LOCAL_MACHINE, GpuClassPath, registry.ENUMERATE_SUB_KEYS|registry.QUERY_VALUE)
 	if err != nil {
 		return topo, fmt.Errorf("không thể mở Driver Class Registry: %w", err)
 	}
@@ -149,7 +149,7 @@ func ScanGPUTopology() (*GPUTopology, error) {
 		}
 
 		subPath := GpuClassPath + `\` + sub
-		sk, err := registry.OpenKey(registry.LOCAL_MACHINE, subPath, registry.QUERY_VALUE)
+		sk, err := graphicsRegistry.OpenKey(registry.LOCAL_MACHINE, subPath, registry.QUERY_VALUE)
 		if err != nil {
 			continue
 		}
@@ -172,7 +172,7 @@ func ScanGPUTopology() (*GPUTopology, error) {
 		for _, tgt := range targets {
 			if tgt.IsAttached && tgt.DeviceID != "" {
 				upperTgt := strings.ToUpper(tgt.DeviceID)
-				if shortDID != "" && strings.Contains(upperTgt, shortDID) {
+				if shortDID != "" && ExtractShortDID(upperTgt) == shortDID {
 					isAttached = true
 					break
 				}
@@ -200,15 +200,10 @@ func ScanGPUTopology() (*GPUTopology, error) {
 		} else if role == RoleNvidiaRender {
 			// Card CMP / NVIDIA render không cắm màn hình
 			topo.RenderGPUs = append(topo.RenderGPUs, adapter)
-			if topo.HighPerfDID == "" && shortDID != "" {
+			if topo.HighPerfDID == "" && (shortDID == "10DE&2189" || shortDID == "10DE&1F0B") {
 				topo.HighPerfDID = shortDID
 			}
 		}
-	}
-
-	// Nếu tìm thấy Render dGPU nhưng HighPerfDID chưa có
-	if topo.HighPerfDID == "" && len(topo.RenderGPUs) > 0 {
-		topo.HighPerfDID = topo.RenderGPUs[0].DID
 	}
 
 	return topo, nil

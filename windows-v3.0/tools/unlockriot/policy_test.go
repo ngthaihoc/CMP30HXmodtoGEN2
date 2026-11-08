@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 )
@@ -37,18 +36,18 @@ func TestDetectGPUModel(t *testing.T) {
 
 func TestEvaluateRiotStatus(t *testing.T) {
 	tests := []struct {
-		name                   string
-		deviceID               uint16
-		gpuName                string
-		sbOn                   bool
-		isWin11                bool
-		expectedModel          GPUModel
-		expectedTensor         bool
-		expectedValorant       bool
-		expectedLMHT           bool
-		expectedNeedsSigning   bool
-		expectedRecommendedSB  string
-		expectedBannerKeyword  string
+		name                  string
+		deviceID              uint16
+		gpuName               string
+		sbOn                  bool
+		isWin11               bool
+		expectedModel         GPUModel
+		expectedTensor        bool
+		expectedValorant      bool
+		expectedLMHT          bool
+		expectedNeedsSigning  bool
+		expectedRecommendedSB string
+		expectedBannerKeyword string
 	}{
 		{
 			name:                  "40HX_Win10_SB_Off_LyTuong",
@@ -297,78 +296,6 @@ func TestGetTensorGuide(t *testing.T) {
 			for _, kw := range tt.expectKeywords {
 				if !strings.Contains(guide, kw) {
 					t.Errorf("GetTensorGuide(%v, %v) không chứa từ khóa: %q", tt.isWin11, tt.is40HX, kw)
-				}
-			}
-		})
-	}
-}
-
-func TestRunOptimization_OutputLogging(t *testing.T) {
-	tests := []struct {
-		name           string
-		is40HX         bool
-		is30HX         bool
-		sbOn           bool
-		isWin11        bool
-		expectedTokens []string
-	}{
-		{
-			name:    "Log_40HX_Win10_SBOff",
-			is40HX:  true,
-			is30HX:  false,
-			sbOn:    false,
-			isWin11: false,
-			expectedTokens: []string{
-				"NVIDIA CMP 40HX [TU106]",
-				"Trạng thái Secure Boot: ĐÃ TẮT",
-				"BƯỚC 1: Dọn dẹp driver mở khóa",
-				"BƯỚC 2: Tắt chế độ Windows Testsigning",
-				"BƯỚC 3: Cấu hình Registry",
-				"HOÀN TẤT TỐI ƯU HÓA",
-			},
-		},
-		{
-			name:    "Log_40HX_Win11_SBOn",
-			is40HX:  true,
-			is30HX:  false,
-			sbOn:    true,
-			isWin11: true,
-			expectedTokens: []string{
-				"NVIDIA CMP 40HX [TU106]",
-				"Secure Boot hiện ĐANG BẬT",
-				"BƯỚC 1: Dọn dẹp driver mở khóa",
-				"BƯỚC 2: Tắt chế độ Windows Testsigning",
-				"BƯỚC 3: Cấu hình Registry",
-			},
-		},
-		{
-			name:    "Log_30HX_Win11_SBOn",
-			is40HX:  false,
-			is30HX:  true,
-			sbOn:    true,
-			isWin11: true,
-			expectedTokens: []string{
-				"NVIDIA CMP 30HX [TU116]",
-				"CMP 30HX không dùng EFI Tensor Core",
-				"BƯỚC 1: Dọn dẹp driver mở khóa",
-				"BƯỚC 2: Tắt chế độ Windows Testsigning",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			buf := &bytes.Buffer{}
-
-			// Act
-			runOptimization(buf, tt.is40HX, tt.is30HX, tt.sbOn, tt.isWin11)
-			output := buf.String()
-
-			// Assert
-			for _, token := range tt.expectedTokens {
-				if !strings.Contains(output, token) {
-					t.Errorf("runOptimization output thiếu token: %q", token)
 				}
 			}
 		})

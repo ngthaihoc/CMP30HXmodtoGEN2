@@ -43,8 +43,10 @@ func ReadGen2Status() string {
 }
 
 // EnsureNvidiaControlPanelHealthy: Đảm bảo service NVDisplay.ContainerLocalSystem chạy (Auto)
+var nvidiaControlPanelService = withService
+
 func EnsureNvidiaControlPanelHealthy() error {
-	err := withService("NVDisplay.ContainerLocalSystem", func(s *mgr.Service) error {
+	err := nvidiaControlPanelService("NVDisplay.ContainerLocalSystem", func(s *mgr.Service) error {
 		conf, err := s.Config()
 		if err == nil && conf.StartType != mgr.StartAutomatic {
 			conf.StartType = mgr.StartAutomatic
