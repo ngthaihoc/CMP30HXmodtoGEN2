@@ -288,14 +288,54 @@ func rawPcieDump() string {
 	return sb.String()
 }
 
+func missingTaskAdvice(cmp30HX, highSpeed bool, speed, tls uint32) string {
+	if cmp30HX {
+		return "· Tác vụ CMP 30HX chưa đăng ký: Mở 40HXInstaller.exe với quyền Admin, chọn thực thi Gen2 và cài đặt tự khởi động. Không reset thiết bị."
+	}
+	if highSpeed && (speed >= 2 || tls >= 2) {
+		return "· Lưu ý: Trạng thái tốc độ cao hiện tại đến từ đo đạc thanh ghi mục tiêu (TLS); Nếu lần khởi động này chưa có tác vụ tự động nào chạy, giá trị này có thể là tàn dư lần trước: tắt máy hẳn hoặc reset card sẽ bị khoá lại. Vui lòng dùng GUI ② [Thực thi Gen2 và cài đặt tự khởi động] để hoàn tất một bước"
+	}
+	return "· Tác vụ lịch trình Gen2 chưa đăng ký: Sau khi đăng nhập sẽ không tự động mở khoá:\n  Mở 40HXInstaller.exe -> ② Bấm [Thực thi Gen2 và cài đặt tự khởi động]; hoặc ① Chọn [Tự khởi động Gen2 khi đăng nhập] bấm [Cài đặt các mục đã chọn]"
+}
+
+func linkAdvice(cmp30HX, ss0OK, unlocked bool, speed, tls uint32) string {
+	if cmp30HX {
+		if speed < 2 && tls >= 1 && tls < 2 {
+			return "· CMP 30HX: GPU TLS vẫn Gen1. Không reset thiết bị; kiểm tra nhật ký ghi MMIO/LNKCTL2, driver và gửi installer.log cho tác giả."
+		}
+		if speed < 2 && tls >= 2 {
+			return "· CMP 30HX: GPU TLS đã Gen2 nhưng liên kết Gen1. Kiểm tra dưới tải 3D/CUDA; nếu vẫn Gen1, gửi nhật ký cho tác giả. Không reset thiết bị."
+		}
+		return ""
+	}
+	if !ss0OK || !unlocked {
+		return ""
+	}
+	if tls >= 1 && tls < 2 {
+		return "· Tốc độ mục tiêu (TLS) vẫn là Gen1: Ghi mở khoá chưa có hiệu lực. Nếu nhật ký cho thấy thanh ghi PL0 đều OK nhưng đọc lại LNKCTL2 vẫn Gen1,\n  thường do driver ghi đè lại trong tích tắc; Tác vụ đăng nhập sẽ tự động chạy Stage2; nếu vẫn thất bại hãy bấm [Thực thi Gen2 ngay] trong GUI ②. Đã xác nhận không phải bảo vệ ghi firmware, **KHÔNG CẦN FLASH VBIOS**, nếu vẫn lỗi gửi chẩn đoán và installer.log phản hồi tác giả"
+	}
+	if speed < 2 && tls >= 2 {
+		return "· Tốc độ mục tiêu đã cấu hình (TLS=Gen2/Gen3) nhưng liên kết hiện tại Gen1: Thường do nghỉ tiết kiệm điện (bình thường, có tải tự tăng); nếu liên tục tải vẫn Gen1: Bấm [Thực thi Gen2 ngay] trong GUI ② để huấn luyện lại; hoặc dùng dòng lệnh `40HXInstaller.exe -gen2 -hard`"
+	}
+	return ""
+}
+
 // knownIssuesBlock: Giới hạn đã biết / sự cố tiềm ẩn
-func knownIssuesBlock() string {
+func knownIssuesBlock(cmp30HX bool) string {
 	var sb strings.Builder
 	sb.WriteString("\n--- Giới hạn đã biết / Sự cố tiềm ẩn (v3.0.0) ---\n")
-	sb.WriteString("· Trình điều khiển/GSP quản lý liên kết (GSP-RM): Khi nghỉ/tải thấp nvlddmkm ghi đè TLS phía GPU về Gen1; Stage2 tự động hoặc LD(-hard) có thể giải quyết. Đã xác nhận **không phải bảo vệ ghi firmware**, **KHÔNG CẦN FLASH VBIOS** — Nếu vẫn lỗi hãy gửi chẩn đoán và nhật ký cho tác giả.\n")
-	sb.WriteString("· Mainboard OEM/Đa card: retrain-only trên một số bo mạch chủ không huấn luyện được Gen2, cần Root Link Disable (ngắt liên kết chớp nhoáng). Tác vụ đăng nhập v2.6+ mặc định tự thử Stage2 (Gen2AutoHard); nếu vẫn lỗi có thể chạy thủ công `40HXInstaller.exe -gen2 -hard`.\n")
-	sb.WriteString("· EFI không tìm thấy card: v3.0 đã mở rộng quét bus 0-16 + CF8 0-255 bao quát toàn bộ; nếu sau khi cài EFI vẫn không tìm thấy, thường do firmware mainboard chưa khởi tạo khe không cổng xuất hình — chỉnh BIOS: Above 4G + Re-Size BAR / Init Display First=PEG / cắm khe PCIe trên cùng nối CPU.\n")
-	sb.WriteString("· Nghỉ tiết kiệm điện: Khi tải thấp liên kết hạ về Gen1 là bình thường, có tải sẽ tự về Gen2/Gen3; Chẩn đoán TLS=Gen2/Gen3 nghĩa là cấu hình đã thành công.\n")
+	if cmp30HX {
+		sb.WriteString("· CMP 30HX (TU116): Giới hạn eFuse là Gen2; không ngắt liên kết, không reset thiết bị. Nếu GPU TLS=Gen1 nhưng Root TLS=Gen2, cần kiểm tra nhật ký ghi MMIO/LNKCTL2 và driver trước khi kết luận giới hạn phần cứng X99/C610.\n")
+	} else {
+		sb.WriteString("· Trình điều khiển/GSP quản lý liên kết (GSP-RM): Khi nghỉ/tải thấp nvlddmkm ghi đè TLS phía GPU về Gen1; Stage2 tự động hoặc LD(-hard) có thể giải quyết. Đã xác nhận **không phải bảo vệ ghi firmware**, **KHÔNG CẦN FLASH VBIOS** — Nếu vẫn lỗi hãy gửi chẩn đoán và nhật ký cho tác giả.\n")
+		sb.WriteString("· Mainboard OEM/Đa card: retrain-only trên một số bo mạch chủ không huấn luyện được Gen2, cần Root Link Disable (ngắt liên kết chớp nhoáng). Tác vụ đăng nhập v2.6+ mặc định tự thử Stage2 (Gen2AutoHard); nếu vẫn lỗi có thể chạy thủ công `40HXInstaller.exe -gen2 -hard`.\n")
+	}
+	if !cmp30HX {
+		sb.WriteString("· EFI không tìm thấy card: v3.0 đã mở rộng quét bus 0-16 + CF8 0-255 bao quát toàn bộ; nếu sau khi cài EFI vẫn không tìm thấy, thường do firmware mainboard chưa khởi tạo khe không cổng xuất hình — chỉnh BIOS: Above 4G + Re-Size BAR / Init Display First=PEG / cắm khe PCIe trên cùng nối CPU.\n")
+		sb.WriteString("· Nghỉ tiết kiệm điện: Khi tải thấp liên kết hạ về Gen1 là bình thường, có tải sẽ tự về Gen2/Gen3; Chẩn đoán TLS=Gen2/Gen3 nghĩa là cấu hình đã thành công.\n")
+	} else {
+		sb.WriteString("· Nếu GPU TLS=Gen2 nhưng tốc độ Gen1 khi rảnh, kiểm tra lại dưới tải 3D/CUDA. Nếu GPU TLS vẫn Gen1, chưa thể coi là đã mở khoá.\n")
+	}
 	sb.WriteString("· Chung sống với ThrottleStop: Driver của công cụ cùng tên với ThrottleStop, tự động tái sử dụng driver của nhau mà không xoá; nếu xung đột hãy tắt ThrottleStop rồi chạy lại.\n")
 	sb.WriteString("· Phần mềm diệt virus cách ly: Có thể chặn các tệp driver .sys; vui lòng thêm tệp dự án vào danh sách loại trừ trong Windows Security.\n")
 	sb.WriteString("· Báo cáo sự cố (issue) vui lòng đính kèm: diagnose.txt + %TEMP%\\40HX_installer.log + Cấu hình Mainboard/CPU/GPU/Hệ điều hành.\n")
@@ -538,7 +578,7 @@ func check() {
 		}
 	}
 	w("\n%s\n", verdict)
-	if st.SS0OK && !st.Unlocked {
+	if !cmp30HX && st.SS0OK && !st.Unlocked {
 		if reason := hxcore.AnalyzeEfiLog(); reason != "" {
 			w("%s\n", reason)
 		}
@@ -560,10 +600,10 @@ func check() {
 	if !cmp30HX && !gsOn {
 		tips = append(tips, "· GSP chưa bật: Mở 40HXInstaller.exe -> ① Chọn [Bật GSP] -> Bấm [Cài đặt các mục đã chọn]")
 	}
-	if gpuOK && st.SS0OK && !st.Unlocked {
+	if gpuOK && !cmp30HX && st.SS0OK && !st.Unlocked {
 		tips = append(tips, "· EFI mở khoá hiệu năng chưa có hiệu lực (SS0 bị khoá): Nếu máy chưa triển khai / đã gỡ bỏ '40HX Unlock' EFI, hiệu năng sẽ giữ khoá — Muốn khôi phục hãy chạy 40HXInstaller.exe chọn [Cài đặt EFI hiệu năng + Mục khởi động firmware]; Nếu EFI đã cài, hãy kiểm tra máy đã khởi động qua mục '40HX Unlock' chưa / Above 4G đã bật / Secure Boot đã tắt")
 	}
-	if hxcore.FirmwareIsLegacy() {
+	if !cmp30HX && hxcore.FirmwareIsLegacy() {
 		tips = append(tips, "· Chế độ khởi động là Legacy BIOS+MBR: Không có phân vùng EFI, không thể cài mở khoá hiệu năng —\n  Theo dõi README §2.4 dùng mbr2gpt chuyển sang GPT rồi chạy lại bộ cài (Gen2 không bị ảnh hưởng)")
 	}
 	if fsOn {
@@ -573,16 +613,13 @@ func check() {
 		tips = append(tips, "· Tính năng tiết kiệm điện PCIe (ASPM) đang bật: Lúc nghỉ hạ về Gen1 là bình thường, có tải sẽ tự tăng lại;\n  Nếu muốn cố định tốc độ cao có thể tắt: powercfg -setacvalueindex SCHEME_CURRENT SUB_PCIEXPRESS ASPM 0\n  (thêm -setdcvalueindex cùng tham số, sau đó -setactive SCHEME_CURRENT để áp dụng)")
 	}
 	if !taskOK {
-		tips = append(tips, "· Tác vụ lịch trình Gen2 chưa đăng ký: Sau khi đăng nhập sẽ không tự động mở khoá:\n  Mở 40HXInstaller.exe -> ② Bấm [Thực thi Gen2 và cài đặt tự khởi động]; hoặc ① Chọn [Tự khởi động Gen2 khi đăng nhập] bấm [Cài đặt các mục đã chọn]")
+		tips = append(tips, missingTaskAdvice(cmp30HX, false, st.Speed, st.TLS))
 	}
-	if st.SS0OK && st.TLS < 2 && st.TLS >= 1 && st.Unlocked {
-		tips = append(tips, "· Tốc độ mục tiêu (TLS) vẫn là Gen1: Ghi mở khoá chưa có hiệu lực. Nếu nhật ký cho thấy thanh ghi PL0 đều OK nhưng đọc lại LNKCTL2 vẫn Gen1,\n  thường do driver ghi đè lại trong tích tắc; Tác vụ đăng nhập sẽ tự động chạy Stage2; nếu vẫn thất bại hãy bấm [Thực thi Gen2 ngay] trong GUI ②. Đã xác nhận không phải bảo vệ ghi firmware, **KHÔNG CẦN FLASH VBIOS**, nếu vẫn lỗi gửi chẩn đoán và installer.log phản hồi tác giả")
+	if linkTip := linkAdvice(cmp30HX, st.SS0OK, st.Unlocked, st.Speed, st.TLS); linkTip != "" {
+		tips = append(tips, linkTip)
 	}
-	if st.SS0OK && st.Unlocked && st.Speed < 2 && st.TLS >= 2 {
-		tips = append(tips, "· Tốc độ mục tiêu đã cấu hình (TLS=Gen2/Gen3) nhưng liên kết hiện tại Gen1: Thường do nghỉ tiết kiệm điện (bình thường, có tải tự tăng); nếu liên tục tải vẫn Gen1: Bấm [Thực thi Gen2 ngay] trong GUI ② để huấn luyện lại; hoặc dùng dòng lệnh `40HXInstaller.exe -gen2 -hard`")
-	}
-	if !taskOK && st.SS0OK && st.Unlocked && (st.Speed >= 2 || st.TLS >= 2) {
-		tips = append(tips, "· Lưu ý: Trạng thái tốc độ cao hiện tại đến từ đo đạc thanh ghi mục tiêu (TLS); Nếu lần khởi động này chưa có tác vụ tự động nào chạy, giá trị này có thể là tàn dư lần trước: tắt máy hẳn hoặc reset card sẽ bị khoá lại. Vui lòng dùng GUI ② [Thực thi Gen2 và cài đặt tự khởi động] để hoàn tất một bước")
+	if !taskOK && !cmp30HX && st.SS0OK && st.Unlocked && (st.Speed >= 2 || st.TLS >= 2) {
+		tips = append(tips, missingTaskAdvice(false, true, st.Speed, st.TLS))
 	}
 	if existsNVD && stateNVD != "RUNNING" {
 		tips = append(tips, "· Dịch vụ NVDisplay.ContainerLocalSystem không chạy (NVIDIA Control Panel có thể bị ẩn): Chạy Setup_CMP30HX_WindowsAIO.bat chọn [3] Khôi phục NVIDIA Control Panel")
@@ -596,6 +633,8 @@ func check() {
 		}
 		if ever, ev := drvLogEvidence(); ever {
 			tips = append(tips, "· Driver hiện không chạy, nhưng nhật ký cho thấy trước đó đã đạt tốc độ cao thành công ("+ev+") — Mở khoá đã có hiệu lực, nhấp chuột phải chọn Run as administrator công cụ này để đọc trạng thái thời gian thực")
+		} else if cmp30HX {
+			tips = append(tips, "· Driver chưa từng được triển khai thành công: Kiểm tra WinRing0 và ThrottleStop, gửi installer.log cho tác giả. Không reset thiết bị CMP 30HX.")
 		} else {
 			tips = append(tips, "· Driver chưa từng được triển khai thành công (không có ghi nhận thành công): Mở 40HXInstaller.exe -> ① Bấm [Cài đặt toàn bộ một nhấp] để hoàn tất triển khai và đăng ký tự khởi động")
 		}
@@ -622,7 +661,7 @@ func check() {
 	w("  ThrottleStop đang chạy: %s\n", map[bool]string{true: "Có (chung sống, không xoá driver)", false: "Không"}[throttleStopAppRunning()])
 	w("\n========== THANH GHI PCIE GỐC ==========\n")
 	w("%s", rawPcieDump())
-	w("%s", knownIssuesBlock())
+	w("%s", knownIssuesBlock(cmp30HX))
 
 	out := sb.String()
 	fmt.Println(out)
