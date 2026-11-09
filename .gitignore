@@ -31,6 +31,7 @@ windows-v3.0/tools/**/*.exe
 !windows-v3.0/release/*.md
 AGENTS.md
 docs/agents/
+UserLogIssue
 
 # Ignore debug symbols
 *.pdb
