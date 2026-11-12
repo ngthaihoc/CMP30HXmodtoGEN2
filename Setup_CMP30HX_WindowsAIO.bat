@@ -124,7 +124,7 @@ echo.
 echo   [1] Cai dat va Mo khoa Gen2 AIO [Tu dong 100%% cho moi nguoi dung]
 echo       - Mo khoa Gen2 x16 [5.0 GT/s], toi uu DEVCTL MRRS 512B
 echo       - TU DONG tich hop toi uu Riot Games (Valorant/LMHT)
-echo       - Don dep sach driver BYOVD tranh loi VAN 1067
+echo       - Giu nguyen driver va service co the duoc phan mem khac su dung
 echo.
 echo   [2] Go bo cai dat (Tu dong xoa Scheduled Task va Don dep)
 echo       - Tu dong xoa sach Scheduled Task, Registry Run key cua script
@@ -241,7 +241,11 @@ if "%DO_PREFLIGHT_ONLY%"=="1" (
     exit /b 0
 )
 
-:: 4.3 Module Persistence (Tao Scheduled Task SYSTEM va ho tro Riot Vanguard)
+:: Installer binaries can delete shared services; refuse pre-existing drivers.
+if not "%IS_MOCK%"=="1" call :CheckSharedDrivers
+if errorlevel 1 if not "%IS_MOCK%"=="1" exit /b 1
+
+:: 4.3 Module Persistence
 call :ConfigurePersistence
 
 :: 4.4 Module PCIeLinkRetrain (Mo khoa Gen2, xu ly Soft Reset neu ket Gen1)
@@ -322,7 +326,12 @@ set "TARGET_CHECK=%TARGET_DIR%\40HXCheck.exe"
 set "TARGET_RIOT=%TARGET_DIR%\UnlockRiotGame.exe"
 
 if not exist "%TARGET_DIR%" mkdir "%TARGET_DIR%" >nul 2>&1
-copy /y "%SRC_INSTALLER%" "%TARGET_INSTALLER%" >nul 2>&1
+set "COPY_OK=0"
+if /i "%SRC_INSTALLER%"=="%TARGET_INSTALLER%" (set "COPY_OK=1") else (copy /y "%SRC_INSTALLER%" "%TARGET_INSTALLER%" >nul 2>&1 && set "COPY_OK=1")
+if "%COPY_OK%"=="0" (
+    echo [X] Khong the cap nhat bo cai trong Program Files.
+    exit /b 1
+)
 if defined SRC_CHECK copy /y "%SRC_CHECK%" "%TARGET_CHECK%" >nul 2>&1
 if defined SRC_RIOT copy /y "%SRC_RIOT%" "%TARGET_RIOT%" >nul 2>&1
 
@@ -345,7 +354,7 @@ if exist "%~dp0scripts" (
     xcopy /s /y /i "%~dp0scripts" "%TARGET_DIR%\scripts" >nul 2>&1
 )
 
-if exist "%TARGET_INSTALLER%" (
+if "%COPY_OK%"=="1" (
     echo [V] Da dong bo bo cai vao thu muc he thong: "%TARGET_DIR%"
     set "FINAL_INSTALLER=%TARGET_INSTALLER%"
     set "FINAL_DIR=%TARGET_DIR%"
@@ -365,8 +374,9 @@ if exist "%~dp0windows-v3.0\release\RunUnlock.bat" (
     set "SRC_RUNNER=%~dp0RunUnlock.bat"
 )
 
-if defined SRC_RUNNER (
+if defined SRC_RUNNER if /i not "%SRC_RUNNER%"=="%FINAL_RUNNER%" (
     copy /y "%SRC_RUNNER%" "%FINAL_RUNNER%" >nul 2>&1
+    if errorlevel 1 exit /b 1
 )
 
 if not exist "%FINAL_RUNNER%" (
@@ -377,15 +387,15 @@ if not exist "%FINAL_RUNNER%" (
         echo :: SETUP_DIR baked-in at install time by Setup_CMP30HX_WindowsAIO.bat
         echo set "SETUP_DIR=%FINAL_DIR%"
         echo cd /d "%%SETUP_DIR%%"
+        echo sc query WinRing0_1_2_0 ^>nul 2^>^&1 ^&^& exit /b 1
+        echo sc query ThrottleStop ^>nul 2^>^&1 ^&^& exit /b 1
+        echo if exist "%%SystemRoot%%\System32\drivers\WinRing0x64.sys" exit /b 1
+        echo if exist "%%SystemRoot%%\System32\drivers\ThrottleStop.sys" exit /b 1
+        echo del /f /q "%%ProgramData%%\40HXUnlock\gen2_status.txt" ^>nul 2^>^&1
+        echo if exist "%%ProgramData%%\40HXUnlock\gen2_status.txt" exit /b 1
         echo where nvidia-smi ^>nul 2^>^&1 ^&^& nvidia-smi -pm 1 ^>nul 2^>^&1
         echo "40HXInstaller.exe" -gen2-30hx -silent
         echo where nvidia-smi ^>nul 2^>^&1 ^&^& nvidia-smi -pm 1 ^>nul 2^>^&1
-        echo sc stop WinRing0_1_2_0 ^>nul 2^>^&1
-        echo sc delete WinRing0_1_2_0 ^>nul 2^>^&1
-        echo sc stop ThrottleStop ^>nul 2^>^&1
-        echo sc delete ThrottleStop ^>nul 2^>^&1
-        echo del /f /q "%%SystemRoot%%\System32\drivers\WinRing0x64.sys" ^>nul 2^>^&1
-        echo del /f /q "%%SystemRoot%%\System32\drivers\ThrottleStop.sys" ^>nul 2^>^&1
         echo sc config NVDisplay.ContainerLocalSystem start= auto ^>nul 2^>^&1
         echo sc start NVDisplay.ContainerLocalSystem ^>nul 2^>^&1
         echo reg add "HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext" /ve /t REG_SZ /d "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}" /f ^>nul 2^>^&1
@@ -422,35 +432,10 @@ sc start NVDisplay.ContainerLocalSystem >nul 2>&1
 
 echo       [OK] Da vo hieu hoa Fast Startup (Hiberboot) va PCIe ASPM toan he thong.
 
-:: 2.2 Tat Microsoft Vulnerable Driver Blocklist
-echo [2/6] Dang tat Microsoft Vulnerable Driver Blocklist...
+:: Giu nguyen chinh sach bao mat Windows.
 set "NEED_REBOOT=0"
-reg query "HKLM\SYSTEM\CurrentControlSet\Control\CI\Config" /v "VulnerableDriverBlocklistEnable" 2>nul | %SystemRoot%\System32\findstr.exe /i "0x1" >nul 2>&1
-if not errorlevel 1 set "NEED_REBOOT=1"
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\CI\Config" /v "VulnerableDriverBlocklistEnable" /t REG_DWORD /d 0 /f >nul 2>&1
-if errorlevel 1 (
-    echo       [X] Khong tat duoc Driver Blocklist. Kiem tra chinh sach bao mat Windows.
-) else (
-    reg query "HKLM\SYSTEM\CurrentControlSet\Control\CI\Config" /v "VulnerableDriverBlocklistEnable" 2>nul | %SystemRoot%\System32\findstr.exe /i "0x0" >nul 2>&1
-    if errorlevel 1 (echo       [!] Driver Blocklist chua xac nhan OFF.) else (echo       [OK] Driver Blocklist da tat.)
-)
-
-:: 2.3 Tat Memory Integrity (HVCI)
-echo [3/6] Dang kiem tra va tat Memory Integrity (HVCI)...
-reg query "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" /v "Enabled" 2>nul | %SystemRoot%\System32\findstr.exe /i "0x1" >nul 2>&1
-if not errorlevel 1 set "NEED_REBOOT=1"
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" /v "Enabled" /t REG_DWORD /d 0 /f >nul 2>&1
-if errorlevel 1 (
-    echo       [X] Khong tat duoc Memory Integrity. Windows co the van chan driver kernel.
-) else (
-    reg query "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" /v "Enabled" 2>nul | %SystemRoot%\System32\findstr.exe /i "0x1" >nul 2>&1
-    if not errorlevel 1 (
-        echo       [X] Memory Integrity van dang ON. Can reboot va kiem tra lai Windows Security.
-        set "NEED_REBOOT=1"
-    ) else (
-        if "%NEED_REBOOT%"=="1" (echo       [!] Da dat HVCI=OFF; can reboot de driver duoc giai phong.) else (echo       [OK] Memory Integrity dang OFF.)
-    )
-)
+echo [2/6] Giu nguyen Vulnerable Driver Blocklist.
+echo [3/6] Giu nguyen Memory Integrity [HVCI].
 
 :: 2.4 Kiem tra che do Test Signing
 bcdedit 2>nul | %SystemRoot%\System32\findstr.exe /i "testsigning" | %SystemRoot%\System32\findstr.exe /i "yes" >nul 2>&1
@@ -488,9 +473,11 @@ if not errorlevel 1 set "TASK_OK=1"
 if "%TASK_OK%"=="1" schtasks /query /tn "CMP30HX_Gen2_Unlock" >nul 2>&1 || set "TASK_OK=0"
 
 if "%TASK_OK%"=="0" (
+    set "TASK_BOOT_OK="
     schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "%comspec% /c \"%FINAL_RUNNER%\"" /sc onstart /delay 0000:45 /rl highest /ru "NT AUTHORITY\SYSTEM" /f >nul 2>&1
+    if not errorlevel 1 set "TASK_BOOT_OK=1"
     schtasks /create /tn "CMP30HX_Gen2_Unlock_User" /tr "%comspec% /c \"%FINAL_RUNNER%\"" /sc onlogon /delay 0000:10 /rl highest /ru "NT AUTHORITY\SYSTEM" /f >nul 2>&1
-    if not errorlevel 1 set "TASK_OK=1"
+    if not errorlevel 1 if defined TASK_BOOT_OK set "TASK_OK=1"
 )
 
 :: Bao hiem kep: Dang ky Registry Run key cho HKLM va HKCU
@@ -516,8 +503,8 @@ if "%HAS_VANGUARD%"=="1" (
     echo       [*] Phat hien Riot Vanguard tren he thong. Che do tuong thich Anti-Cheat da san sang.
 )
 
-:: Khoa co che chong ngu sau RTD3 tren Windows va kich hoat DriverStrategy=2 de giu on dinh link PCIe
-reg add "HKLM\SOFTWARE\40HXUnlock" /v "DriverStrategy" /t REG_DWORD /d 2 /f >nul 2>&1
+:: Dung che do tam thoi de runner khong gap lai driver do lan chay truoc de lai.
+reg add "HKLM\SOFTWARE\40HXUnlock" /v "DriverStrategy" /t REG_DWORD /d 0 /f >nul 2>&1
 
 :: Thuc thi script PowerShell toi uu CASO theo Driver Class Index dong, Borderless LoL va DirectX Riot
 if exist "%FINAL_DIR%\scripts\Set-GpuPreference.ps1" (
@@ -526,12 +513,7 @@ if exist "%FINAL_DIR%\scripts\Set-GpuPreference.ps1" (
     powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Set-GpuPreference.ps1" >nul 2>&1
 )
 
-:: Goi UnlockRiotGame che do im lang de don dep driver BYOVD tranh loi Vanguard 1067
-if exist "%FINAL_DIR%\UnlockRiotGame.exe" (
-    "%FINAL_DIR%\UnlockRiotGame.exe" -silent -optimize -y >nul 2>&1
-) else if defined SRC_RIOT (
-    "%SRC_RIOT%" -silent -optimize -y >nul 2>&1
-)
+:: Khong tu dong chay Riot optimizer vi no thay doi chinh sach bao mat.
 exit /b 0
 
 
@@ -540,10 +522,6 @@ exit /b 0
 :: ================================================================
 :PCIeLinkRetrain
 echo.
-if "%NEED_REBOOT%"=="1" (
-    echo [!] HVCI vua duoc dat OFF trong Registry nhung chua co hieu luc trong phien nay.
-    echo     Buoc hien tai co the khong nap duoc driver kernel; sau khi ket thuc hay reboot truoc khi danh gia.
-)
 echo [5/6] Dang kich hoat Gen2 x16 va toi uu MRRS 512B ngay...
 
 if "%IS_MOCK_MISSING_STATUS%"=="1" (
@@ -571,7 +549,13 @@ if "%IS_MOCK%"=="1" (
     goto :eval_first_attempt
 )
 
-:: Chay installer that lan dau
+:: Moi lan chay phai tao trang thai moi.
+del /f /q "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1
+if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
+    echo [X] Khong the xoa file trang thai cu.
+    set "UNLOCK_OK=0"
+    exit /b 0
+)
 "%FINAL_INSTALLER%" -gen2-30hx -silent
 if errorlevel 1 (
     echo       [X] Installer bao loi khi chay [exit code khac 0].
@@ -616,13 +600,18 @@ if "%UNLOCK_OK%"=="0" set "NEED_DEV_RESET=1"
 if "%IS_GEN1_STUCK%"=="1" set "NEED_DEV_RESET=1"
 
 if "%NEED_DEV_RESET%"=="0" (
-    if "%IS_STATUS_SUCCESS%"=="1" set "UNLOCK_OK=1"
+    if not "%IS_STATUS_SUCCESS%"=="1" set "UNLOCK_OK=0"
     exit /b 0
 )
 
 echo.
 echo       [!] Phat hien GPU TLS van o Gen1 [driver mod / iGPU dang giu DMA context].
-call :PnpSoftReset
+if not "%IS_MOCK%"=="1" call :PnpSoftReset
+if errorlevel 1 if not "%IS_MOCK%"=="1" (
+    echo [X] Khong the reset GPU; bo qua lan thu lai.
+    set "UNLOCK_OK=0"
+    exit /b 0
+)
 echo       [*] Dang chay lai lenh mo khoa Gen2 sau khi Soft Reset card...
 
 if "%IS_MOCK_FAIL%"=="1" (
@@ -637,7 +626,13 @@ if "%IS_MOCK%"=="1" (
     goto :eval_second_attempt
 )
 
-:: Chay lai installer sau khi Soft Reset
+:: Khong chap nhan file trang thai tu lan chay truoc.
+del /f /q "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1
+if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
+    set "UNLOCK_OK=0"
+    exit /b 0
+)
+set "UNLOCK_OK=0"
 "%FINAL_INSTALLER%" -gen2-30hx -silent
 if not errorlevel 1 set "UNLOCK_OK=1"
 
@@ -650,11 +645,7 @@ if not exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
     exit /b 0
 )
 
-if "%IS_STATUS_SUCCESS%"=="1" (
-    set "UNLOCK_OK=1"
-) else (
-    set "UNLOCK_OK=0"
-)
+if not "%IS_STATUS_SUCCESS%"=="1" set "UNLOCK_OK=0"
 exit /b 0
 
 
@@ -712,10 +703,20 @@ if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
 )
 exit /b 0
 
-:PnpSoftReset
-echo       [*] Dang khoi phuc dich vu NVDisplay va Context Menu...
-call :EnsureNvidiaControlPanelHealthy
+:CheckSharedDrivers
+sc query WinRing0_1_2_0 >nul 2>&1 && goto :shared_driver_found
+sc query ThrottleStop >nul 2>&1 && goto :shared_driver_found
+if exist "%SystemRoot%\System32\drivers\WinRing0x64.sys" goto :shared_driver_found
+if exist "%SystemRoot%\System32\drivers\ThrottleStop.sys" goto :shared_driver_found
 exit /b 0
+:shared_driver_found
+echo [X] Driver WinRing0/ThrottleStop da ton tai; dung de tranh anh huong phan mem khac.
+exit /b 1
+
+:PnpSoftReset
+echo       [*] Dang khoi dong lai GPU CMP 30HX qua PnP...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$d = @(Get-PnpDevice -PresentOnly -ErrorAction Stop | Where-Object { $_.HardwareID -match 'VEN_10DE&(DEV_2189|DEV_1F0B)' }); if ($d.Count -ne 1) { exit 1 }; & pnputil.exe /restart-device $d[0].InstanceId; if ($LASTEXITCODE -ne 0) { exit 1 }; $d = Get-PnpDevice -InstanceId $d[0].InstanceId -ErrorAction Stop; if ($d.Status -ne 'OK') { exit 1 }" >nul 2>&1
+exit /b %ERRORLEVEL%
 
 
 :: ================================================================
@@ -809,12 +810,7 @@ exit /b 0
 :: MODULE 5: CLEANUP BYOVD DRIVERS & RESTORE DISPLAY SERVICES
 :: ================================================================
 :CleanupBYOVD
-sc stop WinRing0_1_2_0 >nul 2>&1
-sc delete WinRing0_1_2_0 >nul 2>&1
-sc stop ThrottleStop >nul 2>&1
-sc delete ThrottleStop >nul 2>&1
-del /f /q "%SystemRoot%\System32\drivers\WinRing0x64.sys" >nul 2>&1
-del /f /q "%SystemRoot%\System32\drivers\ThrottleStop.sys" >nul 2>&1
+:: Shared driver services and files may belong to other applications.
 call :EnsureNvidiaControlPanelHealthy
 exit /b 0
 
@@ -832,7 +828,7 @@ if "%NO_CHECK%"=="1" (
 if "%IS_DRV_FAIL%"=="1" (
     echo [*] Driver kernel dang bi chan boi HVCI / Vulnerable Driver Blocklist trong phien nay.
     echo     Bo qua khoi chay 40HXCheck de tranh thong bao nham ve quyen han / GSP.
-    echo     He thong can REBOOT de tat HVCI; sau reboot Scheduled Task se tu dong mo khoa Gen2.
+    echo     Kiem tra chinh sach bao mat va driver truoc khi chay lai.
     goto :summary_dispatch
 )
 echo.
@@ -840,13 +836,7 @@ echo [*] LUU Y QUAN TRONG VE GSP (GPU System Processor):
 echo     CMP 30HX dung kien truc TU116 KHONG CO phan cung GSP.
 echo     Neu 40HXCheck bao "Khong tim thay khoa GSP / Bat GSP": HAY BO QUA HOAN TOAN!
 echo.
-if exist "%TARGET_CHECK%" (
-    echo [*] Tim thay cong cu chan doan: "%TARGET_CHECK%"
-    echo [*] Dang khoi chay cua so chan doan 40HXCheck...
-    start "" "%TARGET_CHECK%"
-) else (
-    "%FINAL_INSTALLER%" -status
-)
+echo [*] Khong tu dong chay cong cu chan doan co the thay doi driver dung chung.
 
 :summary_dispatch
 echo.
@@ -863,7 +853,7 @@ if "%IS_MOCK%"=="1" (
 goto :summary_post
 
 :dispatch_failure
-if "%IS_MOCK_MISSING_STATUS%"=="1" (
+if not exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
     call :SummaryFailMissingStatus
     goto :summary_post
 )
@@ -898,11 +888,11 @@ exit /b 1
 :SummarySuccessMock
 echo  [V] KIEM THU MO PHONG [MOCK TEST] HOAN TAT MY MAN:
 echo  - Mo phong phat hien GPU CMP 30HX ket Gen1 o lan chay 1: [THANH CONG].
-echo  - Tu dong kich hoat chu trinh Soft Reset card qua PnP: [THANH CONG].
+echo  - Mo phong chu trinh Soft Reset card qua PnP: [THANH CONG].
 echo  - Mo phong tai bung toc do Gen2 x16 [5.0 GT/s] o lan chay 2: [THANH CONG].
 echo  - Toan bo cac buoc he thong da thuc hien that 100%%:
 echo    + Powercfg: Tat Fast Startup, Hybrid Sleep, PCIe ASPM tat ca Power Plan.
-echo    + CI Policy: Tat Microsoft Vulnerable Driver Blocklist.
+echo    + CI Policy: Giu nguyen Microsoft Vulnerable Driver Blocklist.
 echo    + HVCI: Kiem tra trang thai Memory Integrity.
 echo    + Persistence: Scheduled Task SYSTEM va Registry Run Key duy tri Gen2.
 echo.
@@ -911,8 +901,8 @@ exit /b 0
 
 :SummarySuccessReal
 echo  [V] CAI DAT HOAN TAT - Gen2 da duoc cau hinh ben vung.
-echo  - Da thiet lap da co che: Scheduled Task SYSTEM + Registry Run Key.
-echo  - Tu dong duy tri Gen2 tren moi lan Boot, Dang nhap va Wake from Sleep!
+echo  - Trang thai Scheduled Task duoc bao cao ben duoi.
+echo  - Runner se dung neu phat hien driver dung chung da ton tai.
 echo.
 echo  - LUU Y QUAN TRONG VE GEN 1 KHI VUA KHOI DONG / IDLE:
 echo    + Link PCIe se o Gen1 x16 khi card o che do ranh [Idle Power Saving].
@@ -921,9 +911,8 @@ echo    + Neu GPU-Z bao Gen1: nhap vao dau cham hoi [?] canh Bus Interface de ch
 echo  - Neu sau khi reboot co tai ma GPU van Gen1: kiem tra HVCI, riser, tiep xuc lane va BIOS khe PCIe.
 echo.
 echo  [*] CHE DO TUONG THICH TOAN DIEN [NGUOI CHOI RIOT GAMES ^& NGUOI DUNG THUONG]:
-echo      1. He thong da tu dong don dep sach se driver WinRing0/ThrottleStop khoi kernel va System32.
-echo         =^> Riot Vanguard, Easy Anti-Cheat, BattlEye khong bao gio phat hien hay chan driver.
-echo      2. Windows Test Signing da duoc kiem tra va tat =^> Khong bi loi VAN 1067 / VAN 9003.
+echo      1. Cac driver va service dung chung duoc giu nguyen.
+echo      2. Kiem tra lai Test Signing va tinh tuong thich cua phan mem anti-cheat.
 echo      3. Chinh sach Secure Boot ^& TPM 2.0 theo tung loai card:
 echo         + Voi CMP 30HX: Secure Boot va TPM 2.0 luon giu BAT trong BIOS [Choi tot ca Valorant ^& LMHT].
 echo         + Voi CMP 40HX [Phai tat Secure Boot trong BIOS de nap EFI mo khoa Tensor Core]:
@@ -954,15 +943,9 @@ echo      Windows Core Isolation (HVCI), Vulnerable Driver Blocklist hoac Antivi
 echo      dang chan nap driver truy cap phan cung kernel (Loi 5 / Access Denied).
 echo.
 echo  [*] CAC BUOC KHAC PHUC:
-echo      1. KHOI DONG LAI MAY (REBOOT):
-echo         Script da tu dong tat HVCI va Driver Blocklist trong Registry o Buoc [2/6] ^& [3/6].
-echo         Tuy nhien, Windows KERNEL BAT BUOC PHAI REBOOT moi co hieu luc!
-echo      2. Kiem tra phan mem diet virus / Windows Defender:
-echo         Neu co Kaspersky, Bitdefender, Avast... hay tam tat hoac them exclusion cho
-echo         thu muc "%ProgramFiles%\40HXUnlock".
-echo      3. Sau khi Reboot:
-echo         Scheduled Task SYSTEM se tu dong thu nap lai driver va mo khoa Gen2.
-echo         Hoac ban co the chay lai script nay voi Run as Administrator.
+echo      Kiem tra chinh sach bao mat Windows va phan mem bao mat.
+echo      Script khong thay doi HVCI hoac Vulnerable Driver Blocklist.
+echo      Su dung driver duoc Windows tin cay neu co.
 goto :fail_common
 
 :SummaryFailNoGpu
@@ -998,10 +981,7 @@ exit /b 0
 
 :warn_reboot
 echo.
-echo  [!] LUU Y BAT BUOC: He thong vua tat Memory Integrity [Core Isolation].
-echo      Ban PHAI KHOI DONG LAI MAY de Windows giai phong driver kernel.
-echo      Sau reboot: cho Scheduled Task chay du 15 giay, tao tai 3D/CUDA,
-echo      sau do moi dung GPU-Z/40HXCheck de danh gia Gen2.
+echo  [!] MOT THAY DOI CAU HINH TRUOC DO CO THE CAN REBOOT.
 exit /b 0
 
 
@@ -1026,9 +1006,8 @@ reg delete "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "CMP30HX_Gen2
 reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "40HXGen2" /f >nul 2>&1
 echo       [OK] Da xoa sach Registry Run Key khoi dong [HKLM va HKCU].
 echo.
-echo [*] Dang don dep driver BYOVD tranh xung dot Anti-Cheat...
+echo [*] Giu nguyen cac driver va service co the thuoc phan mem khac.
 call :CleanupBYOVD
-echo       [OK] Da go bo cac service va driver WinRing0 / ThrottleStop khoi kernel.
 echo.
 if exist "%ProgramData%\40HXUnlock\gen2_status.txt" (
     del /f /q "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1
@@ -1039,7 +1018,7 @@ if exist "%ProgramFiles%\40HXUnlock" (
 echo ================================================================
 echo  [V] DA XOA TOAN BO CAC SCHEDULED TASK VA DON DEP SACH SE!
 echo  - Task Scheduler he thong hoan toan sach se, khong con tac vu chay ngam.
-echo  - Khong con bat ky tac vu nao co the gay anh huong den Riot Vanguard / Anti-Cheat.
+echo  - Driver va service dung chung khong bi xoa.
 echo ================================================================
 echo.
 if not "%NO_WAIT%"=="1" pause
