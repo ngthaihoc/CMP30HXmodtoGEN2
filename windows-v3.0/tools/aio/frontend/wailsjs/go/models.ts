@@ -182,6 +182,13 @@ export namespace main {
 	export class SubtoolResult {
 	    success: boolean;
 	    message: string;
+	    attempted?: boolean;
+	    error?: string;
+	    pendingReboot?: boolean;
+	    verified?: boolean;
+	    rollbackAttempted?: boolean;
+	    rollbackSucceeded?: boolean;
+	    rollbackError?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SubtoolResult(source);
@@ -191,6 +198,13 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.success = source["success"];
 	        this.message = source["message"];
+	        this.attempted = source["attempted"];
+	        this.error = source["error"];
+	        this.pendingReboot = source["pendingReboot"];
+	        this.verified = source["verified"];
+	        this.rollbackAttempted = source["rollbackAttempted"];
+	        this.rollbackSucceeded = source["rollbackSucceeded"];
+	        this.rollbackError = source["rollbackError"];
 	    }
 	}
 	export class UninstallResult {
