@@ -517,6 +517,13 @@ func (n *LinkNegotiator) ensureMRRS512(bdf, cap uint32) (bool, error) {
 	if err := n.bus.WritePCIConfig(bdf, cap+0x08, []byte{byte(value), byte(value >> 8)}); err != nil {
 		return false, fmt.Errorf("ghi DEVCTL MRRS 512B: %w", err)
 	}
+	readback, err := n.bus.ReadPCIConfig(bdf, cap+0x08)
+	if err != nil {
+		return false, fmt.Errorf("đọc lại DEVCTL MRRS: %w", err)
+	}
+	if (readback>>12)&7 != 2 {
+		return false, fmt.Errorf("DEVCTL MRRS không đạt 512B (readback=0x%04X)", readback&0xffff)
+	}
 	return true, nil
 }
 
