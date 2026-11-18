@@ -2,12 +2,8 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 
 	hxcore "40hxcore"
-	"golang.org/x/sys/windows/registry"
 )
 
 const (
@@ -76,54 +72,25 @@ func (a *App) executeUnlock(forceRoot bool) UnlockResult {
 	return result
 }
 
-// RegisterAutostartTask đăng ký tác vụ tự động mở khoá khi đăng nhập Windows
+// RegisterAutostartTask registers one SYSTEM task for the current AIO executable.
 func (a *App) RegisterAutostartTask() error {
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("không thể xác định file thực thi: %w", err)
+	a.Log("[Tự khởi động] Đang đăng ký tác vụ khi đăng nhập...")
+	if err := registerAutostart(defaultStartupDependencies()); err != nil {
+		a.Log("[!] " + err.Error())
+		return err
 	}
-	abs, _ := filepath.Abs(exe)
-
-	// Đăng ký Scheduled Task chạy SYSTEM khi Logon
-	tn := taskName30HX
-	prof, found := hxcore.FindGPUWithProfile()
-	if found && prof.DeviceID == 0x1F0B {
-		tn = taskName40HX
-	}
-
-	a.Log(fmt.Sprintf("[Tự khởi động] Đăng ký tác vụ Scheduled Task %q...", tn))
-	out, err := hxcore.RunOut("schtasks.exe", "/create", "/tn", tn,
-		"/tr", fmt.Sprintf("\"%s\" -gen2 -silent", abs),
-		"/sc", "onlogon", "/ru", "SYSTEM", "/delay", "0000:10", "/rl", "highest", "/f")
-	if err != nil {
-		a.Log(fmt.Sprintf("[!] Lỗi tạo tác vụ: %s", strings.TrimSpace(out)))
-		return fmt.Errorf("tạo tác vụ thất bại: %s", strings.TrimSpace(out))
-	}
-
-	// Đăng ký Registry Run Key dự phòng
-	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows\CurrentVersion\Run`, registry.SET_VALUE)
-	if err == nil {
-		defer k.Close()
-		_ = k.SetStringValue("40HXGen2", fmt.Sprintf("\"%s\" -gen2 -silent", abs))
-	}
-
-	a.Log("[Tự khởi động] ✓ Đăng ký thành công tác vụ tự động mở khóa khi đăng nhập.")
+	a.Log("[Tự khởi động] Đã đăng ký tác vụ SYSTEM. Run key cũ thuộc ứng dụng đã được dọn.")
 	return nil
 }
 
-// UnregisterAutostartTask gỡ bỏ tác vụ tự động mở khoá
+// UnregisterAutostartTask removes only tasks and the old Run value owned by this AIO executable.
 func (a *App) UnregisterAutostartTask() error {
-	a.Log("[Tự khởi động] Đang xoá bỏ tác vụ tự khởi động...")
-	_, _ = hxcore.RunOut("schtasks.exe", "/delete", "/tn", taskName30HX, "/f")
-	_, _ = hxcore.RunOut("schtasks.exe", "/delete", "/tn", taskName40HX, "/f")
-
-	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows\CurrentVersion\Run`, registry.SET_VALUE)
-	if err == nil {
-		defer k.Close()
-		_ = k.DeleteValue("40HXGen2")
+	a.Log("[Tự khởi động] Đang gỡ tác vụ khi đăng nhập...")
+	if err := unregisterAutostart(defaultStartupDependencies()); err != nil {
+		a.Log("[!] " + err.Error())
+		return err
 	}
-
-	a.Log("[Tự khởi động] ✓ Đã gỡ bỏ toàn bộ tác vụ tự chạy khi đăng nhập.")
+	a.Log("[Tự khởi động] Đã gỡ tác vụ và Run key cũ thuộc ứng dụng.")
 	return nil
 }
 
