@@ -6,6 +6,7 @@ package hxcore
 // 电源设置(快速启动/ASPM)属用户偏好, 刻意不提供回滚操作 — 恢复方法见 README。
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,13 +49,15 @@ func UninstallTasks() []string {
 	return removed
 }
 
-// UninstallRunKey: 删 HKCU Run 值 40HXGen2
+// UninstallRunKey removes the startup value from both historical HKCU and AIO HKLM locations.
 func UninstallRunKey() {
-	k, err := registry.OpenKey(registry.CURRENT_USER,
-		`Software\Microsoft\Windows\CurrentVersion\Run`, registry.SET_VALUE)
-	if err == nil {
-		k.DeleteValue("40HXGen2")
-		k.Close()
+	for _, hive := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
+		k, err := registry.OpenKey(hive,
+			`Software\Microsoft\Windows\CurrentVersion\Run`, registry.SET_VALUE)
+		if err == nil {
+			_ = k.DeleteValue("40HXGen2")
+			k.Close()
+		}
 	}
 }
 
@@ -75,85 +78,110 @@ func UninstallBootEntry() bool {
 			}
 		}
 		if strings.Contains(ln, bootDesc40) && curGuid != "" {
-			RunOut("bcdedit.exe", "/delete", "{"+curGuid+"}", "/f")
-			fmt.Printf("  Đã xoá mục khởi động %s\n", curGuid)
-			removed = true
+			if _, err := RunOut("bcdedit.exe", "/delete", "{"+curGuid+"}", "/f"); err == nil {
+				fmt.Printf("  Đã xoá mục khởi động %s\n", curGuid)
+				removed = true
+			} else {
+				fmt.Printf("  [!] Xoá mục khởi động %s thất bại: %v\n", curGuid, err)
+			}
 			curGuid = ""
 		}
 	}
 	return removed
 }
 
-// UninstallEspEfi: 删 \EFI\40HX\40HXUNLK.EFI; bootx64.efi 用"覆盖写+校验"从
-// .40hx.bak 还原(不用 删→rename — 中间窗口会让机器起不来)。返回是否动过 ESP。
+// UninstallEspEfi removes the unlock image and restores the original fallback bootloader.
 func UninstallEspEfi() bool {
+	removed, err := UninstallEspEfiChecked()
+	if err != nil {
+		fmt.Printf("  [!] Khôi phục ESP thất bại: %v\n", err)
+	}
+	return removed
+}
+
+// UninstallEspEfiChecked reports restoration failures to callers that can surface them.
+func UninstallEspEfiChecked() (bool, error) {
 	esp := MountESP()
 	if esp == "" {
-		return false
+		if FirmwareIsLegacy() {
+			return false, nil
+		}
+		return false, fmt.Errorf("không thể gắn phân vùng EFI hệ thống để kiểm tra và gỡ cài đặt")
 	}
-	defer RunOut("mountvol.exe", esp+":", "/D")
+	defer UnmountESP(esp)
 	removed := false
+	std := esp + ":\\EFI\\Boot\\bootx64.efi"
+	bak := std + ".40hx.bak"
+	if _, err := os.Stat(bak); err == nil {
+		if err := restoreEfiBackup(std, bak); err != nil {
+			return false, fmt.Errorf("khôi phục bootx64.efi: %w", err)
+		}
+		fmt.Println("    Đã khôi phục bootx64.efi gốc (từ .40hx.bak, kiểm tra OK)")
+		removed = true
+	} else if !os.IsNotExist(err) {
+		return false, fmt.Errorf("kiểm tra bản sao lưu bootx64.efi: %w", err)
+	}
 	target := esp + ":\\EFI\\40HX\\40HXUNLK.EFI"
 	if err := os.Remove(target); err == nil {
 		removed = true
 	}
 	if entries, err := os.ReadDir(esp + ":\\EFI\\40HX"); err == nil && len(entries) == 0 {
-		os.Remove(esp + ":\\EFI\\40HX")
+		_ = os.Remove(esp + ":\\EFI\\40HX")
 	}
-	// v3.0.0: EFI 运行时写的历史日志一并清除 — 否则卸载后 40HXCheck 会把它
-	// 当本次日志分析, 给没装 EFI 的用户派无关引导。
 	if err := os.Remove(esp + ":\\40hx_log.txt"); err == nil {
 		fmt.Println("    Đã xoá nhật ký lịch sử EFI 40hx_log.txt")
 	}
-	std := esp + ":\\EFI\\Boot\\bootx64.efi"
-	bak := esp + ":\\EFI\\Boot\\bootx64.efi.40hx.bak"
-	if data, berr := os.ReadFile(bak); berr == nil {
-		if werr := os.WriteFile(std, data, 0o644); werr != nil {
-			fmt.Println("  [!] Khôi phục bootx64.efi ghi thất bại:", werr)
-			fmt.Println("      Bản sao lưu gốc vẫn giữ tại bootx64.efi.40hx.bak, có thể khôi phục thủ công")
-			return removed
-		}
-		if rb, rerr := os.ReadFile(std); rerr == nil && len(rb) == len(data) {
-			os.Remove(bak)
-			fmt.Println("    Đã khôi phục bootx64.efi gốc (từ .40hx.bak, kiểm tra OK)")
-		} else {
-			fmt.Println("  [!] bootx64.efi sau khi khôi phục kiểm tra không khớp — Giữ lại .bak để xử lý thủ công")
-		}
-		removed = true
-	}
-	return removed
+	return removed, nil
 }
 
-// UninstallDriverServices: 停止并删除历史驱动服务(v2.5 BYOVD + 旧版 bridge/early)
+var efiWriteFile = os.WriteFile
+
+func restoreEfiBackup(target, backup string) error {
+	original, err := os.ReadFile(backup)
+	if err != nil {
+		return err
+	}
+	if len(original) < 0x2000 || !bytes.HasPrefix(original, []byte("MZ")) {
+		return fmt.Errorf("bản sao lưu bootx64.efi không phải ảnh EFI hợp lệ")
+	}
+	if err := efiWriteFile(target, original, 0o644); err != nil {
+		return err
+	}
+	readback, err := os.ReadFile(target)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(readback, original) {
+		return fmt.Errorf("bootx64.efi readback differs from backup")
+	}
+	return os.Remove(backup)
+}
+
+// UninstallDriverServices removes only services with project-specific names.
+// Generic ThrottleStop and WinRing0 services may belong to other applications.
 func UninstallDriverServices() {
-	for _, name := range []string{"ThrottleStop", "40hx_bridge", "40hx_early", "40hx_early-d", "WinRing0_1_2_0", "WinRing0x64", "WinRing0"} {
+	for _, name := range []string{"40hx_bridge", "40hx_early", "40hx_early-d"} {
 		err := withService(name, func(s *mgr.Service) error {
-			s.Control(svc.Stop)
+			_, _ = s.Control(svc.Stop)
 			time.Sleep(300 * time.Millisecond)
 			return s.Delete()
 		})
 		if err != nil {
 			fmt.Printf("  Dịch vụ %s không tồn tại hoặc xoá thất bại: %v\n", name, err)
-		} else {
-			fmt.Printf("  Dịch vụ %s đã được xoá\n", name)
 		}
 	}
-	_ = EnsureNvidiaControlPanelHealthy()
 }
 
-// UninstallDriverFiles: 删 System32\drivers 下历史 .sys 与 System32\WinRing0x64.dll
+// UninstallDriverFiles removes only project-specific files.
 func UninstallDriverFiles() {
-	for _, name := range []string{"ThrottleStop.sys", "40hx_bridge.sys", "40hx_early-d.sys", "40hx_early.sys", "WinRing0x64.sys"} {
-		p := os.Getenv("SystemRoot") + "\\System32\\drivers\\" + name
-		if err := os.Remove(p); err != nil {
-			if _, statErr := os.Stat(p); statErr == nil {
-				fmt.Printf("  %s xoá thất bại (có thể đang bị chiếm dụng, khởi động lại sẽ tự xoá được)\n", name)
-			}
-		} else {
+	for _, name := range []string{"40hx_bridge.sys", "40hx_early-d.sys", "40hx_early.sys"} {
+		path := filepath.Join(sysRoot(), "System32", "drivers", name)
+		if err := os.Remove(path); err == nil {
 			fmt.Printf("  Đã xoá %s\n", name)
+		} else if _, statErr := os.Stat(path); statErr == nil {
+			fmt.Printf("  %s xoá thất bại (có thể đang bị chiếm dụng)\n", name)
 		}
 	}
-	os.Remove(os.Getenv("SystemRoot") + "\\System32\\WinRing0x64.dll")
 }
 
 // UninstallGspKey: 删 EnableGpuFirmware(恢复 GSP 默认关), 返回是否删除过
@@ -182,13 +210,12 @@ func UninstallProgramData() {
 	}
 	dir := base + "\\40HXUnlock"
 	_ = os.Remove(dir + "\\gen2_status.txt")
-	_ = os.RemoveAll(dir + "\\drivers")
+	_ = os.RemoveAll(PdDrvDir())
 	if entries, err := os.ReadDir(dir); err == nil && len(entries) == 0 {
 		os.Remove(dir)
 	}
-	if pf := os.Getenv("ProgramFiles"); pf != "" {
-		_ = os.RemoveAll(filepath.Join(pf, "40HXUnlock"))
-	}
+	// The batch installer owns ProgramFiles\40HXUnlock and its runner.
+	// Its uninstall command removes that directory after unregistering its startup task.
 	// v2.6.0 修复: 策略键一并删除 — 否则卸载后 DriverStrategy/Gen2AutoHard 等
 	// 残留, 重装会继承旧策略而非默认(README §2.5 承诺"卸载器会一并删除")。
 	DeleteConfig()
@@ -204,13 +231,15 @@ func CheckLeftover() []string {
 	} else {
 		fmt.Println("  Mục khởi động: Đã dọn sạch")
 	}
-	if k, err := registry.OpenKey(registry.CURRENT_USER,
-		`Software\Microsoft\Windows\CurrentVersion\Run`, registry.QUERY_VALUE); err == nil {
-		if _, _, e := k.GetStringValue("40HXGen2"); e == nil {
-			rem = append(rem, "- Khoá Run 40HXGen2")
-			fmt.Println("  [!] Khoá Run vẫn còn tàn dư")
+	for _, hive := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
+		if k, err := registry.OpenKey(hive,
+			`Software\Microsoft\Windows\CurrentVersion\Run`, registry.QUERY_VALUE); err == nil {
+			if _, _, e := k.GetStringValue("40HXGen2"); e == nil {
+				rem = append(rem, "- Khoá Run 40HXGen2")
+				fmt.Println("  [!] Khoá Run vẫn còn tàn dư")
+			}
+			k.Close()
 		}
-		k.Close()
 	}
 	taskLeft := false
 	for _, tn := range UninstallTaskNames {
@@ -226,27 +255,23 @@ func CheckLeftover() []string {
 	}
 	// v3.0.0: 补查驱动服务与 System32 驱动文件 — 常驻策略/文件被占用时
 	// 卸载可能只删了服务注册、文件要重启后才能删, 不能假装干净。
-	svcNames := []string{"ThrottleStop", "40hx_bridge", "40hx_early", "40hx_early-d", "WinRing0_1_2_0", "WinRing0x64", "WinRing0"}
+	svcNames := []string{"40hx_bridge", "40hx_early", "40hx_early-d"}
 	svcLeft := false
 	for _, sn := range svcNames {
 		if err := withService(sn, func(_ *mgr.Service) error { return nil }); err == nil {
 			rem = append(rem, "- Dịch vụ driver "+sn)
-			fmt.Println("  [!] Dịch vụ driver " + sn + " vẫn còn tàn dư (có thể vẫn đang chạy, hãy chạy lại gỡ cài đặt sau khi khởi động lại)")
+			fmt.Println("  [!] Dịch vụ driver " + sn + " vẫn còn tàn dư")
 			svcLeft = true
 		}
 	}
 	if !svcLeft {
 		fmt.Println("  Dịch vụ driver: Đã dọn sạch")
 	}
-	sysRoot := os.Getenv("SystemRoot")
-	if sysRoot == "" {
-		sysRoot = `C:\Windows`
-	}
 	fileLeft := false
-	for _, fn := range []string{"ThrottleStop.sys", "40hx_bridge.sys", "40hx_early-d.sys", "40hx_early.sys", "WinRing0x64.sys"} {
-		if _, err := os.Stat(sysRoot + "\\System32\\drivers\\" + fn); err == nil {
+	for _, fn := range []string{"40hx_bridge.sys", "40hx_early-d.sys", "40hx_early.sys"} {
+		if _, err := os.Stat(filepath.Join(sysRoot(), "System32", "drivers", fn)); err == nil {
 			rem = append(rem, "- Tệp driver "+fn)
-			fmt.Println("  [!] Tệp driver " + fn + " vẫn còn tàn dư (có thể đang bị chiếm dụng, hãy chạy lại gỡ cài đặt sau khi khởi động lại)")
+			fmt.Println("  [!] Tệp driver " + fn + " vẫn còn tàn dư")
 			fileLeft = true
 		}
 	}
@@ -268,7 +293,7 @@ func CheckLeftover() []string {
 			rem = append(rem, "- Gốc ESP 40hx_log.txt (nhật ký lịch sử EFI)")
 			fmt.Println("  [!] Nhật ký lịch sử 40hx_log.txt vẫn tồn tại (chạy lại gỡ cài đặt một lần nữa sẽ sạch)")
 		}
-		RunOut("mountvol.exe", esp+":", "/D")
+		UnmountESP(esp)
 	}
 	base := os.Getenv("ProgramData")
 	if base == "" {

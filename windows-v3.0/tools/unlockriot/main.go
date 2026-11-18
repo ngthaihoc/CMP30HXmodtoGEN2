@@ -490,7 +490,7 @@ func getLogicalDrives() []string {
 
 func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) error {
 	fmt.Fprintln(log, "==============================================")
-	fmt.Fprintln(log, "  UnlockRiotGame: Dọn Dẹp Driver & Tối Ưu Riot")
+	fmt.Fprintln(log, "  UnlockRiotGame: Tối Ưu Riot")
 	fmt.Fprintln(log, "==============================================")
 
 	osName := "Windows 10"
@@ -515,7 +515,7 @@ func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) error {
 			if isWin11 {
 				fmt.Fprintln(log, "    => Chơi tốt LMHT/TFT. Riêng Valorant trên Win 11 cần Secure Boot (xem hướng dẫn Custom Key hoặc Win 10 Dual Boot).")
 			} else {
-				fmt.Fprintln(log, "    => Tuyệt vời: Win 10 cho phép chơi mọi game Riot (Valorant + LMHT) giữ 100% Tensor Core & Gen 2!")
+				fmt.Fprintln(log, "    => Trên Windows 10, hãy kiểm tra khả năng chạy từng game Riot trên hệ thống của bạn.")
 			}
 		}
 	} else if is30HX {
@@ -525,37 +525,20 @@ func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) error {
 		fmt.Fprintln(log, "[*] Kiểm tra phần cứng: Không phát hiện GPU cụ thể hoặc dùng card khác.")
 	}
 
-	fmt.Fprintln(log, "\n[*] BƯỚC 1: Dọn dẹp driver mở khóa (WinRing0 / ThrottleStop)...")
-	exec.Command("sc", "stop", "WinRing0_1_2_0").Run()
-	exec.Command("sc", "delete", "WinRing0_1_2_0").Run()
-	exec.Command("sc", "stop", "ThrottleStop").Run()
-	exec.Command("sc", "delete", "ThrottleStop").Run()
-
+	// The unlock session removes only the driver resources it created.
+	// Generic WinRing0 and ThrottleStop drivers may be shared with other software.
 	sysRoot := os.Getenv("SystemRoot")
 	if sysRoot == "" {
 		sysRoot = `C:\Windows`
 	}
-
-	p1 := filepath.Join(sysRoot, "System32", "drivers", "WinRing0x64.sys")
-	p2 := filepath.Join(sysRoot, "System32", "drivers", "ThrottleStop.sys")
-
-	if err := os.Remove(p1); err != nil && !os.IsNotExist(err) {
-		fmt.Fprintf(log, "[!] Cảnh báo: Không thể xóa %s: %v\n", p1, err)
-	}
-	if err := os.Remove(p2); err != nil && !os.IsNotExist(err) {
-		fmt.Fprintf(log, "[!] Cảnh báo: Không thể xóa %s: %v\n", p2, err)
-	}
-	fmt.Fprintln(log, "[V] Đã dọn dẹp sạch sẽ service và file driver trong System32\\drivers.")
-	fmt.Fprintln(log, "    => Riot Vanguard (vgk.sys), Easy Anti-Cheat sẽ không thể phát hiện hay chặn driver.")
-
-	fmt.Fprintln(log, "\n[*] BƯỚC 2: Tắt chế độ Windows Testsigning (Code Integrity)...")
+	fmt.Fprintln(log, "\n[*] BƯỚC 1: Tắt chế độ Windows Testsigning (Code Integrity)...")
 	if out, err := exec.Command("bcdedit", "/set", "testsigning", "off").CombinedOutput(); err != nil {
 		fmt.Fprintf(log, "[!] Cảnh báo bcdedit (%v): %s\n", err, strings.TrimSpace(string(out)))
 	} else {
-		fmt.Fprintln(log, "[V] Đã đảm bảo Testsigning = OFF (đáp ứng tiêu chuẩn Riot Vanguard).")
+		fmt.Fprintln(log, "[V] Đã đặt Testsigning = OFF.")
 	}
 
-	fmt.Fprintln(log, "\n[*] BƯỚC 3: Cấu hình Registry Driver Class MSHybrid & CASO (Zero-Driver-Reinstall)...")
+	fmt.Fprintln(log, "\n[*] BƯỚC 2: Cấu hình Registry Driver Class MSHybrid & CASO...")
 	var deviceID uint16
 	if is40HX {
 		deviceID = 0x1F0B
@@ -566,7 +549,7 @@ func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) error {
 		return fmt.Errorf("cấu hình đồ họa chưa hoàn tất: %w", err)
 	}
 
-	fmt.Fprintln(log, "\n[*] BƯỚC 4: Cấu hình Registry DirectX ưu tiên GPU hiệu năng cao cho Riot Games...")
+	fmt.Fprintln(log, "\n[*] BƯỚC 3: Cấu hình Registry DirectX ưu tiên GPU hiệu năng cao cho Riot Games...")
 	k, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\DirectX\UserGpuPreferences`, registry.SET_VALUE)
 	if err != nil {
 		fmt.Fprintf(log, "[!] Không thể mở Registry: %v\n", err)
@@ -605,7 +588,7 @@ func runOptimization(log io.Writer, is40HX, is30HX, sbOn, isWin11 bool) error {
 		fmt.Fprintln(log, "[V] Hoàn tất cấu hình Registry DirectX.")
 	}
 
-	fmt.Fprintln(log, "\n[*] BƯỚC 5: Cấu hình Borderless Windowed cho League of Legends...")
+	fmt.Fprintln(log, "\n[*] BƯỚC 4: Cấu hình Borderless Windowed cho League of Legends...")
 	modifiedCfgs, err := riotcore.FindAndConfigureLeagueConfigs(getLogicalDrives())
 	if err != nil {
 		return fmt.Errorf("cấu hình game.cfg chưa hoàn tất: %w", err)

@@ -30,6 +30,13 @@ func main() {
 	}
 
 	// 1. Xử lý các cờ dòng lệnh (CLI mode cho tác vụ tự chạy khi Logon và kịch bản)
+	if len(os.Args) == 4 && os.Args[1] == "-gen2-30hx" && os.Args[2] == "-silent" && os.Args[3] == "-batch" {
+		if err := runCMP30HXBatchUnlock(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 {
 		handleCLIArgs()
 		return
@@ -102,7 +109,7 @@ func handleCLIArgs() {
 				}
 			}
 			if !confirmed {
-				fmt.Fprintln(os.Stderr, "CẢNH BÁO: Tối ưu Riot sẽ tắt VulnerableDriverBlocklistEnable và thay đổi cấu hình hệ thống. Thêm -y để xác nhận.")
+				fmt.Fprintln(os.Stderr, "Tối ưu Riot sẽ thay đổi cấu hình đồ họa và game.cfg Liên Minh Huyền Thoại. Thêm -y để xác nhận.")
 				return
 			}
 			if err := app.RiotOptimize(true); err != nil {

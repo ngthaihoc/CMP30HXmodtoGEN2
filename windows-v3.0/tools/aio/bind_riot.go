@@ -122,23 +122,9 @@ func (a *App) RiotOptimize(confirmed bool) error {
 	a.Log("  [Riot Vanguard] Bắt đầu tối ưu hoá hệ thống")
 	a.Log("==============================================")
 
-	// 1. Dọn dẹp driver tạm thời trong kernel
-	a.Log("[*] Bước 1/3: Dọn dẹp driver kernel tạm thời (WinRing0 / ThrottleStop)...")
-	_ = exec.Command("sc.exe", "stop", "WinRing0_1_2_0").Run()
-	_ = exec.Command("sc.exe", "delete", "WinRing0_1_2_0").Run()
-	_ = exec.Command("sc.exe", "stop", "ThrottleStop").Run()
-	_ = exec.Command("sc.exe", "delete", "ThrottleStop").Run()
-
-	sysRoot := os.Getenv("SystemRoot")
-	if sysRoot == "" {
-		sysRoot = `C:\Windows`
-	}
-	_ = os.Remove(filepath.Join(sysRoot, "System32", "drivers", "WinRing0x64.sys"))
-	_ = os.Remove(filepath.Join(sysRoot, "System32", "drivers", "ThrottleStop.sys"))
-	a.Log("  [✓] Đã giải phóng sạch sẽ dịch vụ và file driver kernel khỏi hệ thống.")
-
-	// Cùng GPUTopologyDetector, MSHybrid/CASO và DirectX Global Router với công cụ độc lập.
-	a.Log("[*] Bước 2/3: Cấu hình MSHybrid, CASO và DirectX...")
+	// Driver cleanup is handled by the scoped unlock session that created its resources.
+	// Generic WinRing0 and ThrottleStop services may belong to other applications.
+	a.Log("[*] Bước 1/2: Cấu hình MSHybrid, CASO và DirectX...")
 	prof, _ := hxcore.FindGPUWithProfile()
 	res, graphicsErr := riotcore.ConfigureDriverClassRegistry(appLogWriter{a}, prof.DeviceID)
 	if graphicsErr != nil {
@@ -147,7 +133,7 @@ func (a *App) RiotOptimize(confirmed bool) error {
 	}
 
 	// 4. Quét và cấu hình Liên Minh Huyền Thoại (WindowMode=2, DX11Support=1)
-	a.Log("[*] Bước 3/3: Tự động cấu hình game.cfg Liên Minh Huyền Thoại...")
+	a.Log("[*] Bước 2/2: Tự động cấu hình game.cfg Liên Minh Huyền Thoại...")
 	modifiedCfgs, cfgErr := riotcore.FindAndConfigureLeagueConfigs(getLogicalDrives())
 	cfgCount := len(modifiedCfgs)
 	if cfgErr != nil {

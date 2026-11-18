@@ -101,6 +101,10 @@ func FindGPUPCI(wh syscall.Handle) (uint32, bool) {
 
 // FindGPUPCIWithBus: Quét PCI config qua HardwareBus định vị GPU BDF và trả về Profile
 func FindGPUPCIWithBus(bus HardwareBus) (uint32, GPUProfile, bool) {
+	return findGPUPCIWithBus(bus, 0)
+}
+
+func findGPUPCIWithBus(bus HardwareBus, deviceID uint16) (uint32, GPUProfile, bool) {
 	match := func(bdf uint32) (GPUProfile, bool) {
 		id, err := bus.ReadPCIConfig(bdf, 0x00)
 		if err != nil || id == 0xFFFFFFFF {
@@ -108,6 +112,9 @@ func FindGPUPCIWithBus(bus HardwareBus) (uint32, GPUProfile, bool) {
 		}
 		ven := uint16(id & 0xFFFF)
 		dev := uint16((id >> 16) & 0xFFFF)
+		if deviceID != 0 && dev != deviceID {
+			return GPUProfile{}, false
+		}
 		return LookupGPUProfile(ven, dev)
 	}
 

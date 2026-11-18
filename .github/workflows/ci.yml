@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: windows-latest
@@ -15,35 +18,89 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: 'stable'
-          check-latest: true
+          go-version-file: windows-v3.0/tools/aio/go.mod
+          cache-dependency-path: windows-v3.0/tools/*/go.sum
 
-      - name: Run Core Tests (40hxcore)
+      - name: Test and vet Go modules
         run: |
-          cd windows-v3.0/tools/40hxcore
-          go test -v ./...
+          foreach ($module in (Get-ChildItem -LiteralPath windows-v3.0/tools -File -Filter go.mod -Recurse)) {
+            Write-Host "::group::$($module.Directory.Name)"
+            Push-Location $module.DirectoryName
+            go test -cover ./...
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            go vet ./...
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Pop-Location
+            Write-Host '::endgroup::'
+          }
 
-      - name: Run Riot Tests (unlockriot)
-        run: |
-          cd windows-v3.0/tools/unlockriot
-          go test -v ./...
+      - name: Test batch status parsing
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Test-AIO-Status.ps1
 
-      - name: Run AIO Tests (aio)
-        run: |
-          cd windows-v3.0/tools/aio
-          go test -v ./...
+      - name: Test batch setup in isolation
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Test-AIO-Integration.ps1
 
-      - name: Verify Builds
+      - name: Test boot persistence in isolation
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Test-AIO-Persistence.ps1
+
+      - name: Test frontend telemetry
+        run: node --test windows-v3.0/tools/aio/tests/telemetry.test.cjs
+
+      - name: Build standalone Windows tools
+        working-directory: windows-v3.0/tools
         run: |
-          cd windows-v3.0/tools/inst40hx
-          go build -ldflags "-s -w -H=windowsgui" -o "../../release/40HXInstaller.exe" .
-          cd ../check40x
-          go build -ldflags "-s -w -H=windowsgui" -o "../../release/40HXCheck.exe" .
-          cd ../uninstall40x
-          go build -ldflags "-s -w -H=windowsgui" -o "../../release/40HXUninstaller.exe" .
-          cd ../unlockriot
-          go build -ldflags "-s -w -H=windowsgui" -o "../../release/UnlockRiotGame.exe" .
-          go install github.com/wailsapp/wails/v2/cmd/wails@latest
-          cd ../aio
-          wails build -clean -s -webview2 download -ldflags "-s -w -H=windowsgui" -o UnlockAIO.exe
-          cp build/bin/UnlockAIO.exe ../../release/UnlockAIO.exe
+          $tools = [ordered]@{
+            inst40hx = '40HXInstaller.exe'
+            check40x = '40HXCheck.exe'
+            uninstall40x = '40HXUninstaller.exe'
+            unlockriot = 'UnlockRiotGame.exe'
+            fix30hxcsm = 'FixCMP30HX_CSM.exe'
+          }
+          foreach ($module in $tools.Keys) {
+            Push-Location $module
+            go build -trimpath -ldflags '-s -w -H=windowsgui' -o "../../release/$($tools[$module])" .
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Pop-Location
+          }
+
+      - name: Build UnlockAIO.exe
+        working-directory: windows-v3.0/tools/aio
+        run: |
+          $wailsVersion = go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:GOBIN = Join-Path $env:RUNNER_TEMP 'cmp-go-bin'
+          go install "github.com/wailsapp/wails/v2/cmd/wails@$wailsVersion"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Join-Path $env:GOBIN 'wails.exe') build -clean -s -trimpath -nosyncgomod -webview2 download -ldflags '-s -w -H=windowsgui' -o UnlockAIO.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item -LiteralPath build/bin/UnlockAIO.exe -Destination ../../release/UnlockAIO.exe
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Bash syntax
+        shell: bash
+        run: |
+          bash -n Setup_CMP30HX_LinuxAIO.sh
+          bash -n windows-v3.0/tools/unlock40x/build_v70.sh
+
+      - name: Test Linux setup and removal in mock mode
+        shell: bash
+        run: |
+          status_file="$(mktemp)"
+          bash Setup_CMP30HX_LinuxAIO.sh -test --no-root --status-file="$status_file"
+          grep -Fx 'STATUS_CODE=GEN2_SUCCESS' "$status_file"
+          bash Setup_CMP30HX_LinuxAIO.sh -test --no-root --status-file="$status_file" --uninstall
+          grep -Fx 'STATUS_CODE=UNINSTALLED' "$status_file"
+
+      - name: Verify mock mode skips BAR0 access
+        shell: bash
+        run: |
+          source ./Setup_CMP30HX_LinuxAIO.sh
+          inject_bar0_mmio() {
+            echo "Mock mode called the MMIO injector" >&2
+            exit 1
+          }
+          IS_MOCK=1
+          unlock_gpu_pcie '0000:01:00.0'

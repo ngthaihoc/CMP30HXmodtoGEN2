@@ -93,11 +93,13 @@ type NegotiationResult struct {
 
 // NegotiationOptions thiết lập tham số cho quy trình đàm phán hoàn chỉnh
 type NegotiationOptions struct {
-	TargetGen   uint32
-	AllowGen3   bool
-	ForceRoot   bool
-	AllowStage2 bool
-	UserIsAdmin bool
+	TargetGen          uint32
+	DeviceID           uint16 // Zero selects any supported GPU.
+	AllowGen3          bool
+	ForceRoot          bool
+	AllowStage2        bool
+	UserIsAdmin        bool
+	SkipDisplayRestart bool
 	// Prepare chạy với GPU Profile đã dò được, trước mọi bước đàm phán.
 	Prepare func(GPUProfile)
 }
@@ -140,6 +142,10 @@ func (n *LinkNegotiator) sleep(d time.Duration) {
 
 // Negotiate thực thi quy trình huấn luyện PCIe sâu và tối ưu MRRS 512B
 func (n *LinkNegotiator) Negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint32, targetGen uint32, allowStage2 bool) (*NegotiationResult, error) {
+	return n.negotiate(gpuBDF, prof, rootBDF, targetGen, allowStage2, false)
+}
+
+func (n *LinkNegotiator) negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint32, targetGen uint32, allowStage2, skipDisplayRestart bool) (*NegotiationResult, error) {
 	// 1. eFuse Hardware Boundary Enforcement
 	if prof.DeviceID == 0x2189 && targetGen > 2 {
 		targetGen = 2
@@ -249,11 +255,13 @@ func (n *LinkNegotiator) Negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint3
 	if res.CurrentSpeed >= targetGen {
 		res.Success = true
 		res.Verdict = fmt.Sprintf("✅ Mở khoá Gen%d thành công: Băng thông hiện tại Gen%d x%d", targetGen, res.CurrentSpeed, res.CurrentWidth)
-		_ = n.bus.RestartNVDisplay()
+		if !skipDisplayRestart {
+			_ = n.bus.RestartNVDisplay()
+		}
 	} else if res.TargetTLS >= targetGen {
 		res.Success = true
 		res.Verdict = fmt.Sprintf("🟢 Gen%d đã cấu hình (TLS=Gen%d): Hiện đang Gen%d x%d do trạng thái tiết kiệm điện PCIe rảnh", targetGen, res.TargetTLS, res.CurrentSpeed, res.CurrentWidth)
-		if mrrsChanged {
+		if mrrsChanged && !skipDisplayRestart {
 			_ = n.bus.RestartNVDisplay()
 		}
 	} else {
@@ -530,7 +538,7 @@ func (n *LinkNegotiator) ensureMRRS512(bdf, cap uint32) (bool, error) {
 // Unlock dò GPU và thực hiện chính sách mở khóa chung cho các caller.
 func (n *LinkNegotiator) Unlock(opts NegotiationOptions) (*NegotiationVerdict, error) {
 	for attempt := 0; attempt < 3; attempt++ {
-		bdf, prof, found := FindGPUPCIWithBus(n.bus)
+		bdf, prof, found := findGPUPCIWithBus(n.bus, opts.DeviceID)
 		if found {
 			if opts.TargetGen == 0 {
 				opts.TargetGen = 2
@@ -602,7 +610,7 @@ func (n *LinkNegotiator) ExecuteNegotiation(gpuBDF uint32, prof GPUProfile, opts
 			return &NegotiationVerdict{TargetGen: targetGen, CurrentSpeed: cur, CurrentWidth: curWidth, Verdict: err.Error(),
 				StatusContract: StatusContract{StatusCode: StatusDrvFail, ErrorCode: "MRRS_OPTIMIZATION_FAILED", SpeedCurrent: cur, WidthCurrent: curWidth, TLSTarget: targetGen, Details: []string{err.Error()}}}, err
 		}
-		if changed {
+		if changed && !opts.SkipDisplayRestart {
 			_ = n.bus.RestartNVDisplay()
 		}
 		st := StatusContract{
@@ -670,7 +678,7 @@ func (n *LinkNegotiator) ExecuteNegotiation(gpuBDF uint32, prof GPUProfile, opts
 	if prof.DeviceID == 0x2189 || prof.Family == "TU116" {
 		allowStage2 = false
 	}
-	res, err := n.Negotiate(gpuBDF, prof, rootBDF, targetGen, allowStage2)
+	res, err := n.negotiate(gpuBDF, prof, rootBDF, targetGen, allowStage2, opts.SkipDisplayRestart)
 	if err != nil {
 		st := StatusContract{
 			StatusCode:   StatusDrvFail,

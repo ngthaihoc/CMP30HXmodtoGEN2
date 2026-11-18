@@ -120,30 +120,29 @@ func SetTestsigning() (bool, string) {
 	return false, "bcdedit 返回成功但读回仍为 No\n可能原因: Secure Boot 开启时 testsigning 无法生效\n请进 BIOS 关闭 Secure Boot 后重试"
 }
 
-// MountESP: 挂 ESP 到空闲盘符, 返回盘符字母(如 "S")或 ""。
-// 非管理员下 mountvol /S 失败 → 返回空(安全, 不弹 UAC)。
+// MountESP mounts the system ESP on a free drive letter and returns the letter.
+// An existing drive with an EFI directory may be a removable disk, so it is never reused.
+var espPathExists = func(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+var espRunOut = RunOut
+
 func MountESP() string {
 	candidates := []string{"Y", "X", "W", "V", "U", "T", "S"}
-
-	// Bước 1: Nếu ESP đã được mount ở một trong các ổ đĩa này từ trước, tái sử dụng ngay
-	for _, c := range candidates {
-		letter := c + ":"
-		if _, err := os.Stat(letter + "\\EFI"); err == nil {
-			return c
-		}
-	}
-
-	// Bước 2: Tìm ổ đĩa chưa bị chiếm dụng để mount
-	for _, c := range candidates {
-		letter := c + ":"
-		if _, err := os.Stat(letter + "\\"); err == nil {
+	for _, letter := range candidates {
+		drive := letter + ":"
+		if espPathExists(drive + "\\") {
 			continue
 		}
-		RunOut("mountvol.exe", letter, "/S")
-		if _, err := os.Stat(letter + "\\EFI"); err == nil {
-			return c
+		if _, err := espRunOut("mountvol.exe", drive, "/S"); err != nil {
+			continue
 		}
-		UnmountESP(c)
+		if espPathExists(drive + "\\EFI") {
+			return letter
+		}
+		UnmountESP(letter)
 	}
 	return ""
 }
@@ -151,6 +150,6 @@ func MountESP() string {
 // UnmountESP: 卸载盘符。
 func UnmountESP(letter string) {
 	if letter != "" {
-		RunOut("mountvol.exe", letter+":", "/D")
+		espRunOut("mountvol.exe", letter+":", "/D")
 	}
 }

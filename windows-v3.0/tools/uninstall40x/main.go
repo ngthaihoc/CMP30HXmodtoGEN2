@@ -112,20 +112,23 @@ func main() {
 	delRunKey()
 	fmt.Println("Hoàn thành")
 
-	// 3. 固件启动项
-	fmt.Print("[3/8] Xoá mục khởi động firmware '40HX Unlock' ... ")
+	// Restore the fallback bootloader before deleting the firmware entry.
+	fmt.Print("[3/8] Khôi phục EFI và dọn dẹp phân vùng ESP ... ")
+	_, espErr := hxcore.UninstallEspEfiChecked()
+	if espErr != nil {
+		fmt.Println("Thất bại:", espErr)
+		msgbox("Công cụ gỡ cài đặt 40HX", "Khôi phục EFI thất bại: "+espErr.Error()+"\nGiữ nguyên GSP, driver và mục khởi động để thử lại an toàn.", mbIconError)
+		if silent {
+			os.Exit(1)
+		}
+		return
+	}
+	fmt.Println("Đã xử lý")
+	fmt.Print("[4/8] Xoá mục khởi động firmware '40HX Unlock' ... ")
 	if delBootEntry() {
 		fmt.Println("Hoàn thành")
 	} else {
 		fmt.Println("Không tìm thấy (có thể đã được gỡ bỏ)")
-	}
-
-	// 4. ESP 解锁 EFI 文件
-	fmt.Print("[4/8] Xoá EFI mở khoá trong ESP ... ")
-	if delEspEfi() {
-		fmt.Println("Hoàn thành")
-	} else {
-		fmt.Println("Không tìm thấy/Bỏ qua")
 	}
 
 	// 5. 驱动服务
@@ -166,6 +169,9 @@ func main() {
 	// v2.6.0: 安装时关掉的快速启动/ASPM 属电源偏好, 卸载不回滚
 	fmt.Println("  Lưu ý: Thiết lập nguồn khi cài đặt (Fast Startup/tiết kiệm điện PCIe) được giữ nguyên, cách khôi phục xem trong README.")
 	if silent {
+		if leftover != "" {
+			os.Exit(1)
+		}
 		return
 	}
 	icon := uint(mbIconInfo)

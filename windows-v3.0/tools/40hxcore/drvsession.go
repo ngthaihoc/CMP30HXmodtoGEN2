@@ -1,11 +1,19 @@
 package hxcore
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
+
+	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/mgr"
 )
 
 // DriverFileProvider: Hàm hook tuỳ chọn cho phép ứng dụng cấp dữ liệu file driver nhúng (embed)
@@ -14,6 +22,7 @@ var DriverFileProvider func(filename string) ([]byte, error)
 // Test seams for driver execution and lifecycle mocking
 var (
 	driverCmdRunner          = RunOut
+	createDriverService      = createRuntimeDriverService
 	openWinRing0             = func() (syscall.Handle, error) { return OpenDevice(`\\.\WinRing0_1_2_0`) }
 	openThrottleStop         = func() (syscall.Handle, error) { return OpenThrottleStop() }
 	driverCloseHandle        = CloseHandle
@@ -27,76 +36,228 @@ func ThrottleStopAppRunning() bool {
 	return strings.Contains(out, "ThrottleStop.exe")
 }
 
-// EnsureDriverLoaded triển khai file và khởi động service cho driver kernel BYOVD
-func EnsureDriverLoaded(svcName, fileName string) error {
-	out, _ := driverCmdRunner("sc.exe", "query", svcName)
-	if strings.Contains(out, "RUNNING") {
+// driverCommandError recognizes sc.exe's Win32 exit status.
+func driverCommandError(err error, status windows.Errno) bool {
+	var exitErr *exec.ExitError
+	return errors.Is(err, status) || (errors.As(err, &exitErr) && exitErr.ExitCode() == int(status))
+}
+
+type ownedDriverService interface {
+	Start(...string) error
+	Control(svc.Cmd) (svc.Status, error)
+	Query() (svc.Status, error)
+	Delete() error
+	Close() error
+}
+
+type loadedDriver struct {
+	name    string
+	service ownedDriverService
+	path    string
+	file    os.FileInfo
+	started bool
+}
+
+func createRuntimeDriverService(name, path string) (ownedDriverService, error) {
+	m, err := mgr.Connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.Disconnect()
+	service, err := m.CreateService(name, `\SystemRoot\System32\drivers\`+filepath.Base(path), mgr.Config{
+		ServiceType:  windows.SERVICE_KERNEL_DRIVER,
+		StartType:    mgr.StartManual,
+		ErrorControl: mgr.ErrorNormal,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return service, nil
+}
+
+func acquireDriverSession() (func(), error) {
+	// The lifetime of this named handle excludes other project processes.
+	// We do not take thread ownership of the mutex.
+	name, _ := windows.UTF16PtrFromString("Global\\CMPUnlockDriverSession")
+	handle, err := windows.CreateMutex(nil, false, name)
+	if handle != 0 && err != nil {
+		_ = windows.CloseHandle(handle)
+	}
+	if errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+		return nil, errors.New("một phiên driver CMP khác đang chạy")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("không thể khóa phiên driver CMP: %w", err)
+	}
+	return func() { _ = windows.CloseHandle(handle) }, nil
+}
+
+func loadDriver(name, filename string, bundledOnly bool) (*loadedDriver, error) {
+	d := &loadedDriver{name: name, path: filepath.Join(sysRoot(), "System32", "drivers", filename)}
+	out, err := driverCmdRunner("sc.exe", "query", name)
+	if err == nil {
+		if strings.Contains(out, "RUNNING") {
+			return d, nil
+		}
+		if bundledOnly {
+			return d, fmt.Errorf("dịch vụ %s đã tồn tại và chưa chạy", name)
+		}
+		out, err = driverCmdRunner("sc.exe", "start", name)
+		if err != nil && !driverCommandError(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
+			return d, fmt.Errorf("không thể khởi động dịch vụ có sẵn %s: %s (%w)", name, strings.TrimSpace(out), err)
+		}
+		return d, nil
+	}
+	if !driverCommandError(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+		return d, fmt.Errorf("không thể kiểm tra dịch vụ %s: %s (%w)", name, strings.TrimSpace(out), err)
+	}
+
+	if err := d.stage(filename, bundledOnly); err != nil {
+		return d, err
+	}
+	d.service, err = createDriverService(name, d.path)
+	if err != nil {
+		if errors.Is(err, windows.ERROR_SERVICE_EXISTS) || errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
+			// Another process registered this name. Its service may use the file.
+			d.file = nil
+		}
+		return d, fmt.Errorf("không thể tạo dịch vụ %s: %w", name, err)
+	}
+	if err := d.service.Start(); err != nil {
+		return d, fmt.Errorf("không thể khởi động dịch vụ %s: %w", name, err)
+	}
+	d.started = true
+	return d, nil
+}
+
+func (d *loadedDriver) stage(filename string, bundledOnly bool) error {
+	info, err := os.Lstat(d.path)
+	if err == nil {
+		if bundledOnly {
+			return fmt.Errorf("giữ nguyên tệp driver có sẵn: %s", d.path)
+		}
+		if !info.Mode().IsRegular() || info.Size() == 0 {
+			return fmt.Errorf("tệp driver có sẵn không hợp lệ: %s", d.path)
+		}
 		return nil
 	}
-
-	sysDir := filepath.Join(sysRoot(), "System32", "drivers")
-	dst := filepath.Join(sysDir, fileName)
-
-	// Kiểm tra tính hợp lệ của file trong System32
-	needCopy := false
-	if b, err := os.ReadFile(dst); err != nil || len(b) == 0 {
-		needCopy = true
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 
-	if needCopy {
-		copied := false
-		// 1. Thử lấy từ ProgramData\40HXUnlock\drivers
-		src := filepath.Join(PdDrvDir(), fileName)
-		if sb, err := os.ReadFile(src); err == nil && len(sb) > 0 {
-			if err := os.WriteFile(dst, sb, 0o644); err == nil {
-				copied = true
-			}
+	var data []byte
+	if DriverFileProvider != nil {
+		data, err = DriverFileProvider(filename)
+	}
+	if !bundledOnly && (err != nil || len(data) == 0) {
+		data, err = os.ReadFile(filepath.Join(PdDrvDir(), filename))
+	}
+	if err != nil || len(data) == 0 {
+		return fmt.Errorf("không tìm thấy nguồn driver hợp lệ cho %s", filename)
+	}
+	f, err := os.OpenFile(d.path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	d.file, err = f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return err
+	}
+	_, writeErr := f.Write(data)
+	return errors.Join(writeErr, f.Close())
+}
+
+func (d *loadedDriver) cleanup(keep bool) error {
+	if d.service != nil {
+		defer d.service.Close()
+		if keep && d.started {
+			return nil
 		}
-		// 2. Thử lấy từ DriverFileProvider (embed trong bộ cài đặt)
-		if !copied && DriverFileProvider != nil {
-			if eb, err := DriverFileProvider(fileName); err == nil && len(eb) > 0 {
-				if err := os.WriteFile(dst, eb, 0o644); err == nil {
-					copied = true
-				}
-			}
+		if d.name == "ThrottleStop" && isThrottleStopAppRunning() {
+			return errors.New("ThrottleStop đang chạy; giữ nguyên driver của phiên này")
 		}
-		if copied {
-			_ = AddDefenderExclusions()
+		if err := stopOwnedDriver(d.service); err != nil {
+			return fmt.Errorf("không thể dừng dịch vụ %s: %w", d.name, err)
+		}
+		if err := d.service.Delete(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
+			return fmt.Errorf("không thể xóa dịch vụ %s: %w", d.name, err)
 		}
 	}
+	if d.file == nil {
+		return nil
+	}
+	current, err := os.Lstat(d.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(d.file, current) {
+		return fmt.Errorf("tệp driver đã bị thay thế; giữ nguyên %s", d.path)
+	}
+	return os.Remove(d.path)
+}
 
-	bin := `\SystemRoot\System32\drivers\` + fileName
-	driverCmdRunner("sc.exe", "create", svcName, "type=", "kernel", "start=", "demand", "binPath=", bin)
-	if _, err := driverCmdRunner("sc.exe", "start", svcName); err != nil {
-		// Thử xoá và tạo lại (phòng trường hợp service bị đánh dấu delete hoặc config lỗi)
-		driverCmdRunner("sc.exe", "delete", svcName)
-		driverCmdRunner("sc.exe", "create", svcName, "type=", "kernel", "start=", "demand", "binPath=", bin)
-		if out2, err2 := driverCmdRunner("sc.exe", "start", svcName); err2 != nil {
-			return fmt.Errorf("không thể khởi động dịch vụ %s: %s (%v)", svcName, strings.TrimSpace(out2), err2)
+func stopOwnedDriver(service ownedDriverService) error {
+	state, err := service.Control(svc.Stop)
+	if errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for state.State == svc.StopPending && time.Now().Before(deadline) {
+		time.Sleep(25 * time.Millisecond)
+		state, err = service.Query()
+		if err != nil {
+			return err
 		}
+	}
+	if state.State != svc.Stopped {
+		return fmt.Errorf("dịch vụ chưa dừng (trạng thái %d)", state.State)
 	}
 	return nil
 }
 
-// CleanupByovd dừng và xoá dịch vụ driver BYOVD cùng file .sys trong System32
-// nhằm đảm bảo an toàn tuyệt đối trước các hệ thống Anti-Cheat
+var diagnosticDrivers struct {
+	sync.Mutex
+	owned   []*loadedDriver
+	release func()
+}
+
+// EnsureDriverLoaded loads a driver for an explicit diagnostic session.
+func EnsureDriverLoaded(name, filename string) error {
+	diagnosticDrivers.Lock()
+	defer diagnosticDrivers.Unlock()
+	if diagnosticDrivers.release == nil {
+		release, err := acquireDriverSession()
+		if err != nil {
+			return err
+		}
+		diagnosticDrivers.release = release
+	}
+	d, err := loadDriver(name, filename, false)
+	diagnosticDrivers.owned = append(diagnosticDrivers.owned, d)
+	return err
+}
+
+// CleanupByovd releases only resources created by this process for diagnostics.
 func CleanupByovd() {
-	if driverStrategyGetter() == DriverStrategyResident {
+	diagnosticDrivers.Lock()
+	defer diagnosticDrivers.Unlock()
+	if diagnosticDrivers.release == nil {
 		return
 	}
-	appRunning := isThrottleStopAppRunning()
-
-	for _, d := range []struct{ name, file string }{
-		{"ThrottleStop", "ThrottleStop.sys"},
-		{"WinRing0_1_2_0", "WinRing0x64.sys"},
-	} {
-		if d.name == "ThrottleStop" && appRunning {
-			continue
-		}
-		driverCmdRunner("sc.exe", "stop", d.name)
-		driverCmdRunner("sc.exe", "delete", d.name)
-		_ = os.Remove(filepath.Join(sysRoot(), "System32", "drivers", d.file))
+	defer diagnosticDrivers.release()
+	keep := driverStrategyGetter() == DriverStrategyResident
+	for _, driver := range diagnosticDrivers.owned {
+		_ = driver.cleanup(keep)
 	}
+	diagnosticDrivers.owned = nil
+	diagnosticDrivers.release = nil
 }
 
 // DriverSession: Deep Module quản lý vòng đời đóng kín (RAII) của driver kernel
@@ -119,12 +280,27 @@ func RunScoped(prof GPUProfile, fn func(bus HardwareBus) error) error {
 	return RunScopedBus(needsMMIO, fn)
 }
 
-// RunScopedBus thực thi fn với HardwareBus, tải ThrottleStop nếu needsPL0=true
+// RunScopedBus uses the configured driver strategy for this hardware operation.
 func RunScopedBus(needsPL0 bool, fn func(bus HardwareBus) error) error {
-	defer CleanupByovd()
+	return runDriverSession(needsPL0, driverStrategyGetter() == DriverStrategyResident, false, fn)
+}
 
-	// 1. Tải và mở WinRing0
-	if err := EnsureDriverLoaded("WinRing0_1_2_0", "WinRing0x64.sys"); err != nil {
+// RunTransientDriverSession uses the bundled drivers, leaves existing driver
+// files and stopped services alone, and does not apply registry policy.
+func RunTransientDriverSession(needsPL0 bool, fn func(bus HardwareBus) error) error {
+	return runDriverSession(needsPL0, false, true, fn)
+}
+
+func runDriverSession(needsPL0, keep, bundledOnly bool, fn func(HardwareBus) error) (result error) {
+	release, err := acquireDriverSession()
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	wr, err := loadDriver("WinRing0_1_2_0", "WinRing0x64.sys", bundledOnly)
+	defer func() { result = errors.Join(result, wr.cleanup(keep)) }()
+	if err != nil {
 		return fmt.Errorf("WinRing0 error: %w", err)
 	}
 	wh, err := openWinRing0()
@@ -133,20 +309,18 @@ func RunScopedBus(needsPL0 bool, fn func(bus HardwareBus) error) error {
 	}
 	defer driverCloseHandle(wh)
 
-	// 2. Tải và mở ThrottleStop nếu cần truy cập MMIO vật lý (tuỳ chọn: trên CPU AMD không hỗ trợ MSR Intel hoặc khi bị chặn, tiếp tục với WinRing0)
-	var th syscall.Handle = 0
+	var th syscall.Handle
 	if needsPL0 {
-		if err := EnsureDriverLoaded("ThrottleStop", "ThrottleStop.sys"); err == nil {
-			if t, err := openThrottleStop(); err == nil {
-				th = t
+		ts, err := loadDriver("ThrottleStop", "ThrottleStop.sys", bundledOnly)
+		defer func() { result = errors.Join(result, ts.cleanup(keep)) }()
+		if err == nil {
+			if handle, err := openThrottleStop(); err == nil {
+				th = handle
 				defer driverCloseHandle(th)
 			}
 		}
 	}
-
-	// 3. Khởi tạo ProductionBus và chạy closure
-	bus := NewProductionBus(wh, th)
-	return fn(bus)
+	return fn(NewProductionBus(wh, th))
 }
 
 // ClassifyDriverLoadError chuyển đổi mã lỗi nạp driver thô sang nguyên nhân và cách xử lý dễ hiểu (HVCI, Memory Integrity, v.v.)
@@ -154,13 +328,13 @@ func ClassifyDriverLoadError(raw string) string {
 	r := strings.ToLower(raw)
 	switch {
 	case strings.Contains(r, "1275"):
-		return "Cài đặt bảo mật Windows chặn tải driver (Lỗi 1275) — Thường do Defender bật 'Cách ly lõi / Tính toàn vẹn bộ nhớ', 'Danh sách chặn driver dễ bị tấn công' hoặc Smart App Control; vui lòng tạm tắt các bảo vệ này trong Windows Security rồi thử lại (sau khi nạp xong có thể bật lại)"
+		return "Chính sách bảo mật Windows chặn tải driver (Lỗi 1275). Xem nhật ký Code Integrity để xác định chính sách đang áp dụng."
 	case strings.Contains(r, "577"):
-		return "Hình ảnh driver bị hệ thống từ chối (Lỗi 577) — Tệp đã bị chỉnh sửa hoặc bị chính sách bảo mật chặn; vui lòng chạy lại 40HXInstaller để triển khai lại driver gốc và kiểm tra cài đặt 'Driver không tin cậy' trong Windows Security"
+		return "Windows từ chối chữ ký driver (Lỗi 577). Kiểm tra tính toàn vẹn của gói phát hành và nhật ký Code Integrity."
 	case strings.Contains(r, "1058"):
-		return "Dịch vụ bị vô hiệu hóa (Lỗi 1058) — Công cụ đã cố gắng kích hoạt lại và tạo lại dịch vụ"
+		return "Dịch vụ có sẵn bị vô hiệu hóa (Lỗi 1058). Công cụ giữ nguyên cấu hình dịch vụ."
 	case strings.Contains(r, "1072"):
-		return "Dịch vụ đang ở trạng thái tồn đọng 'Đánh dấu để xóa' (Lỗi 1072) — Công cụ đã tạo lại và thử lại"
+		return "Dịch vụ đang được đánh dấu để xóa (Lỗi 1072). Đợi Windows hoàn thành hoặc khởi động lại rồi thử lại."
 	case strings.Contains(r, "拒绝访问"), strings.Contains(r, "access is denied"), strings.Contains(r, "error 5"), strings.Contains(r, " 5:"):
 		return "Không đủ quyền hạn hoặc bị chặn driver (Lỗi 5 / Access Denied) — Nếu đã chạy Administrator: Lỗi do Tính toàn vẹn bộ nhớ (HVCI) hoặc Danh sách chặn driver (Vulnerable Driver Blocklist). CẦN KHỞI ĐỘNG LẠI MÁY (REBOOT) để Windows áp dụng tắt HVCI."
 	case strings.Contains(r, "1060"), strings.Contains(r, "不存在"):

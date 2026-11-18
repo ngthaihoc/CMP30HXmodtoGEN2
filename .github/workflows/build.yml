@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: windows-latest
@@ -14,38 +17,41 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: 'stable'
-          check-latest: true
+          go-version-file: windows-v3.0/tools/aio/go.mod
+          cache-dependency-path: windows-v3.0/tools/*/go.sum
 
-      - name: Build Installer (40HXInstaller.exe)
+      - name: Build standalone Windows tools
+        working-directory: windows-v3.0/tools
         run: |
-          cd windows-v3.0/tools/inst40hx
-          go build -ldflags "-s -w -H=windowsgui" -o "../../release/40HXInstaller.exe" .
+          $tools = [ordered]@{
+            inst40hx = '40HXInstaller.exe'
+            check40x = '40HXCheck.exe'
+            uninstall40x = '40HXUninstaller.exe'
+            unlockriot = 'UnlockRiotGame.exe'
+            fix30hxcsm = 'FixCMP30HX_CSM.exe'
+          }
+          foreach ($module in $tools.Keys) {
+            Push-Location $module
+            go build -trimpath -ldflags '-s -w -H=windowsgui' -o "../../release/$($tools[$module])" .
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Pop-Location
+          }
 
-      - name: Build Diagnostic (40HXCheck.exe)
+      - name: Build UnlockAIO.exe
+        working-directory: windows-v3.0/tools/aio
         run: |
-          cd windows-v3.0/tools/check40x
-          go build -ldflags "-s -w -H=windowsgui" -o "../../release/40HXCheck.exe" .
-
-      - name: Build Uninstaller (40HXUninstaller.exe)
-        run: |
-          cd windows-v3.0/tools/uninstall40x
-          go build -ldflags "-s -w -H=windowsgui" -o "../../release/40HXUninstaller.exe" .
-
-      - name: Build UnlockRiotGame (UnlockRiotGame.exe)
-        run: |
-          cd windows-v3.0/tools/unlockriot
-          go build -ldflags "-s -w -H=windowsgui" -o "../../release/UnlockRiotGame.exe" .
-
-      - name: Build All-In-One (UnlockAIO.exe)
-        run: |
-          go install github.com/wailsapp/wails/v2/cmd/wails@latest
-          cd windows-v3.0/tools/aio
-          wails build -clean -s -webview2 download -ldflags "-s -w -H=windowsgui" -o UnlockAIO.exe
-          cp build/bin/UnlockAIO.exe ../../release/UnlockAIO.exe
+          $wailsVersion = go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:GOBIN = Join-Path $env:RUNNER_TEMP 'cmp-go-bin'
+          go install "github.com/wailsapp/wails/v2/cmd/wails@$wailsVersion"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Join-Path $env:GOBIN 'wails.exe') build -clean -s -trimpath -nosyncgomod -webview2 download -ldflags '-s -w -H=windowsgui' -o UnlockAIO.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item -LiteralPath build/bin/UnlockAIO.exe -Destination ../../release/UnlockAIO.exe
 
       - name: Upload Release Binaries
         uses: actions/upload-artifact@v4
         with:
           name: release-binaries
           path: windows-v3.0/release/*.exe
+          if-no-files-found: error

@@ -72,17 +72,17 @@ func RunGen2Startup(input Gen2StartupInput, hooks Gen2StartupHooks) Gen2StartupR
 
 	result := Gen2StartupResult{Verdict: verdict, NegotiationError: negotiationErr, Err: negotiationErr}
 	if scopedErr != nil {
-		result.Err = scopedErr
-	}
-	if scopedErr != nil {
-		if verdict == nil {
-			result.StatusWriteError = hooks.WriteStatus(StatusContract{
-				StatusCode: StatusDrvFail,
-				ErrorCode:  "DRIVER_SESSION_FAILED",
-				Details:    []string{"Không thể khởi tạo phiên driver: " + scopedErr.Error()},
-			})
-			return result
+		result.Err = errors.Join(negotiationErr, scopedErr)
+		errorCode := "DRIVER_SESSION_FAILED"
+		if verdict != nil {
+			errorCode = "DRIVER_CLEANUP_FAILED"
 		}
+		result.StatusWriteError = hooks.WriteStatus(StatusContract{
+			StatusCode: StatusDrvFail,
+			ErrorCode:  errorCode,
+			Details:    []string{"Phiên driver không hoàn tất: " + scopedErr.Error()},
+		})
+		return result
 	}
 	if verdict == nil {
 		return result

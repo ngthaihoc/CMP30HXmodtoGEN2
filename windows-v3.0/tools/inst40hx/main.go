@@ -193,7 +193,9 @@ func main() {
 			resetPnpMain()
 			return
 		case "-uninstall":
-			uninstall()
+			if !uninstall() {
+				os.Exit(1)
+			}
 			return
 		case "-status":
 			status()
@@ -860,7 +862,10 @@ func install() {
 
 	// 4. Driver
 	fmt.Println("[4/8] Chuẩn bị driver Gen2 BYOVD (ThrottleStop + WinRing0)...")
-	installDrivers()
+	if err := installDrivers(); err != nil {
+		fmt.Println("Không thể chuẩn bị driver Gen2:", err)
+		return
+	}
 
 	// 4.5 Defender
 	fmt.Print("[4.5/8] Thêm loại trừ Defender (chống xoá nhầm driver) ... ")
@@ -928,89 +933,44 @@ func install() {
 		mbIconInfo)
 }
 
-func installDrivers() {
-	sysDir := os.Getenv("SystemRoot") + "\\System32\\drivers"
-	svcRunning := func(name string) bool {
-		out, _ := hxcore.RunOut("sc.exe", "query", name)
-		return strings.Contains(out, "RUNNING")
+func installDrivers() error {
+	directory := hxcore.PdDrvDir()
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return err
 	}
-	tsApp := hxcore.ThrottleStopAppRunning()
-	for _, d := range []struct{ name, file string }{
-		{"ThrottleStop", "ThrottleStop.sys"},
-		{"WinRing0_1_2_0", "WinRing0x64.sys"},
-	} {
-		dst := filepath.Join(sysDir, d.file)
-		if tsApp {
-			fmt.Printf("  Phát hiện phần mềm ThrottleStop đang chạy, tái sử dụng driver %s (không ghi đè/không xoá)\n", d.name)
-			continue
+	for _, path := range []string{filepath.Dir(directory), directory} {
+		info, err := os.Lstat(path)
+		if err != nil || !info.IsDir() {
+			return fmt.Errorf("thư mục driver không hợp lệ: %s: %w", path, err)
 		}
-		if svcRunning(d.name) {
-			fmt.Printf("  %s đang chạy, bỏ qua ghi đè (giữ nguyên trạng thái)\n", d.name)
-			continue
+	}
+	for _, name := range []string{"ThrottleStop.sys", "WinRing0x64.sys"} {
+		data, err := embedded.ReadFile("embed/" + name)
+		if err != nil {
+			return err
 		}
-		hxcore.RunOut("sc.exe", "stop", d.name)
-		pdDir := filepath.Join(os.Getenv("ProgramData"), "40HXUnlock", "drivers")
-		os.MkdirAll(pdDir, 0o755)
-		copyEmbedTo(filepath.Join(pdDir, d.file), d.file)
-		if err := copyEmbedTo(dst, d.file); err != nil {
-			if _, statErr := os.Stat(dst); statErr != nil {
-				fmt.Printf("  [!] Sao chép %s thất bại: %v\n", d.file, err)
-				continue
+		path := filepath.Join(directory, name)
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, os.ErrExist) {
+			info, statErr := os.Lstat(path)
+			existing, readErr := os.ReadFile(path)
+			if statErr != nil || readErr != nil || !info.Mode().IsRegular() || !bytes.Equal(existing, data) {
+				return fmt.Errorf("bản sao driver đã tồn tại và khác nội dung: %s", path)
 			}
-		} else {
-			fmt.Printf("  Đã sao chép %s\n", d.file)
+			continue
 		}
-		ensureService(d.name, d.file)
-	}
-	fmt.Println("  File driver Gen2 đã sẵn sàng (demand), đăng nhập sẽ được tác vụ SYSTEM nạp và tự dọn dẹp")
-}
-
-// ensureService: 仅注册(或更新)驱动服务, 不在此处加载。
-// 安装阶段加载 40hx_bridge(映射 GPU BAR0)会与正在运行的 nvlddmkm 争用硬件,
-// 实测导致 40HX 设备报 code19 / 后续启动异常。加载推迟到重启后登录时的 -gen2。
-// v2.4.6 关键修复(社区 #1/#2 根因):
-//
-//	驱动服务注册为 start=demand(手动), 需在登录后由 -gen2 拉起。
-//	而 -gen2 走 Run 键以普通用户权限运行 → sc start 需要管理员 →
-//	"[SC] StartService: OpenService 失败 5: 拒绝访问" → 驱动永远起不来
-//	→ Gen2 永远失败(用户现象: 算力解锁 OK 但 Gen2 ✗)。
-//	正解 = 保持 demand(不改成 auto! 详见下), 并把 -gen2 的执行权限升到
-//	SYSTEM: 注册 SYSTEM 计划任务(登录时触发 + 延迟 30s)跑 -gen2 -silent,
-//	既不需要 UAC 弹窗, 又保留"登录后才加载驱动"的安全时序。
-//
-// 为什么不改成 start=auto: type=kernel auto 驱动在开机早期由 SCM 加载,
-// 会与随后初始化的 nvlddmkm 争用 GPU BAR0 — 历史上实测导致 40HX 报
-// code19 / Windows 启动异常进安全模式。demand + 登录后加载是经过验证的时序。
-func ensureService(name string, sysFile string) {
-	bin := fmt.Sprintf("\\SystemRoot\\System32\\drivers\\%s", sysFile)
-	// 创建(已存在会失败, 忽略); 启动类型 demand — 由 SYSTEM 任务登录后拉起
-	hxcore.RunOut("sc.exe", "create", name, "type=", "kernel", "start=", "demand", "binPath=", bin)
-	out, err := hxcore.RunOut("sc.exe", "query", name)
-	if err != nil || !strings.Contains(out, "STATE") {
-		fmt.Printf("  [!] 注册服务 %s 失败: %s\n", name, strings.TrimSpace(out))
-		return
-	}
-	// 纠正被安全软件/策略改错的启动类型(Disabled 会导致 Gen2 永远拉不起)。
-	// 启动类型在 sc qc, 不在 query; 状态(STOPPED/RUNNING)在 query。
-	start := "demand"
-	if qc, qerr := hxcore.RunOut("sc.exe", "qc", name); qerr == nil {
-		qcu := strings.ToUpper(qc)
-		switch {
-		case strings.Contains(qcu, "DISABLED"):
-			hxcore.RunOut("sc.exe", "config", name, "start=", "demand")
-			start = "demand (ban đầu bị đổi DISABLED, đã sửa lại)"
-		case strings.Contains(qcu, "AUTO_START"):
-			start = "auto (chú ý: nên là demand)"
+		if err != nil {
+			return err
+		}
+		_, writeErr := file.Write(data)
+		closeErr := file.Close()
+		if err := errors.Join(writeErr, closeErr); err != nil {
+			_ = os.Remove(path)
+			return err
 		}
 	}
-	stateS := "?"
-	switch {
-	case strings.Contains(out, "RUNNING"):
-		stateS = "RUNNING"
-	case strings.Contains(out, "STOPPED"):
-		stateS = "STOPPED"
-	}
-	fmt.Printf("  Dịch vụ %s đã đăng ký (%s, %s), sau khi đăng nhập sẽ do tác vụ SYSTEM nạp\n", name, start, stateS)
+	fmt.Println("Driver Gen2 đã được lưu trong ProgramData. Phiên unlock sẽ nạp driver khi cần.")
+	return nil
 }
 
 func setupBootEntry() error {
@@ -1163,21 +1123,6 @@ func gen2Main() {
 				gen2StatusFail(fmt.Sprintf("Lỗi thương lượng link: %v", err))
 				return verdict, err
 			}
-			gen2Succeeded = verdict.Success
-			fmt.Printf("[Gen%d] %s\n", verdict.TargetGen, verdict.Verdict)
-			if verdict.Success {
-				gen2Notify(fmt.Sprintf("%s PCIe đã đạt Gen%d, không cần thao tác thêm.", profile.Name, verdict.CurrentSpeed))
-			} else if verdict.StatusContract.StatusCode == hxcore.StatusHwLimit {
-				gen2Notify(fmt.Sprintf("%s Liên kết phần cứng PCIe không hỗ trợ Gen%d (chỉ Gen%d), an toàn dừng lại.\nCần kiểm tra thiết lập BIOS khe cắm bo mạch chủ, riser/dây nối hoặc giới hạn VBIOS/Strap.", profile.Name, targetGen, verdict.CurrentSpeed))
-			}
-			if !hasArg("-silent") && !hasArg("-y") {
-				icon := uint(mbIconInfo)
-				txt := fmt.Sprintf("Băng thông PCIe: Hiện tại Gen%d x%d (Mục tiêu Gen%d)\n%s\n", verdict.CurrentSpeed, verdict.CurrentWidth, verdict.TargetGen, verdict.Verdict)
-				if !verdict.Success {
-					icon = mbIconError
-				}
-				msgbox(fmt.Sprintf("%s Gen%d", profile.Name, verdict.TargetGen), txt, icon)
-			}
 			return verdict, nil
 		},
 		WriteStatus: hxcore.WriteStructuredGen2Status,
@@ -1199,28 +1144,37 @@ func gen2Main() {
 			}
 		},
 	})
+	gen2Succeeded = result.Err == nil && result.StatusWriteError == nil &&
+		(result.Skipped || (result.Verdict != nil && result.Verdict.Success))
+	if result.StatusWriteError != nil {
+		fmt.Printf("[Gen2] Ghi file trạng thái thất bại: %v\n", result.StatusWriteError)
+		gen2Notify("Không thể lưu kết quả Gen2: " + result.StatusWriteError.Error())
+	}
 	if result.Skipped {
-		gen2Succeeded = true
 		fmt.Println("[Gen2] Một tiến trình Gen2 khác đang chạy, bỏ qua (bảo vệ đơn phiên)")
 		return
 	}
-	if result.StatusWriteError != nil {
-		fmt.Printf("[Gen2] Ghi file trạng thái thất bại: %v\n", result.StatusWriteError)
-	}
-	if result.NegotiationError != nil {
+	if result.Err != nil {
+		if result.NegotiationError == nil {
+			fmt.Println("[Gen2] Lỗi phiên driver:", result.Err)
+			gen2Notify("Lỗi phiên driver: " + result.Err.Error())
+		}
 		return
 	}
-	if result.Err == nil {
+	if result.StatusWriteError != nil || result.Verdict == nil {
 		return
 	}
-	if !isAdmin() {
-		fmt.Println("[Gen2] Lỗi tải driver và hiện tại không có quyền Admin: Chuyển cho SYSTEM task, thoát im lặng:", result.Err)
-		gen2StatusFail("Driver chưa được tải, hiện tại quyền hạn bị hạn chế (do task SYSTEM xử lý)")
-		return
+	verdict := result.Verdict
+	fmt.Printf("[Gen%d] %s\n", verdict.TargetGen, verdict.Verdict)
+	icon := uint(mbIconInfo)
+	if !verdict.Success {
+		icon = mbIconError
 	}
-	fmt.Println("[Gen2] Lỗi khởi động driver:", result.Err)
-	gen2StatusFail("Driver không chạy được: " + result.Err.Error())
-	gen2Notify("Lỗi khởi động driver kernel.\nNguyên nhân: Antivirus chặn WinRing0/ThrottleStop hoặc xung đột phần mềm.\nVui lòng chạy với quyền Administrator.")
+	txt := fmt.Sprintf("Băng thông PCIe: Hiện tại Gen%d x%d (Mục tiêu Gen%d)\n%s\n", verdict.CurrentSpeed, verdict.CurrentWidth, verdict.TargetGen, verdict.Verdict)
+	if verdict.StatusContract.StatusCode == hxcore.StatusHwLimit {
+		txt += "Kiểm tra thiết lập BIOS khe cắm, riser/dây nối hoặc giới hạn VBIOS/Strap."
+	}
+	msgbox(fmt.Sprintf("%s Gen%d", verdict.Profile.Name, verdict.TargetGen), txt, icon)
 }
 
 // probe30HX: Chẩn đoán chỉ đọc PCIe và BAR0 cho GPU NVIDIA được hỗ trợ.
@@ -1398,15 +1352,15 @@ func gen2StatusFail(reason string) {
 
 // ===================== Gỡ cài đặt / Trạng thái =====================
 
-func uninstall() {
+func uninstall() bool {
 	if !isAdmin() {
 		fmt.Println("[!] Cần quyền quản trị viên.")
 		msgbox("Bộ cài đặt 40HX", "Cần quyền quản trị viên.\nVui lòng nhấp chuột phải vào chương trình -> Chọn Run as administrator.", mbIconError)
-		return
+		return false
 	}
 	if lockOnce(`Local\40HXUninstaller_v1`) == nil {
 		msgbox("Bộ cài đặt 40HX", "Chương trình gỡ cài đặt đang chạy, vui lòng không nhấp trùng lặp.", mbIconInfo)
-		return
+		return false
 	}
 	fmt.Println("=== Gỡ cài đặt mở khoá 40HX (v3.0.0 Cấp thành phần) ===")
 	fmt.Print("[1/8] Xoá tác vụ lịch trình ... ")
@@ -1418,26 +1372,36 @@ func uninstall() {
 	fmt.Print("[2/8] Xoá khoá Run tự khởi động Gen2 ... ")
 	hxcore.UninstallRunKey()
 	fmt.Println("Hoàn thành")
-	fmt.Print("[3/8] Xoá mục khởi động firmware '40HX Unlock' ... ")
-	if hxcore.UninstallBootEntry() {
+	fmt.Print("[3/8] Xoá EFI mở khoá trong ESP ... ")
+	removedEFI, espErr := hxcore.UninstallEspEfiChecked()
+	switch {
+	case espErr != nil:
+		fmt.Println("Khôi phục EFI thất bại:", espErr)
+	case removedEFI:
 		fmt.Println("Hoàn thành")
-	} else {
-		fmt.Println("Không tìm thấy (có thể đã được gỡ bỏ)")
-	}
-	fmt.Print("[4/8] Xoá EFI mở khoá trong ESP ... ")
-	if hxcore.UninstallEspEfi() {
-		fmt.Println("Hoàn thành")
-	} else {
+	default:
 		fmt.Println("Không tìm thấy/bỏ qua")
+	}
+	fmt.Print("[4/8] Xoá mục khởi động firmware '40HX Unlock' ... ")
+	switch {
+	case espErr != nil:
+		fmt.Println("Bỏ qua vì khôi phục EFI chưa hoàn tất")
+	case hxcore.UninstallBootEntry():
+		fmt.Println("Hoàn thành")
+	default:
+		fmt.Println("Không tìm thấy (có thể đã được gỡ bỏ)")
 	}
 	fmt.Println("[5/8] Dừng và xoá dịch vụ driver...")
 	hxcore.UninstallDriverServices()
 	fmt.Println("[6/8] Xoá file driver...")
 	hxcore.UninstallDriverFiles()
 	fmt.Print("[6.5/8] Xoá EnableGpuFirmware (khôi phục GSP về tắt mặc định) ... ")
-	if hxcore.UninstallGspKey() {
+	switch {
+	case espErr != nil:
+		fmt.Println("Bỏ qua vì khôi phục EFI chưa hoàn tất")
+	case hxcore.UninstallGspKey():
 		fmt.Println("Hoàn thành")
-	} else {
+	default:
 		fmt.Println("Không tìm thấy (bỏ qua)")
 	}
 	fmt.Print("[6.6/8] Dọn dẹp ProgramData + khoá chính sách ... ")
@@ -1452,16 +1416,27 @@ func uninstall() {
 	fmt.Println("[7/8] Kiểm tra tàn dư...")
 	left := hxcore.CheckLeftover()
 	fmt.Println()
-	fmt.Println("Gỡ cài đặt hoàn tất. Khuyến nghị khởi động lại máy tính.")
-	fmt.Println("  Lưu ý: Thiết lập nguồn khi cài đặt (Fast Startup/ASPM) được giữ nguyên — cách khôi phục xem README §2.4.")
 	icon := uint(mbIconInfo)
-	txt := "Gỡ cài đặt hoàn tất.\nKhuyến nghị khởi động lại máy tính.\n\nLưu ý: Thiết lập nguồn khi cài đặt (Fast Startup/ASPM)\nđược giữ nguyên theo sở thích nguồn — cách khôi phục xem README §2.4.\n"
-	if len(left) > 0 {
+	completed := espErr == nil && len(left) == 0
+	message := "Gỡ cài đặt hoàn tất."
+	if !completed {
 		icon = mbIconError
-		txt += "\nVẫn còn tàn dư:\n" + strings.Join(left, "\n")
+		message = "Gỡ cài đặt chưa hoàn tất. Xem nhật ký để biết các mục cần xử lý."
+	}
+	fmt.Println(message, "Khuyến nghị khởi động lại máy tính.")
+	fmt.Println("  Lưu ý: Thiết lập nguồn khi cài đặt (Fast Startup/ASPM) được giữ nguyên, cách khôi phục xem README §2.4.")
+	txt := message + "\nKhuyến nghị khởi động lại máy tính.\n\nThiết lập nguồn khi cài đặt (Fast Startup/ASPM) được giữ nguyên. Xem README §2.4.\n"
+	if espErr != nil {
+		txt += "\nKhôi phục EFI thất bại: " + espErr.Error()
+	}
+	if len(left) > 0 {
+		details := "\nVẫn còn tàn dư:\n" + strings.Join(left, "\n")
+		fmt.Println(details)
+		txt += details
 	}
 	txt += "\nNhật ký chi tiết: " + filepath.Join(os.TempDir(), "40HX_installer.log")
 	msgbox("Bộ cài đặt 40HX", txt, icon)
+	return completed
 }
 
 func status() {

@@ -148,6 +148,32 @@ func TestRunGen2StartupScopedErrorWritesFailureStatus(t *testing.T) {
 	}
 }
 
+func TestRunGen2StartupCleanupFailureOverridesSuccessfulNegotiation(t *testing.T) {
+	cleanupErr := errors.New("driver cleanup failed")
+	var written StatusContract
+	got := RunGen2Startup(Gen2StartupInput{}, Gen2StartupHooks{
+		AcquireSingleInstance: func() (bool, func()) { return true, func() {} },
+		WaitForDriver:         func() {},
+		RunScoped: func(fn func(HardwareBus) error) error {
+			if err := fn(nil); err != nil {
+				return err
+			}
+			return cleanupErr
+		},
+		Negotiate: func(HardwareBus, Gen2StartupInput) (*NegotiationVerdict, error) {
+			return &NegotiationVerdict{Success: true, StatusContract: StatusContract{StatusCode: StatusGen2Success}}, nil
+		},
+		WriteStatus: func(status StatusContract) error { written = status; return nil },
+		RetryDisposition: func(*NegotiationVerdict) Gen2RetryDisposition {
+			t.Error("retry policy ran after driver cleanup failed")
+			return Gen2RetryNone
+		},
+	})
+	if !errors.Is(got.Err, cleanupErr) || written.StatusCode != StatusDrvFail {
+		t.Fatalf("result = %+v; written = %+v", got, written)
+	}
+}
+
 func TestRunGen2StartupCleanupOnScopedError(t *testing.T) {
 	state := &startupTestHookState{}
 	errSession := errors.New("scoped")

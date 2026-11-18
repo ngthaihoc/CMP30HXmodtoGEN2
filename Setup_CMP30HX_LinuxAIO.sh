@@ -348,7 +348,8 @@ inject_bar0_mmio() {
         return 0
     fi
 
-    local injector_bin="${injector_dir}/mmio_injector"
+    local injector_bin
+    injector_bin="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/linux-mmio/mmio_injector"
 
     if [[ ! -x "${injector_bin}" ]]; then
         echo -e "      ${C_RED}[X] Loi: Khong tim thay executable mmio_injector tai ${injector_bin}. Vui long compile binary truoc khi chay script.${C_RESET}"
@@ -369,7 +370,6 @@ unlock_gpu_pcie() {
 
     if [[ "${IS_MOCK}" -eq 1 ]]; then
         echo -e "    [*] [MOCK] Tim thay Upstream Root Port: 0000:00:01.0 (Cap: CAP_EXP)"
-        inject_bar0_mmio "${gpu_bdf}"
         echo -e "    [OK] GPU LNKCTL2 TLS -> Gen2 (0x0001 -> 0x0002)"
         echo -e "    [OK] Root Port LNKCTL2 TLS -> Gen2 (0x0001 -> 0x0002)"
         echo -e "    [OK] Tối ưu MRRS GPU: 128B -> 512B (DEVCTL: 0x0000 -> 0x2000)"
@@ -410,7 +410,7 @@ unlock_gpu_pcie() {
     fi
 
     # 1. MMIO BAR0 Injection
-    inject_bar0_mmio "${gpu_bdf}"
+    inject_bar0_mmio "${gpu_bdf}" || return 1
 
     # 2. Cai dat Target Link Speed = Gen2 (TLS=2) tren GPU LNKCTL2 (Cap + 0x30)
     local cur_gpu_ctl2_raw
@@ -613,11 +613,13 @@ install_systemd_service() {
         
         # Also copy mmio_injector
         local injector_dir="$(dirname "${current_script}")/linux-mmio"
-        if [[ -d "${injector_dir}" ]]; then
-            mkdir -p "/usr/local/bin/linux-mmio"
-            cp -f "${injector_dir}/mmio_injector" "/usr/local/bin/linux-mmio/"
-            chmod +x "/usr/local/bin/linux-mmio/mmio_injector"
+        if [[ ! -f "${injector_dir}/mmio_injector" ]]; then
+            echo -e "      ${C_RED}[X] Khong tim thay mmio_injector trong goi cai dat.${C_RESET}"
+            return 1
         fi
+        mkdir -p "/usr/local/bin/linux-mmio" || return 1
+        cp -f "${injector_dir}/mmio_injector" "/usr/local/bin/linux-mmio/" || return 1
+        chmod +x "/usr/local/bin/linux-mmio/mmio_injector" || return 1
     fi
 
     # Tao file systemd service (chay truoc display-manager de tranh xung dot driver)
@@ -1081,4 +1083,6 @@ main() {
     exit 0
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

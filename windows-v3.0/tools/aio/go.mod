@@ -4,10 +4,10 @@ go 1.26.5
 
 require (
 	40hxcore v0.0.0
-	riotcore v0.0.0
 	github.com/wailsapp/go-webview2 v1.0.22
 	github.com/wailsapp/wails/v2 v2.16.0
 	golang.org/x/sys v0.47.0
+	riotcore v0.0.0
 )
 
 require (

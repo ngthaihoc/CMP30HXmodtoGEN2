@@ -364,7 +364,10 @@ func runWebGUI() {
 			fmt.Println("[PCIe] Bước 1/2: Mở khoá phiên hiện tại...")
 			gen2Main()
 			fmt.Println("[PCIe] Bước 2/2: Cài đặt tự khởi động khi đăng nhập Windows...")
-			installDrivers()
+			if err := installDrivers(); err != nil {
+				fmt.Println("  [Driver] Không thể chuẩn bị:", err)
+				return
+			}
 			if err := hxcore.AddDefenderExclusions(); err != nil {
 				fmt.Println("  [Defender] Lỗi ngoại lệ:", err)
 			} else {

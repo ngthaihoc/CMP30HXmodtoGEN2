@@ -1,20 +1,24 @@
 @echo off
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0" || exit /b 1
+
 :: The installer can remove shared driver services. Do not touch existing ones.
-sc query WinRing0_1_2_0 >nul 2>&1 && exit /b 1
-sc query ThrottleStop >nul 2>&1 && exit /b 1
+"%SystemRoot%\System32\sc.exe" query WinRing0_1_2_0 >nul 2>&1 && exit /b 1
+"%SystemRoot%\System32\sc.exe" query ThrottleStop >nul 2>&1 && exit /b 1
 if exist "%SystemRoot%\System32\drivers\WinRing0x64.sys" exit /b 1
 if exist "%SystemRoot%\System32\drivers\ThrottleStop.sys" exit /b 1
-del /f /q "%ProgramData%\40HXUnlock\gen2_status.txt" >nul 2>&1
-if exist "%ProgramData%\40HXUnlock\gen2_status.txt" exit /b 1
-where nvidia-smi >nul 2>&1 && nvidia-smi -pm 1 >nul 2>&1
-"40HXInstaller.exe" -gen2-30hx -silent
-where nvidia-smi >nul 2>&1 && nvidia-smi -pm 1 >nul 2>&1
-powershell -noProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 15; $statusFile = [System.IO.Path]::Combine($env:ProgramData, '40HXUnlock\gen2_status.txt'); if (Test-Path $statusFile) { $c = Get-Content $statusFile -Raw; if ($c -match 'GPU TLS=Gen1|chua dat|chưa đạt') { $devs = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -match 'VEN_10DE&(DEV_2189|DEV_1F0B)' }; foreach ($d in $devs) { try { & pnputil /restart-device $d.InstanceId >$null 2>&1 } catch {}; try { Disable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } catch {}; try { $st = (Get-PnpDevice -InstanceId $d.InstanceId -ErrorAction SilentlyContinue).Status; if ($st -ne 'OK') { Enable-PnpDevice -InstanceId $d.InstanceId -Confirm:$false -ErrorAction SilentlyContinue } } catch {} }; Start-Sleep -Seconds 2; try { Restart-Service NVDisplay.ContainerLocalSystem -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 } catch {}; Start-Process -FilePath (Join-Path $pwd.Path '40HXInstaller.exe') -ArgumentList '-gen2-30hx -silent' -Wait; try { & 'nvidia-smi' -pm 1 } catch {} } }" >nul 2>&1
-:: Shared driver services and files may belong to other applications.
-:: Dam bao service NVDisplay.ContainerLocalSystem va NVIDIA Control Panel hoat dong
-sc config NVDisplay.ContainerLocalSystem start= auto >nul 2>&1
-sc start NVDisplay.ContainerLocalSystem >nul 2>&1
-reg add "HKCR\Directory\Background\shellex\ContextMenuHandlers\NvCplDesktopContext" /ve /t REG_SZ /d "{3D1975AF-48C6-4f8e-A182-BE0E08FA86A9}" /f >nul 2>&1
-endlocal
+
+if not exist "%ProgramData%\40HXUnlock" mkdir "%ProgramData%\40HXUnlock" >nul 2>&1
+if not exist "%ProgramData%\40HXUnlock\" exit /b 1
+if exist "%ProgramData%\40HXUnlock\cmp30hx_batch_status.txt\" exit /b 1
+del /f /q "%ProgramData%\40HXUnlock\cmp30hx_batch_status.txt" >nul 2>&1
+if exist "%ProgramData%\40HXUnlock\cmp30hx_batch_status.txt" exit /b 1
+
+start "" /wait "%~dp0UnlockAIO.exe" -gen2-30hx -silent -batch
+set "INSTALLER_EXIT=%ERRORLEVEL%"
+if not "%INSTALLER_EXIT%"=="0" exit /b %INSTALLER_EXIT%
+if not exist "%ProgramData%\40HXUnlock\cmp30hx_batch_status.txt" exit /b 1
+
+"%SystemRoot%\System32\findstr.exe" /i /x /c:"STATUS_CODE=GEN2_SUCCESS" "%ProgramData%\40HXUnlock\cmp30hx_batch_status.txt" >nul 2>&1
+if errorlevel 1 exit /b 1
+exit /b 0
