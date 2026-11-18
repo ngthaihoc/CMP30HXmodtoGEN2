@@ -94,6 +94,9 @@ jobs:
           bash Setup_CMP30HX_LinuxAIO.sh -test --no-root --status-file="$status_file" --uninstall
           grep -Fx 'STATUS_CODE=UNINSTALLED' "$status_file"
 
+      - name: Test Linux uninstall ownership and error reporting
+        shell: bash
+        run: bash scripts/Test-Linux-Uninstall.sh
       - name: Verify mock mode skips BAR0 access
         shell: bash
         run: |

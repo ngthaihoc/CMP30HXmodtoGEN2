@@ -3,16 +3,17 @@
 # CONG CU CAI DAT TU DONG GEN2 X16 CHO NVIDIA CMP 30HX (TU116) TREN LINUX (AIO)
 # Ho tro: Ubuntu, Debian, HiveOS, RaveOS, Fedora, Arch Linux, v.v.
 # Tac gia: ngthaihoc (https://github.com/ngthaihoc/CMP30HXmodtoGEN2)
-# Phien ban: 3.1.0
+# Phien ban: 3.1.2
 # ==============================================================================
 
 set -uo pipefail
 
-VERSION="3.1.0"
+VERSION="3.1.2"
 SYSTEMD_SVC_NAME="cmp30hx-gen2-unlock.service"
 SYSTEMD_SVC_PATH="/etc/systemd/system/${SYSTEMD_SVC_NAME}"
 BIN_INSTALL_PATH="/usr/local/bin/cmp30hx-unlock"
 SUSPEND_HOOK_PATH="/lib/systemd/system-sleep/cmp30hx-unlock"
+MMIO_INSTALL_PATH="/usr/local/bin/linux-mmio/mmio_injector"
 
 # Bien danh cho kiem thu va mo phong (Mock Testing)
 IS_MOCK=0
@@ -607,23 +608,25 @@ install_systemd_service() {
     current_script="$(readlink -f "$0")"
 
     if [[ "${current_script}" != "${BIN_INSTALL_PATH}" ]]; then
-        cp -f "${current_script}" "${BIN_INSTALL_PATH}"
-        chmod +x "${BIN_INSTALL_PATH}"
+        cp -f "${current_script}" "${BIN_INSTALL_PATH}" || return 1
+        chmod +x "${BIN_INSTALL_PATH}" || return 1
         echo -e "      [OK] Da sao chep script den: ${BIN_INSTALL_PATH}"
-        
-        # Also copy mmio_injector
+
         local injector_dir="$(dirname "${current_script}")/linux-mmio"
         if [[ ! -f "${injector_dir}/mmio_injector" ]]; then
             echo -e "      ${C_RED}[X] Khong tim thay mmio_injector trong goi cai dat.${C_RESET}"
             return 1
         fi
-        mkdir -p "/usr/local/bin/linux-mmio" || return 1
-        cp -f "${injector_dir}/mmio_injector" "/usr/local/bin/linux-mmio/" || return 1
-        chmod +x "/usr/local/bin/linux-mmio/mmio_injector" || return 1
+        mkdir -p "$(dirname "${MMIO_INSTALL_PATH}")" || return 1
+        cp -f "${injector_dir}/mmio_injector" "${MMIO_INSTALL_PATH}" || return 1
+        chmod +x "${MMIO_INSTALL_PATH}" || return 1
+    elif [[ ! -x "${MMIO_INSTALL_PATH}" ]]; then
+        echo -e "      ${C_RED}[X] mmio_injector da cai khong ton tai hoac khong the chay.${C_RESET}"
+        return 1
     fi
 
     # Tao file systemd service (chay truoc display-manager de tranh xung dot driver)
-    cat <<EOF > "${SYSTEMD_SVC_PATH}"
+    cat <<EOF > "${SYSTEMD_SVC_PATH}" || return 1
 [Unit]
 Description=NVIDIA CMP 30HX PCIe Gen2 x16 Unlock Service
 DefaultDependencies=no
@@ -639,11 +642,11 @@ ExecStart=${BIN_INSTALL_PATH} --daemon
 WantedBy=multi-user.target
 EOF
 
-    chmod 644 "${SYSTEMD_SVC_PATH}"
+    chmod 644 "${SYSTEMD_SVC_PATH}" || return 1
 
     # Tao hook phuc hoi sau Sleep / Suspend / Hibernate
-    mkdir -p "$(dirname "${SUSPEND_HOOK_PATH}")"
-    cat <<EOF > "${SUSPEND_HOOK_PATH}"
+    mkdir -p "$(dirname "${SUSPEND_HOOK_PATH}")" || return 1
+    cat <<EOF > "${SUSPEND_HOOK_PATH}" || return 1
 #!/bin/sh
 case "\$1/\$2" in
   post/*)
@@ -651,16 +654,16 @@ case "\$1/\$2" in
     ;;
 esac
 EOF
-    chmod +x "${SUSPEND_HOOK_PATH}"
+    chmod +x "${SUSPEND_HOOK_PATH}" || return 1
 
-    # Kich hoat service voi systemctl neu co systemd
     if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
-        systemctl daemon-reload >/dev/null 2>&1 || true
-        systemctl enable "${SYSTEMD_SVC_NAME}" >/dev/null 2>&1 || true
+        systemctl daemon-reload >/dev/null 2>&1 || return 1
+        systemctl enable "${SYSTEMD_SVC_NAME}" >/dev/null 2>&1 || return 1
         echo -e "      ${C_GREEN}[OK]${C_RESET} Systemd service '${SYSTEMD_SVC_NAME}' da duoc kich hoat."
         echo -e "      ${C_GREEN}[OK]${C_RESET} Sleep/resume hook da duoc cai dat tai: ${SUSPEND_HOOK_PATH}"
     else
-        echo -e "      ${C_YELLOW}[!] He thong khong su dung systemd; hay them '${BIN_INSTALL_PATH} --daemon' vao /etc/rc.local${C_RESET}"
+        echo -e "      ${C_RED}[X] He thong khong chay systemd; khong the dang ky tu dong khoi dong.${C_RESET}"
+        return 1
     fi
 }
 
@@ -679,19 +682,37 @@ uninstall_service() {
         exit 0
     fi
 
-    if command -v systemctl >/dev/null 2>&1; then
-        systemctl stop "${SYSTEMD_SVC_NAME}" >/dev/null 2>&1 || true
-        systemctl disable "${SYSTEMD_SVC_NAME}" >/dev/null 2>&1 || true
-        systemctl daemon-reload >/dev/null 2>&1 || true
+    local failed=0
+    if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+        if systemctl is-active --quiet "${SYSTEMD_SVC_NAME}"; then
+            systemctl stop "${SYSTEMD_SVC_NAME}" >/dev/null 2>&1 || failed=1
+        fi
+        if systemctl is-enabled --quiet "${SYSTEMD_SVC_NAME}"; then
+            systemctl disable "${SYSTEMD_SVC_NAME}" >/dev/null 2>&1 || failed=1
+        fi
     fi
 
-    rm -f "${SYSTEMD_SVC_PATH}"
-    rm -f "${SUSPEND_HOOK_PATH}"
-    rm -f "${BIN_INSTALL_PATH}"
-    rm -rf "/usr/local/bin/linux-mmio"
+    local path
+    for path in "${SYSTEMD_SVC_PATH}" "${SUSPEND_HOOK_PATH}" "${BIN_INSTALL_PATH}" "${MMIO_INSTALL_PATH}"; do
+        if [[ -e "${path}" || -L "${path}" ]]; then
+            if ! rm -f -- "${path}" || [[ -e "${path}" || -L "${path}" ]]; then
+                echo -e "${C_RED}[X] Khong the xoa: ${path}${C_RESET}" >&2
+                failed=1
+            fi
+        fi
+    done
+    rmdir -- "$(dirname "${MMIO_INSTALL_PATH}")" 2>/dev/null || true
+    if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+        systemctl daemon-reload >/dev/null 2>&1 || failed=1
+    fi
+    if [[ "${failed}" -ne 0 ]]; then
+        write_status_file "UNINSTALL_FAILED" "0" "0" "0" "ERR_UNINSTALL" "Khong the go het service, hook hoac tep cua cong cu."
+        echo -e "${C_RED}[X] Go cai dat chua hoan tat. Kiem tra loi va chay lai.${C_RESET}" >&2
+        exit 1
+    fi
 
-    echo -e "${C_GREEN}[V] Da go bo hoan toan Systemd Service va Sleep Hook.${C_RESET}"
-    echo "    He thong da duoc khoi phuc trang thai ban dau."
+    echo -e "${C_GREEN}[V] Da go bo Systemd Service va Sleep Hook.${C_RESET}"
+    echo "    Khoi dong lai neu can lam moi trang thai PCIe runtime."
     write_status_file "UNINSTALLED" "1" "16" "1" "NONE" "Da go bo thanh cong service tren Linux."
     exit 0
 }
@@ -973,7 +994,13 @@ main() {
     # 5. Cai dat Systemd Service
     if [[ ${is_daemon} -eq 0 ]]; then
         echo ""
-        install_systemd_service
+        if [[ ${count_fail} -gt 0 ]]; then
+            echo -e "${C_YELLOW}[!] Khong dang ky service khi mo khoa PCIe that bai.${C_RESET}"
+        elif ! install_systemd_service; then
+            write_status_file "INSTALL_FAILED" "0" "0" "0" "ERR_PERSISTENCE" "Khong the cai dat service tu dong khoi dong."
+            echo -e "${C_RED}[X] Khong the cai dat service tu dong khoi dong.${C_RESET}" >&2
+            exit 1
+        fi
     fi
 
     # 6. Tong ket va Kiem tra
