@@ -98,6 +98,7 @@ $statePath = $env:PERSISTENCE_STATE
 $caseName = $env:PERSISTENCE_CASE
 $taskName = 'CMP30HX_Batch_Gen2_Unlock'
 $otherTaskName = 'CMP30HX_Gen2_Unlock'
+$installedExe = Join-Path (Split-Path -Parent $runner) 'UnlockAIO.exe'
 $global:PERSISTENCE_TASKS = @()
 $global:PERSISTENCE_LIST_COUNT = 0
 
@@ -139,8 +140,32 @@ function Unregister-ScheduledTask {
 
 function Test-Path {
     param($LiteralPath, $PathType)
-    if ($LiteralPath -like 'Registry::*') { Write-Call 'registry-cleanup:'; return $false }
+    if ($LiteralPath -like 'Registry::*') {
+        Write-Call 'registry-cleanup:'
+        return $caseName -in 'remove unrelated Go task', 'remove legacy installed AIO' -and
+            $LiteralPath -eq 'Registry::HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Run'
+    }
     Microsoft.PowerShell.Management\Test-Path -LiteralPath $LiteralPath -PathType $PathType
+}
+
+function Get-Item {
+    param($LiteralPath)
+    if ($LiteralPath -like 'Registry::*') {
+        $valuePath = if ($caseName -eq 'remove legacy installed AIO') { $installedExe } else { 'D:\Other\UnlockAIO.exe' }
+        $item = [pscustomobject]@{ ValuePath = $valuePath }
+        Add-Member -InputObject $item -MemberType ScriptMethod -Name GetValue -Value {
+            param($name, $default, $options)
+            if ($name -ne '40HXGen2') { return $null }
+            return '"' + $this.ValuePath + '" -gen2 -silent'
+        }
+        return $item
+    }
+    Microsoft.PowerShell.Management\Get-Item -LiteralPath $LiteralPath
+}
+
+function Remove-ItemProperty {
+    param($LiteralPath, $Name, $ErrorAction)
+    Write-Call ("registry-remove:" + $Name)
 }
 
 function Get-ChildItem {
@@ -149,12 +174,19 @@ function Get-ChildItem {
     Microsoft.PowerShell.Management\Get-ChildItem -LiteralPath $LiteralPath -ErrorAction $ErrorAction
 }
 
-if ($caseName -eq 'remove unrelated Go task' -or $caseName -eq 'register collision') {
+if ($caseName -in 'remove unrelated Go task', 'remove legacy installed AIO', 'register collision') {
     $name = if ($caseName -eq 'register collision') { $taskName } else { $otherTaskName }
+    $execute = if ($caseName -eq 'remove legacy installed AIO') { $installedExe } else { 'D:\Other\UnlockAIO.exe' }
     $global:PERSISTENCE_TASKS += [pscustomobject]@{
         TaskName = $name
         State = 'Ready'
-        Actions = @([pscustomobject]@{ Execute = 'UnlockAIO.exe'; Arguments = '-gen2-30hx -silent -guard' })
+        Actions = @([pscustomobject]@{ Execute = $execute; Arguments = '-gen2 -silent' })
+    }
+} elseif ($caseName -eq 'remove task mentions runner') {
+    $global:PERSISTENCE_TASKS += [pscustomobject]@{
+        TaskName = $taskName
+        State = 'Ready'
+        Actions = @([pscustomobject]@{ Execute = 'cmd.exe'; Arguments = ('/d /c echo "' + $runner + '"') })
     }
 } elseif ($caseName -in 'remove matching', 'unregister fails', 'running task completes') {
     $state = if ($caseName -eq 'running task completes') { 'Running' } else { 'Ready' }
@@ -218,7 +250,21 @@ try {
     $code = Invoke-SchedulerCase 'remove unrelated Go task' -Remove
     Assert-Condition ($code -eq 0) "Unrelated task removal case failed with exit code $code"
     Assert-Condition (-not (Select-String -LiteralPath $logPath -Pattern '^(disable|stop|unregister):' -Quiet)) 'Unrelated Go task was modified'
+    Assert-Condition (-not (Select-String -LiteralPath $logPath -Pattern '^registry-remove:' -Quiet)) 'Unrelated Run value was removed'
     Write-Host 'PASS removal preserves unrelated Go task'
+
+    Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
+    $code = Invoke-SchedulerCase 'remove task mentions runner' -Remove
+    Assert-Condition ($code -eq 0) "Unrelated task mention case failed with exit code $code"
+    Assert-Condition (-not (Select-String -LiteralPath $logPath -Pattern '^(disable|stop|unregister):' -Quiet)) 'Task mentioning runner was modified'
+    Write-Host 'PASS removal ignores a task that only mentions the runner'
+
+    Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
+    $code = Invoke-SchedulerCase 'remove legacy installed AIO' -Remove
+    Assert-Condition ($code -eq 0) "Legacy installed AIO removal failed with exit code $code"
+    Assert-Condition (Select-String -LiteralPath $logPath -Pattern '^unregister:CMP30HX_Gen2_Unlock$' -Quiet) 'Legacy installed AIO task was not removed'
+    Assert-Condition (Select-String -LiteralPath $logPath -Pattern '^registry-remove:40HXGen2$' -Quiet) 'Installed AIO Run value was not removed'
+    Write-Host 'PASS removal of legacy installed AIO task'
 
     Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
     $code = Invoke-SchedulerCase 'remove matching' -Remove

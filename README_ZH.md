@@ -35,7 +35,7 @@ Setup_CMP30HX_WindowsAIO.bat -uninstall
 - `-preflight` 只检查硬件。必须恰好有 **一张**已连接且 PCI ID 为 CMP 30HX `10DE:2189` 的显卡。没有匹配设备或匹配多张时脚本会拒绝继续。
 - 解锁成功后，脚本注册 SYSTEM 计划任务 `CMP30HX_Batch_Gen2_Unlock`，在开机 45 秒后或登录 10 秒后运行。安装文件位于 `%ProgramFiles%\40HXUnlock`，批处理状态文件位于 `%ProgramData%\40HXUnlock\cmp30hx_batch_status.txt`。
 - 新安装时使用 `-notask` 可跳过持久化任务注册，解锁仅作用于当前会话。
-- `-cleantasks` 只移除安装器的持久化任务和已知旧任务名称，不卸载工具文件。
+- `-cleantasks` 仅在批处理任务或已知旧任务运行 `%ProgramFiles%\40HXUnlock` 中的 `RunUnlock.bat` 或 `UnlockAIO.exe` 时移除它们，同时清理指向这些文件的 Run 注册表值。其他任务和工具文件会保留。
 - `-uninstall` 移除安装器的持久化设置和自有文件，同时保留共享驱动、服务及配置。卸载后重启，以清除当前会话的运行时解锁状态。
 
 验证安装时，检查安装结果，并在 GPU 负载下检查 PCIe 状态。随后重启并再次检查。使用以下命令查看计划任务：

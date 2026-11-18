@@ -3,12 +3,12 @@
 # CONG CU CAI DAT TU DONG GEN2 X16 CHO NVIDIA CMP 30HX (TU116) TREN LINUX (AIO)
 # Ho tro: Ubuntu, Debian, HiveOS, RaveOS, Fedora, Arch Linux, v.v.
 # Tac gia: ngthaihoc (https://github.com/ngthaihoc/CMP30HXmodtoGEN2)
-# Phien ban: 3.1.3
+# Phien ban: 3.1.4
 # ==============================================================================
 
 set -uo pipefail
 
-VERSION="3.1.3"
+VERSION="3.1.4"
 SYSTEMD_SVC_NAME="cmp30hx-gen2-unlock.service"
 SYSTEMD_SVC_PATH="/etc/systemd/system/${SYSTEMD_SVC_NAME}"
 BIN_INSTALL_PATH="/usr/local/bin/cmp30hx-unlock"

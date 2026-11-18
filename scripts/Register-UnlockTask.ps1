@@ -21,39 +21,54 @@ if (-not [IO.Path]::IsPathRooted($ExePath)) {
 }
 
 $runnerPath = [IO.Path]::GetFullPath($ExePath)
+$ownedExePath = Join-Path (Split-Path -Parent $runnerPath) 'UnlockAIO.exe'
+$ownedTargets = @($runnerPath, $ownedExePath)
 
 function Test-ActionTargetsRunner($Task, [string]$Path) {
     foreach ($action in $Task.Actions) {
-        $actionText = "$($action.Execute) $($action.Arguments)".Replace('/', '\')
-        $pathIndex = $actionText.IndexOf($Path, [StringComparison]::OrdinalIgnoreCase)
-        if ($pathIndex -lt 0) {
-            continue
-        }
-        $pathEnd = $pathIndex + $Path.Length
-        if ($pathEnd -eq $actionText.Length -or $actionText[$pathEnd] -in '"', ' ', [char]9) {
-            return $true
+        $command = [Environment]::ExpandEnvironmentVariables([string]$action.Execute).Trim('"')
+        $arguments = ([string]$action.Arguments).Trim()
+        if ($command -ieq $Path) { return $true }
+        if ($command -ieq $env:ComSpec -or $command -ieq 'cmd.exe') {
+            if ($arguments -ieq ('/d /c ""' + $Path + '""') -or
+                $arguments -ieq ('/c ""' + $Path + '""')) { return $true }
         }
     }
     return $false
 }
 
-function Test-ValueTargetsRunner([string]$Value, [string]$Path) {
-    $expandedValue = [Environment]::ExpandEnvironmentVariables($Value).Replace('/', '\')
-    $pathIndex = $expandedValue.IndexOf($Path, [StringComparison]::OrdinalIgnoreCase)
-    if ($pathIndex -lt 0) {
-        return $false
+function Test-ActionTargetsOwned($Task, [string[]]$Paths) {
+    foreach ($path in $Paths) {
+        if (Test-ActionTargetsRunner $Task $path) { return $true }
     }
-    $pathEnd = $pathIndex + $Path.Length
-    return $pathEnd -eq $expandedValue.Length -or $expandedValue[$pathEnd] -in '"', ' ', [char]9
+    return $false
 }
 
-function Remove-RunValue([string]$KeyPath, [string]$ValueName, [string]$Path) {
+function Test-ValueTargetsRunner([string]$Value, [string]$Path) {
+    $expandedValue = [Environment]::ExpandEnvironmentVariables($Value).Trim()
+    $quotedPath = '"' + $Path + '"'
+    if ($expandedValue -ieq $Path -or $expandedValue -ieq $quotedPath) { return $true }
+    if ($expandedValue.StartsWith($quotedPath, [StringComparison]::OrdinalIgnoreCase)) {
+        $tail = $expandedValue.Substring($quotedPath.Length)
+        return $tail.Length -gt 0 -and [char]::IsWhiteSpace($tail[0])
+    }
+    return $false
+}
+
+function Test-ValueTargetsOwned([string]$Value, [string[]]$Paths) {
+    foreach ($path in $Paths) {
+        if (Test-ValueTargetsRunner $Value $path) { return $true }
+    }
+    return $false
+}
+
+function Remove-RunValue([string]$KeyPath, [string]$ValueName, [string[]]$Paths) {
     if (-not (Test-Path -LiteralPath $KeyPath)) {
         return
     }
     $key = Get-Item -LiteralPath $KeyPath
     $value = $key.GetValue($ValueName, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-    if ($null -ne $value -and (Test-ValueTargetsRunner ([string]$value) $Path)) {
+    if ($null -ne $value -and (Test-ValueTargetsOwned ([string]$value) $Paths)) {
         Remove-ItemProperty -LiteralPath $KeyPath -Name $ValueName -ErrorAction Stop
     }
 }
@@ -66,7 +81,8 @@ if ($Remove) {
     $taskNames = @($taskName) + $legacyTaskNames
     foreach ($name in $taskNames) {
         $task = Get-RootTask $name
-        if ($null -eq $task -or -not (Test-ActionTargetsRunner $task $runnerPath)) {
+        $targets = if ($name -eq $taskName) { @($runnerPath) } else { $ownedTargets }
+        if ($null -eq $task -or -not (Test-ActionTargetsOwned $task $targets)) {
             continue
         }
         Disable-ScheduledTask -InputObject $task -ErrorAction Stop | Out-Null
@@ -88,10 +104,11 @@ if ($Remove) {
         }
     }
 
-    Remove-RunValue 'Registry::HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Run' 'CMP30HX_Gen2' $runnerPath
-    Remove-RunValue 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run' '40HXGen2' $runnerPath
+    Remove-RunValue 'Registry::HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Run' 'CMP30HX_Gen2' $ownedTargets
+    Remove-RunValue 'Registry::HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Run' '40HXGen2' $ownedTargets
+    Remove-RunValue 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run' '40HXGen2' $ownedTargets
     foreach ($hive in Get-ChildItem -LiteralPath 'Registry::HKEY_USERS' -ErrorAction Stop) {
-        Remove-RunValue "$($hive.PSPath)\Software\Microsoft\Windows\CurrentVersion\Run" '40HXGen2' $runnerPath
+        Remove-RunValue "$($hive.PSPath)\Software\Microsoft\Windows\CurrentVersion\Run" '40HXGen2' $ownedTargets
     }
     exit 0
 }

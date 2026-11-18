@@ -26,7 +26,7 @@ Command-line options:
 | --- | --- |
 | `Setup_CMP30HX_WindowsAIO.bat -preflight` | Read-only check requiring exactly one connected GPU with PCI ID `10DE:2189`. Zero or multiple matches fail. |
 | `Setup_CMP30HX_WindowsAIO.bat -notask` | Installs/unlocks for the current session without registering persistence on a fresh install. |
-| `Setup_CMP30HX_WindowsAIO.bat -cleantasks` | Removes the installer persistence task and known legacy tasks. Keeps tool files. |
+| `Setup_CMP30HX_WindowsAIO.bat -cleantasks` | Removes the batch task and known legacy tasks only when they run the installed `RunUnlock.bat` or `UnlockAIO.exe`; removes matching Run values and keeps other tasks and tool files. |
 | `Setup_CMP30HX_WindowsAIO.bat -uninstall` | Removes the batch package's persistence and owned files. Retains shared drivers, services, and configuration. |
 
 After a successful unlock, the SYSTEM task `CMP30HX_Batch_Gen2_Unlock` runs 45 seconds after startup or 10 seconds after logon. The installer files are placed in `%ProgramFiles%\40HXUnlock`; batch status is written to `%ProgramData%\40HXUnlock\cmp30hx_batch_status.txt`.

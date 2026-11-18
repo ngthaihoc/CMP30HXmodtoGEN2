@@ -31,7 +31,7 @@ Run `Setup_CMP30HX_WindowsAIO.bat` as Administrator from the package root. The f
 The batch installer files are placed in `%ProgramFiles%\40HXUnlock`. Status is written to `%ProgramData%\40HXUnlock\cmp30hx_batch_status.txt`.
 
 - Select menu option [2] or use `-uninstall` to remove persistence and owned installer files while retaining shared drivers, services, and configuration.
-- Use `-cleantasks` to remove only the persistence task and known legacy tasks while keeping installed tool files.
+- Use `-cleantasks` to remove the batch task and known legacy tasks only when they run `RunUnlock.bat` or `UnlockAIO.exe` from `%ProgramFiles%\40HXUnlock`. Matching Run values are removed; other tasks and installed tool files are kept.
 - Reboot after uninstall to clear runtime unlock state. Keep the ZIP/extracted folder through uninstall.
 
 Verify after installation by checking the success result and PCIe link under GPU load. Reboot and check again. View the task with `Get-ScheduledTask -TaskName 'CMP30HX_Batch_Gen2_Unlock'`. After removing persistence, `schtasks /query /tn "CMP30HX_Batch_Gen2_Unlock"` should report that the task cannot be found. Reboot and confirm the unlock no longer starts automatically.

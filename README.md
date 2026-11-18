@@ -35,7 +35,7 @@ Menu tương tác có năm lựa chọn: [1] cài đặt và mở khóa, [2] g�
 - `-preflight` chỉ kiểm tra phần cứng. Yêu cầu đúng **một** GPU đang kết nối có PCI ID CMP 30HX `10DE:2189`. Không có hoặc có nhiều hơn một GPU khớp sẽ bị từ chối.
 - Sau khi mở khóa thành công, script đăng ký tác vụ SYSTEM `CMP30HX_Batch_Gen2_Unlock`: chạy sau khởi động 45 giây hoặc sau đăng nhập 10 giây. Tệp cài được đặt trong `%ProgramFiles%\40HXUnlock`, trạng thái batch trong `%ProgramData%\40HXUnlock\cmp30hx_batch_status.txt`.
 - `-notask` bỏ qua đăng ký persistence ở lần cài mới. Mở khóa chỉ có hiệu lực trong phiên hiện tại.
-- `-cleantasks` chỉ gỡ tác vụ persistence của bộ cài và các tên tác vụ cũ đã biết, không gỡ các tệp công cụ.
+- `-cleantasks` gỡ tác vụ batch và tên tác vụ cũ chỉ khi chúng chạy `RunUnlock.bat` hoặc `UnlockAIO.exe` trong `%ProgramFiles%\40HXUnlock`; khóa Run trỏ tới hai tệp này cũng được dọn. Tác vụ khác và tệp công cụ được giữ lại.
 - `-uninstall` gỡ tác vụ persistence và các tệp thuộc bộ cài, đồng thời giữ lại driver, service và cấu hình dùng chung. Khởi động lại để xóa trạng thái mở khóa runtime của phiên hiện tại.
 
 Để xác minh, kiểm tra kết quả cài đặt và trạng thái PCIe dưới tải GPU, sau đó khởi động lại và kiểm tra lại. Tác vụ có thể xem bằng:

@@ -35,7 +35,7 @@ The interactive menu has five choices: [1] install and unlock, [2] uninstall, [3
 - `-preflight` checks hardware only. Exactly **one** connected GPU with CMP 30HX PCI ID `10DE:2189` is required. The script rejects zero or multiple matches.
 - After a successful unlock, the script registers the SYSTEM task `CMP30HX_Batch_Gen2_Unlock`. It runs 45 seconds after startup or 10 seconds after logon. The installer files are placed in `%ProgramFiles%\40HXUnlock`, and batch status is written to `%ProgramData%\40HXUnlock\cmp30hx_batch_status.txt`.
 - `-notask` skips persistence registration on a fresh install. The unlock then applies only to the current session.
-- `-cleantasks` removes this installer’s persistence task and known legacy task names. It does not uninstall the tool files.
+- `-cleantasks` removes the batch task and known legacy task names only when they run `RunUnlock.bat` or `UnlockAIO.exe` inside `%ProgramFiles%\40HXUnlock`; Run values pointing to those files are also removed. Other tasks and tool files are retained.
 - `-uninstall` removes the installer’s persistence and owned files while retaining shared drivers, services, and configuration. Reboot to clear runtime unlock state for the current session.
 
 To verify installation, inspect the result and check PCIe status under GPU load, then reboot and check again. Inspect the scheduled task with:
