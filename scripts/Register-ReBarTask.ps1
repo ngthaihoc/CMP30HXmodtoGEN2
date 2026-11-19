@@ -4,6 +4,8 @@ param (
     [string]$WorkingDirectory
 )
 
+$ErrorActionPreference = 'Stop'
+
 $action = New-ScheduledTaskAction -Execute $env:ComSpec -Argument ("/c `"$BatPath`"") -WorkingDirectory $WorkingDirectory
 
 $t1 = New-ScheduledTaskTrigger -AtStartup

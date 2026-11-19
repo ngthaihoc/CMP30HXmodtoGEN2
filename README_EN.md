@@ -18,6 +18,14 @@ A research tool for enabling PCIe Gen2 links on NVIDIA CMP 30HX (TU116, PCI ID `
 - **Linux:** use `Setup_CMP30HX_LinuxAIO.sh` to install, check status, or remove the service. Read the script's help before running it.
 - **Resizable BAR / CSM:** `Setup_ReBar_CMP30HX.bat` and `Fix_CMP30HX_CSM_Error43.bat` are separate utilities that may change system or device configuration. Review their prompts and documentation before confirming.
 
+### CMP 30HX Resizable BAR diagnosis
+
+Run `Setup_ReBar_CMP30HX.bat -status` to inspect BAR1. A 16 MB BAR0 is a different BAR and does not establish whether BAR1 was enlarged. The `rebar_status.txt` file records an attempted setup, not a hardware success. After reboot, check GPU-Z (Advanced → PCIe Resizable BAR) and `nvidia-smi -q -d memory`.
+
+`Bridge Found` means the NvStrapsReBar DXE driver saw a PCI bridge; it does not confirm that GPU BAR1 was configured. The script attempts `E/S` and marks the result pending reboot verification. If BAR1 stays unchanged, check UEFI boot, CSM disabled and Above 4G Decoding enabled. Older motherboards may also need the PCI-side BAR option `P` described in the [upstream NvStrapsReBar guide](https://github.com/terminatorul/NvStrapsReBar/blob/master/README.md). Share the motherboard model, BIOS version, post-reboot GPU-Z screenshot and full NvStrapsReBar output for board-specific diagnosis. An 8 GiB BAR1 cannot be guaranteed on every system.
+
+`Setup_ReBar_CMP30HX.bat -mock -nowait` simulates the flow without writing EFI variables, tasks, Registry values or installation files.
+
 ## Windows CMP 30HX
 
 Download and extract the complete project ZIP or release package. Keep the extracted folder available for uninstall. Open an elevated Terminal or Command Prompt in that folder.

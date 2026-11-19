@@ -97,7 +97,7 @@ cls
 echo ================================================================
 echo    BO CONG CU AIO KICH HOAT RESIZABLE BAR CHO NVIDIA CMP 30HX
 echo    - Kien truc Turing [TU116 / 6GB GDDR6] tren nen tang PCIe Gen2
-echo    - Co che NvStrapsReBar: 0%% rui ro cho GPU, Zero-Touch VBIOS
+echo    - NvStrapsReBar can UEFI DXE va cau hinh BIOS phu hop; can xac minh sau reboot.
 echo ================================================================
 echo.
 echo  [1] Cai dat va Kich hoat Resizable BAR [Full Setup AIO]
@@ -136,8 +136,8 @@ if "!IS_MOCK!"=="1" (
     echo    - 100%% AN TOAN: Khong can thiep BIOS/NVRAM he thong
 ) else (
     echo    CONG CU CAI DAT TU DONG AIO: RESIZABLE BAR CHO NVIDIA CMP 30HX
-    echo    - Giai phap NvStrapsReBar: Mo khoa BAR 8GB cho GPU 6GB GDDR6
-    echo    - Giu nguyen VBIOS goc cua GPU, tuyet doi an toan phan cung card
+    echo    - Thu cau hinh GPU BAR qua NvStrapsReBar va NVIDIA Driver Profile.
+    echo    - Viec sua firmware mainboard co rui ro; hay theo huong dan cua nha san xuat.
 )
 echo ================================================================
 echo.
@@ -161,24 +161,27 @@ set "MB_MANU=Unknown"
 set "MB_PROD=Unknown"
 set "MB_BIOS=Unknown"
 set "IS_LAPTOP=0"
+set "SYSINFO_OK=0"
 
 for /f "usebackq tokens=1* delims==" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Get-SysInfo.ps1"`) do (
     set "%%A=%%B"
 )
 
+if "!IS_MOCK!"=="0" if not "!MOCK_LAPTOP!"=="1" if not "!SYSINFO_OK!"=="1" (
+    echo [X] Khong doc duoc thong tin he thong; dung truoc khi ghi EFI.
+    if "!NO_WAIT!"=="0" pause
+    exit /b 2
+)
 echo    - He thong   : !SYS_MANU! - Model: !SYS_MODEL!
 echo    - Bo mach chu: !MB_MANU! - Model: !MB_PROD! [BIOS: !MB_BIOS!]
 echo    - Che do Boot: %FIRMWARE_TYPE%
 
-rem Kiem tra che do khoi dong UEFI thuan
-if /i not "%FIRMWARE_TYPE%"=="UEFI" (
-    echo.
-    echo ================================================================
-    echo  [!] CANH BAO: He thong dang khoi dong o che do Legacy BIOS [CSM].
-    echo      Resizable BAR bat buoc he thong phai boot o chuan UEFI thuan.
-    echo      Vui long chuyen doi o dia sang GPT va bat UEFI trong BIOS.
-    echo ================================================================
-    echo.
+rem UEFI firmware is required for the DXE driver to run.
+if "!IS_MOCK!"=="0" if not "!MOCK_LAPTOP!"=="1" if /i not "%FIRMWARE_TYPE%"=="UEFI" (
+    echo [X] ReBAR requires UEFI boot with CSM disabled.
+    echo [*] Enable Above 4G Decoding and check UEFI boot mode before retrying.
+    if "!NO_WAIT!"=="0" pause
+    exit /b 2
 )
 
 rem Ho tro mo phong phat hien Laptop cho bo kiem thu (Mock Laptop Guard)
@@ -256,41 +259,29 @@ if "!IS_LAPTOP!"=="1" (
     )
 )
 
-rem Kiem tra nhan dien CMP 30HX tren Desktop
+rem Only configure the supported target GPU during a live install.
 if "!FOUND_CMP30HX!"=="1" (
-    echo    [+] Xac nhan chinh xac card NVIDIA CMP 30HX [TU116 - DEV_2189].
+    echo    [+] Xac nhan card NVIDIA CMP 30HX [TU116 - DEV_2189].
 ) else (
     if "!IS_MOCK!"=="1" (
-        echo    [MOCK] Gia lap phat hien card do hoa: NVIDIA CMP 30HX [TU116 - 10DE:2189].
+        echo    [MOCK] Gia lap phat hien NVIDIA CMP 30HX [10DE:2189].
     ) else (
-        if "!FOUND_NVIDIA!"=="0" (
-            echo [*] Khong tim thay card do hoa NVIDIA nao tren he thong.
-            echo     Vui long kiem tra lai ket noi khe PCIe, nguon phu hoac riser.
-            echo.
-            if "!NO_WAIT!"=="0" pause
-            exit /b 1
-        ) else (
-            echo    [*] Phat hien GPU NVIDIA tren he thong Desktop PC.
-        )
+        echo [X] Khong tim thay NVIDIA CMP 30HX [10DE:2189].
+        echo [*] Dung cai dat de tranh thay doi cau hinh GPU khac.
+        if "!NO_WAIT!"=="0" pause
+        exit /b 2
     )
 )
 
 rem ----------------------------------------------------------------
-rem BUOC 2: GIAI THICH KHOA HOC VE VRAM 6GB VA DUNG LUONG BAR 8GB
+rem BUOC 2: PHAN BIET BAR0 VA BAR1
 rem ----------------------------------------------------------------
 echo.
-echo [2/5] Co so kien truc PCIe: Tai sao CMP 30HX 6GB VRAM lai can BAR 8GB?
-echo    ----------------------------------------------------------------
-echo    - Dung luong VRAM vat ly cua CMP 30HX: 6GB GDDR6 [6144 MB].
-echo    - Theo chuan ky thuat PCI Express: Cua so Base Address Register [BAR]
-echo      BAT BUOC phai duoc cap phat theo luy thua cua 2 [2^n]:
-echo      ... 1024 MB [1GB] -^> 2048 MB [2GB] -^> 4096 MB [4GB] -^> 8192 MB [8GB]...
-echo    - Do KHONG TON TAI muc BAR 6GB chan trong chuan PCIe:
-echo      + Neu dat BAR = 4GB: CPU chi doc truc tiep duoc 4GB dau, 2GB VRAM con
-echo        lai bi bo phi ngoai vung ReBAR [phai chia nho goi tin gay giat hinh].
-echo      + De CPU truy cap TRON VEN 100%% dung luong 6GB VRAM cua CMP 30HX,
-echo        he thong bat buoc phai mo cua so BAR o muc luy thua 2 gan nhat la 8GB.
-echo    - Cong cu NvStrapsReBar se tu dong cau hinh muc BAR 8192 MB [8GB] toi uu.
+echo [2/5] Kiem tra muc tieu BAR:
+echo    - BAR0 16 MB la vung thanh ghi GPU; can kiem tra BAR1 cua VRAM.
+echo    - 8 GiB la muc tieu cho VRAM 6 GiB neu GPU va firmware ho tro.
+echo    - NvStrapsReBar co the can cau hinh ca GPU-side va PCI-side BAR.
+echo    - Chi GPU-Z/nvidia-smi sau reboot moi cho biet BAR1 thuc te.
 echo    ----------------------------------------------------------------
 
 rem ----------------------------------------------------------------
@@ -298,73 +289,60 @@ rem BUOC 3: KIEM TRA BO CONG CU VA HUONG DAN BIOS MAINBOARD
 rem ----------------------------------------------------------------
 echo.
 echo [3/5] Kiem tra bo cong cu Resizable BAR:
-echo    + NvStrapsReBar.exe          : [OK] [Cong cu thiet lap NVRAM]
-echo    + NvStrapsReBar.ffs          : [OK] [Module UEFI DXE chen vao BIOS mainboard]
-echo    + UEFITool.exe [v0.28.0]     : [OK] [Cong cu chen module FFS vao BIOS]
-echo    + nvidiaProfileInspector.exe : [OK] [Cong cu mo khoa rBAR trong driver]
-echo    + Enable_ReBAR_Turing.nip    : [OK] [Profile rBAR Base da cau hinh san]
-
-echo.
-rem ----------------------------------------------------------------
-rem KIEM TRA CHAN DOAN UEFI DXE DRIVER STATUS
-rem ----------------------------------------------------------------
-set "DXE_LOADED=0"
-if "!IS_MOCK!"=="1" (
-    set "DXE_LOADED=1"
-    echo    + Trang thai UEFI DXE Driver: [MOCK] Loaded [0x0] - San sang 100%%.
-) else (
-    echo Q | "%TOOL_DIR%\NvStrapsReBar.exe" 2>nul | findstr /i "status: Loaded" >nul 2>&1
-    if not errorlevel 1 (
-        set "DXE_LOADED=1"
-        echo    + Trang thai UEFI DXE Driver: Loaded [0x0] - San sang 100%%.
-    ) else (
-        echo    + Trang thai UEFI DXE Driver: Not loaded [Chua phat hien ReBAR trong BIOS].
+for %%F in (NvStrapsReBar.exe nvidiaProfileInspector.exe Enable_ReBAR_Turing.nip) do (
+    if not exist "%TOOL_DIR%\%%F" (
+        echo [X] Thieu tep bat buoc: %%F
+        if "!NO_WAIT!"=="0" pause
+        exit /b 2
     )
 )
 
-if "!DXE_LOADED!"=="0" (
-    set "IS_MODERN_MB=0"
-    for %%k in (B450 B550 A520 X570 B650 X670 A620 Z390 Z490 B460 H470 Z590 B560 H510 Z690 B660 H610 Z790 B760 H770) do (
-        echo "!MB_PROD!" | findstr /i "%%k" >nul 2>&1 && set "IS_MODERN_MB=1"
+echo.
+rem ----------------------------------------------------------------
+rem Inspect DXE status; Bridge Found means the driver saw a PCI bridge,
+rem but BAR1 still needs post-reboot verification.
+set "DXE_ACTIVE=0"
+set "DXE_STATUS=Other status; see console output"
+set "DXE_BRIDGE=0"
+set "DXE_GPU_SEEN=0"
+if "!IS_MOCK!"=="1" (
+    echo    [MOCK] Gia lap DXE Bridge Found.
+) else (
+    set "DXE_REPORT=%TEMP%\CMP30HX_ReBar_DXE_%RANDOM%%RANDOM%.txt"
+    echo Q | "%TOOL_DIR%\NvStrapsReBar.exe" > "!DXE_REPORT!" 2>&1
+    set "DXE_EXIT=!errorlevel!"
+    findstr /i /c:"UEFI DXE driver status:" "!DXE_REPORT!" >nul 2>&1
+    if not errorlevel 1 set "DXE_ACTIVE=1"
+    findstr /i /c:"status: Loaded" "!DXE_REPORT!" >nul 2>&1
+    if not errorlevel 1 set "DXE_STATUS=Loaded"
+    findstr /i /c:"status: Unconfigured" "!DXE_REPORT!" >nul 2>&1
+    if not errorlevel 1 set "DXE_STATUS=Unconfigured"
+    findstr /i /c:"status: Bridge Found" "!DXE_REPORT!" >nul 2>&1
+    if not errorlevel 1 (
+        set "DXE_BRIDGE=1"
+        set "DXE_STATUS=Bridge Found"
     )
-
-    if "!IS_MODERN_MB!"=="1" (
-        echo.
-        echo ================================================================
-        echo [*] HUONG DAN BO MACH CHU HO TRO REBAR GOC [!MB_PROD!]:
-        echo     Bo mach chu cua ban da co san tinh nang ReBAR trong BIOS.
-        echo     [V] BAN KHONG CAN DUNG UEFITOOL DE MOD BIOS.
-        echo.
-        echo     Chi can khoi dong lai may, vao BIOS Setup [Del / F2] va BAT:
-        echo       1. 'Above 4G Decoding'   = Enabled
-        echo       2. 'Re-Size BAR Support' = Auto hoac Enabled
-        echo       3. 'CSM Support'         = Disabled [UEFI thuan]
-        echo ================================================================
-        echo.
-    ) else (
-        echo.
-        echo ================================================================
-        echo [*] HUONG DAN BO MACH CHU THE HE CU / CAN CHEN MODULE FFS:
-        echo     Bo mach chu [!MB_PROD!] co the can chen module NvStrapsReBar.ffs.
-        echo     Luu y: Chi thuc hien tren mainboard PC co nut 'USB BIOS Flashback'.
-        echo.
-        echo     Cac buoc thuc hien bang UEFITool:
-        echo     1. Mo UEFITool.exe tai: "%TOOL_DIR%\UEFITool.exe"
-        echo     2. Mo file BIOS goc cua bo mach chu.
-        echo     3. Tim kiem 'PciBus' trong phan DXE Volume.
-        echo     4. Nhap chuot phai vao driver cuoi cung -^> 'Insert after...'
-        echo     5. Chon file: "%TOOL_DIR%\NvStrapsReBar.ffs" va luu lai BIOS moi.
-        echo ================================================================
-        echo.
-        if "!NO_WAIT!"=="0" (
-            if "!IS_MOCK!"=="0" (
-                set "OPEN_TOOL=N"
-                set /p "OPEN_TOOL=Ban co muon mo UEFITool.exe ngay bay gio khong? [Y/N, Mac dinh N]: "
-                if /i "!OPEN_TOOL!"=="Y" (
-                    start "" "%TOOL_DIR%\UEFITool.exe"
-                )
-            )
-        )
+    findstr /i /c:"status: Not loaded" /c:"status: Missing" /c:"status: Bad" /c:"status: EFI Error" "!DXE_REPORT!" >nul 2>&1
+    if not errorlevel 1 set "DXE_ACTIVE=0"
+    findstr /i /c:"10DE:2189" "!DXE_REPORT!" >nul 2>&1
+    if not errorlevel 1 set "DXE_GPU_SEEN=1"
+    type "!DXE_REPORT!"
+    if not "!DXE_EXIT!"=="0" set "DXE_ACTIVE=0"
+    del /f /q "!DXE_REPORT!" >nul 2>&1
+    if "!DXE_ACTIVE!"=="0" (
+        echo [X] Khong xac nhan duoc UEFI DXE driver. Dung truoc khi ghi EFI.
+        echo [*] Kiem tra UEFI boot, CSM va Above 4G Decoding trong BIOS.
+        if "!NO_WAIT!"=="0" pause
+        exit /b 2
+    )
+    if "!DXE_GPU_SEEN!"=="0" (
+        echo [X] NvStrapsReBar khong liet ke GPU 10DE:2189. Dung truoc khi ghi EFI.
+        if "!NO_WAIT!"=="0" pause
+        exit /b 2
+    )
+    if "!DXE_BRIDGE!"=="1" (
+        echo [!] Bridge Found: DXE da thay PCI bridge, BAR1 chua duoc xac minh.
+        echo [*] Mainboard cu co the can cau hinh PCI-side BAR [P] thu cong.
     )
 )
 
@@ -373,16 +351,18 @@ rem BUOC 4: CAU HINH NVRAM VA DRIVER PROFILE TU DONG [1-CLICK AIO]
 rem ----------------------------------------------------------------
 echo [4/5] Tu dong cau hinh phan mem Windows [1-Click Automation]:
 echo.
-echo [*] BUOC 4A: Tu dong cau hinh BAR 8GB vao UEFI NVRAM...
+echo [*] BUOC 4A: Thu cau hinh GPU-side BAR qua UEFI NVRAM...
 if "!IS_MOCK!"=="1" (
-    echo    [MOCK] Gia lap khoi chay NvStrapsReBar.exe thanh cong.
-    echo    [MOCK] - Da chon Enable ReBAR Turing [E]: [OK]
-    echo    [MOCK] - Da thiet lap BAR Size = 8192 MB [8GB]: [OK]
-    echo    [MOCK] - Da ghi bien EFI NVRAM he thong [S]: [OK]
-    echo    [MOCK] - Da thoat chuong trinh [Q]: [OK]
+    echo    [MOCK] Gia lap gui lenh E/S/Q; khong ghi EFI NVRAM.
+    echo    [MOCK] BAR1 sau reboot chua duoc xac minh.
 ) else (
-    (echo E & echo S & echo Q) | "%TOOL_DIR%\NvStrapsReBar.exe" >nul 2>&1
-    echo    [+] Da tu dong ghi cau hinh Turing ReBAR 8GB vao UEFI NVRAM: [OK]
+    (echo E & echo S & echo Q) | "%TOOL_DIR%\NvStrapsReBar.exe"
+    if errorlevel 1 (
+        echo [X] NvStrapsReBar failed while saving EFI configuration.
+        if "!NO_WAIT!"=="0" pause
+        exit /b 2
+    )
+    echo    [+] Da gui cau hinh EFI. Can khoi dong lai va kiem tra BAR1 thuc te.
 )
 
 echo.
@@ -394,18 +374,35 @@ if "!IS_MOCK!"=="1" (
     echo    [MOCK] - rBAR - Size Limit = 0x00000000 [No Limit]
 ) else (
     start /wait "" "%TOOL_DIR%\nvidiaProfileInspector.exe" -silent "%TOOL_DIR%\Enable_ReBAR_Turing.nip"
-    echo    [+] Da tu dong nap Driver Profile [Enable_ReBAR_Turing.nip -silent]: [OK]
+    if errorlevel 1 (
+        echo [X] Khong the nap NVIDIA Driver Profile.
+        if "!NO_WAIT!"=="0" pause
+        exit /b 2
+    )
+    echo    [+] Driver Profile da nap; ReBAR van can xac minh sau reboot.
 )
 
 echo.
-echo [*] BUOC 4C: Thiet lap Scheduled Task duy tri rBAR Driver Profile...
+echo [*] BUOC 4C: Duy tri rBAR Driver Profile...
+if "!IS_MOCK!"=="1" (
+    echo    [MOCK] Bo qua Scheduled Task, Registry va file he thong.
+    goto :after_profile_persistence
+)
 set "REBAR_APP_DIR=%ProgramFiles%\40HXUnlock\rebar"
 set "REBAR_RUNNER=%REBAR_APP_DIR%\RunReBarProfile.bat"
 
 if not exist "%REBAR_APP_DIR%" mkdir "%REBAR_APP_DIR%" >nul 2>&1
-copy /y "%TOOL_DIR%\nvidiaProfileInspector.exe" "%REBAR_APP_DIR%\" >nul 2>&1
-copy /y "%TOOL_DIR%\nvidiaProfileInspector.exe.config" "%REBAR_APP_DIR%\" >nul 2>&1
-copy /y "%TOOL_DIR%\Enable_ReBAR_Turing.nip" "%REBAR_APP_DIR%\" >nul 2>&1
+if not exist "%REBAR_APP_DIR%" (
+    echo [X] Khong tao duoc thu muc duy tri Driver Profile.
+    exit /b 2
+)
+for %%F in (nvidiaProfileInspector.exe nvidiaProfileInspector.exe.config Enable_ReBAR_Turing.nip) do (
+    copy /y "%TOOL_DIR%\%%F" "%REBAR_APP_DIR%\" >nul 2>&1
+    if errorlevel 1 (
+        echo [X] Khong sao chep duoc %%F; profile sau reboot co the khong duoc nap.
+        exit /b 2
+    )
+)
 
 (
     echo @echo off
@@ -415,28 +412,52 @@ copy /y "%TOOL_DIR%\Enable_ReBAR_Turing.nip" "%REBAR_APP_DIR%\" >nul 2>&1
     echo exit /b 0
 ) > "%REBAR_RUNNER%"
 
+if not exist "%REBAR_RUNNER%" (
+    echo [X] Khong tao duoc RunReBarProfile.bat.
+    exit /b 2
+)
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Register-ReBarTask.ps1" -TaskName "NVIDIA_ReBAR_Global_Profile" -BatPath "%REBAR_RUNNER%" -WorkingDirectory "%REBAR_APP_DIR%" >nul 2>&1
-
+if errorlevel 1 (
+    echo [X] Khong dang ky duoc Scheduled Task duy tri Driver Profile.
+    exit /b 2
+)
+schtasks /query /tn "NVIDIA_ReBAR_Global_Profile" >nul 2>&1
+if errorlevel 1 (
+    echo [X] Khong xac nhan duoc Scheduled Task sau khi dang ky.
+    exit /b 2
+)
 reg add "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v "NVIDIA_ReBAR_Profile" /t REG_SZ /d "\"%REBAR_RUNNER%\"" /f >nul 2>&1
+if errorlevel 1 echo [!] Khong ghi duoc HKLM Run; Scheduled Task van duoc dang ky.
 reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "NVIDIA_ReBAR_Profile" /t REG_SZ /d "\"%REBAR_RUNNER%\"" /f >nul 2>&1
-echo    [+] Da kich hoat Scheduled Task [NVIDIA_ReBAR_Global_Profile] va Registry Run: [OK]
+if errorlevel 1 echo [!] Khong ghi duoc HKCU Run; Scheduled Task van duoc dang ky.
+echo    [+] Da dang ky va xac nhan Scheduled Task duy tri Driver Profile.
 
 rem Ghi nhan file trang thai ReBAR
 if not exist "%STATUS_DIR%" mkdir "%STATUS_DIR%" >nul 2>&1
+if not exist "%STATUS_DIR%" (
+    echo [X] Khong tao duoc thu muc bao cao ReBAR.
+    exit /b 2
+)
+if exist "%STATUS_FILE%" del /f /q "%STATUS_FILE%" >nul 2>&1
+if exist "%STATUS_FILE%" (
+    echo [X] Khong the thay the bao cao ReBAR cu.
+    exit /b 2
+)
 (
-    echo ==== CMP 30HX Resizable BAR Status Report ====
+    echo ==== CMP 30HX Resizable BAR Setup Attempt ====
     echo Thoi gian thiet lap : %date% %time%
-    echo GPU Muc tieu        : NVIDIA CMP 30HX [TU116 - DEV_2189]
-    echo Dung luong VRAM     : 6GB GDDR6
-    echo Kich thuoc BAR1     : 8192 MB [8GB luy thua 2 PCIe]
-    echo Module UEFI         : NvStrapsReBar.ffs [DXE Driver]
-    echo Driver Profile      : rBAR Enabled [0x1], Turing Override [0x1]
-    if "!IS_MOCK!"=="1" (
-        echo Che do thuc thi     : MOCK TEST SIMULATION [100%% Safe]
-    ) else (
-        echo Che do thuc thi     : LIVE PRODUCTION SETUP
-    )
+    echo GPU Muc tieu        : NVIDIA CMP 30HX [10DE:2189]
+    echo DXE truoc cai dat   : !DXE_STATUS!
+    echo EFI config          : Da gui lenh E/S; can xac minh sau reboot
+    echo BAR1 hien tai       : CHUA XAC MINH
+    echo Driver Profile      : Da gui lenh nap profile
+    echo Trang thai          : PENDING POST-REBOOT VERIFICATION
 ) > "%STATUS_FILE%"
+if not exist "%STATUS_FILE%" (
+    echo [X] Khong ghi duoc bao cao ReBAR.
+    exit /b 2
+)
+:after_profile_persistence
 
 rem ----------------------------------------------------------------
 rem BUOC 5: TONG KET VA HUONG DAN NGHIEM THU
@@ -444,20 +465,27 @@ rem ----------------------------------------------------------------
 echo.
 echo [5/5] Tong ket va nghiem thu:
 echo ================================================================
-echo                    HOAN TAT THIET LAP REBAR AIO
+if "!IS_MOCK!"=="1" (
+    echo                    MOCK TEST - KHONG GUI CAU HINH
+) else (
+    echo                    DA GUI CAU HINH REBAR AIO
+)
 echo ================================================================
-echo  Cac buoc nghiem thu sau khi khoi dong lai may tinh:
-echo  1. Khoi dong lai he thong de BIOS va driver ap dung cau hinh.
-echo  2. Mo GPU-Z kiem tra trang thai:
-echo     - Muc 'Resizable BAR' tai tab dau: phai bao 'Enabled'.
-echo     - Vao tab Advanced -^> 'PCIe Resizable BAR':
-echo       + GPU Supported: Yes
-echo       + PCIe BAR1 Size: 8192 MB [8GB].
-echo  3. Kiem tra qua nvidia-smi:
-echo     ^> nvidia-smi -q -d memory
-echo     Muc 'BAR1 Memory Usage - Total' phai bao ~8192 MiB.
-echo  4. File bao cao trang thai da duoc luu tai:
-echo     "%STATUS_FILE%"
+if "!IS_MOCK!"=="1" (
+    echo  Mock chi mo phong; khong thay doi he thong va khong can reboot.
+) else (
+    echo  Trang thai: CHO XAC MINH SAU KHI KHOI DONG LAI
+    echo  1. Khoi dong lai he thong.
+    echo  2. Mo GPU-Z tab Advanced -^> PCIe Resizable BAR:
+    echo     - Kiem tra BAR1 hien tai va BIOS/UEFI support.
+    echo     - Neu van Disabled, gui model mainboard, BIOS version,
+    echo       anh GPU-Z va toan bo output NvStrapsReBar.
+    echo  3. Kiem tra qua nvidia-smi:
+    echo     ^> nvidia-smi -q -d memory
+    echo     So sanh BAR1 Memory Usage - Total voi gia tri truoc khi cai dat.
+    echo  4. File bao cao ghi lai lan THU cai dat, khong xac nhan BAR:
+    echo     "%STATUS_FILE%"
+)
 echo ================================================================
 echo.
 
@@ -476,7 +504,7 @@ echo ================================================================
 echo.
 
 if exist "%STATUS_FILE%" (
-    echo [*] Thong tin trang thai da ghi nhan truoc do:
+    echo [*] Lan thu cai dat truoc do - chua xac minh BAR:
     echo ----------------------------------------------------------------
     type "%STATUS_FILE%"
     echo ----------------------------------------------------------------
@@ -486,7 +514,7 @@ if exist "%STATUS_FILE%" (
 echo [*] Dang kiem tra thong so bo nho BAR1 qua nvidia-smi...
 where nvidia-smi >nul 2>&1
 if "%errorlevel%"=="0" (
-    nvidia-smi -q -d memory | findstr /i "BAR1 Total"
+    nvidia-smi -q -d memory | powershell -NoProfile -Command "$text=$input | Out-String; if($text -match '(?s)BAR1 Memory Usage\s+Total\s*:\s*([^\r\n]+)'){Write-Output ('BAR1 Total (first NVIDIA GPU): '+$Matches[1])}else{exit 1}"
     if errorlevel 1 (
         echo [!] Khong the doc truong thong tin BAR1 tu nvidia-smi.
     )
@@ -496,8 +524,8 @@ if "%errorlevel%"=="0" (
 
 echo.
 echo [*] Huong dan kiem tra truc quan qua GPU-Z:
-echo     - Mo GPU-Z -^> Kiem tra muc 'Resizable BAR' o dong cuoi = Enabled.
-echo     - Tab Advanced -^> Dropdown chon 'PCIe Resizable BAR' -^> BAR1 = 8192 MB.
+echo     - Mo GPU-Z -^> Advanced -^> PCIe Resizable BAR.
+echo     - Kiem tra BAR1 va trang thai firmware; BAR0 16 MB la muc rieng.
 echo ================================================================
 echo.
 if "!NO_WAIT!"=="0" pause
@@ -520,12 +548,18 @@ echo     3. Xoa file trang thai tai ProgramData.
 echo.
 
 if "!IS_MOCK!"=="1" (
-    echo [MOCK] Gia lap xoa bien NVRAM va don dep file thanh cong.
+    echo [MOCK] Bo qua moi thao tac xoa EFI, task, registry va file.
+    if "!NO_WAIT!"=="0" pause
+    exit /b 0
 ) else (
-    echo [*] Dang tu dong xoa cau hinh ReBAR trong UEFI NVRAM...
+    echo [*] Dang xoa cau hinh ReBAR trong UEFI NVRAM...
     if exist "%TOOL_DIR%\NvStrapsReBar.exe" (
         (echo C & echo S & echo Q) | "%TOOL_DIR%\NvStrapsReBar.exe" >nul 2>&1
-        echo    [+] Da xoa cau hinh ReBAR trong NVRAM: [OK]
+        if errorlevel 1 (
+            echo [X] Khong the xoa cau hinh EFI.
+            if "!NO_WAIT!"=="0" pause
+            exit /b 2
+        )
     )
 )
 

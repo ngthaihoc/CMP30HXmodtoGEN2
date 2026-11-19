@@ -18,6 +18,14 @@ Công cụ nghiên cứu mở liên kết PCIe Gen2 cho NVIDIA CMP 30HX (TU116, 
 - **Linux:** dùng `Setup_CMP30HX_LinuxAIO.sh` để cài, xem trạng thái hoặc gỡ service. Đọc trợ giúp của script trước khi chạy.
 - **Resizable BAR / CSM:** `Setup_ReBar_CMP30HX.bat` và `Fix_CMP30HX_CSM_Error43.bat` là các tiện ích riêng, có thể thay đổi cấu hình hệ thống hoặc thiết bị. Xem prompt và hướng dẫn của chúng trước khi xác nhận.
 
+### Chẩn đoán Resizable BAR trên CMP 30HX
+
+Chạy `Setup_ReBar_CMP30HX.bat -status` để xem BAR1 hiện tại. BAR0 16 MB là một BAR khác và riêng con số này không xác nhận BAR1 đã được mở rộng. Tệp `rebar_status.txt` chỉ ghi nhận lần gửi cấu hình; sau khi khởi động lại cần xem GPU-Z (Advanced → PCIe Resizable BAR) và `nvidia-smi -q -d memory`.
+
+Nếu NvStrapsReBar báo `Bridge Found`, DXE đã thấy PCI bridge nhưng vẫn chưa xác nhận BAR1 của GPU. Script sẽ thử gửi `E/S`, rồi yêu cầu kiểm tra lại sau reboot. Nếu vẫn không thay đổi, kiểm tra UEFI boot, CSM đã tắt và Above 4G Decoding đã bật. Mainboard cũ có thể cần cấu hình PCI-side BAR bằng mục `P` theo [hướng dẫn NvStrapsReBar](https://github.com/terminatorul/NvStrapsReBar/blob/master/README.md); script không tự thay đổi tùy chọn này vì phụ thuộc bo mạch. Gửi model mainboard, phiên bản BIOS, ảnh GPU-Z sau reboot và toàn bộ đầu ra NvStrapsReBar để chẩn đoán tiếp. Không thể bảo đảm BAR1 8 GiB trên mọi hệ thống.
+
+`Setup_ReBar_CMP30HX.bat -mock -nowait` chỉ mô phỏng luồng, không ghi EFI, task, Registry hay tệp cài đặt.
+
 ## Windows CMP 30HX
 
 Tải và giải nén đầy đủ ZIP của dự án hoặc gói phát hành. Giữ nguyên thư mục đã giải nén để có thể gỡ cài đặt. Mở Terminal hoặc Command Prompt với quyền Administrator tại thư mục này.
@@ -83,3 +91,7 @@ Tải gói phát hành từ [GitHub Releases](https://github.com/ngthaihoc/CMP30
 Dự án được chia sẻ miễn phí. Nếu công cụ hữu ích, bạn có thể ủng hộ tác giả qua MoMo/VietQR trong [ảnh QR](assets/donate_momo.jpg). Dự án lấy cảm hứng từ các công trình nghiên cứu ban đầu của cộng đồng CMP40HX-Unlock.
 
 Tuân thủ luật địa phương, điều khoản nhà sản xuất và quy định của phần mềm bạn sử dụng.
+
+## CI/CD
+
+GitHub Actions chạy kiểm thử Go, batch/PowerShell, frontend và Linux mock trên pull request, push lên `main` và tag `v*`. Khi các kiểm tra và bản build Windows thành công, tag `v*` tạo ZIP giữ cấu trúc repository, tệp SHA-256 và một GitHub Release **bản nháp**. Sáu công cụ Windows được build lại từ mã của tag; các thành phần binary/EFI khác lấy từ repository. Maintainer kiểm tra nội dung, checksum, release notes và kết quả thử trên phần cứng phù hợp trước khi xuất bản bản nháp. Kiểm thử CI không xác nhận hoạt động trên GPU thật. Cần cấu hình branch protection yêu cầu các job CI trong GitHub; workflow không tự bật thiết lập này.

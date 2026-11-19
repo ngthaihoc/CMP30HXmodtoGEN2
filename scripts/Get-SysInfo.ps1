@@ -4,12 +4,20 @@ $cs = Get-CimInstance Win32_ComputerSystem
 $bb = Get-CimInstance Win32_BaseBoard
 $bios = Get-CimInstance Win32_BIOS
 $batt = Get-CimInstance Win32_Battery
-
+$sysInfoOk = if ($cs -and $bb -and $bios -and $null -ne $cs.PCSystemType) { 1 } else { 0 }
 $sysManu = $cs.Manufacturer
 $sysModel = $cs.Model
 $mbManu = $bb.Manufacturer
 $mbProd = $bb.Product
 $mbBios = $bios.SMBIOSBIOSVersion
+$firmwareType = (Get-ComputerInfo -Property BiosFirmwareType).BiosFirmwareType
+if ($firmwareType -eq 'Uefi') {
+    $firmwareType = 'UEFI'
+} elseif ($firmwareType -eq 'Bios') {
+    $firmwareType = 'BIOS'
+} else {
+    $firmwareType = 'Unknown'
+}
 
 $isLaptop = 0
 if ($cs.PCSystemType -eq 2 -or $batt) {
@@ -22,3 +30,5 @@ Write-Output "MB_MANU=$mbManu"
 Write-Output "MB_PROD=$mbProd"
 Write-Output "MB_BIOS=$mbBios"
 Write-Output "IS_LAPTOP=$isLaptop"
+Write-Output "FIRMWARE_TYPE=$firmwareType"
+Write-Output "SYSINFO_OK=$sysInfoOk"
