@@ -146,15 +146,14 @@ func (n *LinkNegotiator) Negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint3
 }
 
 func (n *LinkNegotiator) negotiate(gpuBDF uint32, prof GPUProfile, rootBDF uint32, targetGen uint32, allowStage2, skipDisplayRestart bool) (*NegotiationResult, error) {
-	// 1. eFuse Hardware Boundary Enforcement
+	// Enforce the project's link targets for each supported GPU.
 	if prof.DeviceID == 0x2189 && targetGen > 2 {
 		targetGen = 2
 	}
 	if prof.MaxSupportedGen > 0 && targetGen > prof.MaxSupportedGen {
 		targetGen = prof.MaxSupportedGen
 	}
-	// CMP 30HX (TU116) has laser-cut eFuse and cannot tolerate Link Disable or PnP resets.
-	// Hardware Rule 3: No dangerous resets on 30HX. Force allowStage2 to false.
+	// CMP 30HX uses retraining only. Keep link disable and PnP resets out of its fallback.
 	if prof.DeviceID == 0x2189 || prof.Family == "TU116" {
 		allowStage2 = false
 	}

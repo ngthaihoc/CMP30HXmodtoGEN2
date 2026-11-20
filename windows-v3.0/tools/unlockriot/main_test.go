@@ -49,12 +49,27 @@ func (m *mockUEFIManager) RebootToFirmware(ctx context.Context) error {
 }
 
 func TestRunCLI_OptimizeRequiresConfirmation(t *testing.T) {
-	var buf bytes.Buffer
-	if err := RunCLI(CLIOptions{Optimize: true}, &buf, nil); err != nil {
-		t.Fatalf("RunCLI failed: %v", err)
-	}
-	if !strings.Contains(buf.String(), "Thêm -y") {
-		t.Fatalf("missing confirmation warning: %s", buf.String())
+	for _, test := range []struct {
+		name     string
+		autoSign bool
+	}{
+		{name: "optimize"},
+		{name: "optimize and sign", autoSign: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			manager := &mockUEFIManager{}
+			err := RunCLI(CLIOptions{Optimize: true, AutoSign: test.autoSign}, &buf, manager)
+			if err == nil {
+				t.Error("unconfirmed optimization reported success")
+			}
+			if !strings.Contains(buf.String(), "-confirm-riot") {
+				t.Errorf("missing confirmation warning: %s", buf.String())
+			}
+			if manager.signCalled {
+				t.Error("unconfirmed command signed EFI before rejecting optimization")
+			}
+		})
 	}
 }
 

@@ -53,7 +53,7 @@ var SupportedGPUProfiles = []GPUProfile{
 		HardwareID:      GpuVenDev30HX,
 		Name:            GpuAdapter30,
 		Family:          "TU116",
-		MaxSupportedGen: 2, // ponytail: CMP 30HX (TU116) bi dut eFuse bit 3 (8.0 GT/s), gioi han phan cung la Gen2 (5.0 GT/s)
+		MaxSupportedGen: 2, // Supported CMP 30HX target, regardless of Gen3 capability bits.
 		FirmwareUnlock:  false,
 		HasSafePL0:      false,
 		RequiresMMIO:    true,

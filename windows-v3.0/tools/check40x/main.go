@@ -325,7 +325,7 @@ func knownIssuesBlock(cmp30HX bool) string {
 	var sb strings.Builder
 	sb.WriteString("\n--- Giới hạn đã biết / Sự cố tiềm ẩn (v3.0.0) ---\n")
 	if cmp30HX {
-		sb.WriteString("· CMP 30HX (TU116): Giới hạn eFuse là Gen2; không ngắt liên kết, không reset thiết bị. Nếu GPU TLS=Gen1 nhưng Root TLS=Gen2, cần kiểm tra nhật ký ghi MMIO/LNKCTL2 và driver trước khi kết luận giới hạn phần cứng X99/C610.\n")
+		sb.WriteString("· CMP 30HX (TU116): Công cụ đặt mục tiêu Gen2 và chỉ huấn luyện lại liên kết. Nếu GPU TLS=Gen1 nhưng Root TLS=Gen2, hãy đối chiếu nhật ký MMIO/LNKCTL2 và driver.\n")
 	} else {
 		sb.WriteString("· Trình điều khiển/GSP quản lý liên kết (GSP-RM): Khi nghỉ/tải thấp nvlddmkm ghi đè TLS phía GPU về Gen1; Stage2 tự động hoặc LD(-hard) có thể giải quyết. Đã xác nhận **không phải bảo vệ ghi firmware**, **KHÔNG CẦN FLASH VBIOS** — Nếu vẫn lỗi hãy gửi chẩn đoán và nhật ký cho tác giả.\n")
 		sb.WriteString("· Mainboard OEM/Đa card: retrain-only trên một số bo mạch chủ không huấn luyện được Gen2, cần Root Link Disable (ngắt liên kết chớp nhoáng). Tác vụ đăng nhập v2.6+ mặc định tự thử Stage2 (Gen2AutoHard); nếu vẫn lỗi có thể chạy thủ công `40HXInstaller.exe -gen2 -hard`.\n")

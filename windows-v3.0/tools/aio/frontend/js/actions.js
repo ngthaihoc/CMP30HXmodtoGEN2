@@ -105,14 +105,12 @@ const Actions = {
       btnRiotOpt.addEventListener('click', () => {
         Modal.show({
           title: "Tối Ưu Hoá Riot Games (1-Chạm)",
-          subtitle: "Cấu hình MSHybrid CASO, DirectX Router & Dọn dẹp driver tạm",
+          subtitle: "Cấu hình MSHybrid CASO, DirectX Router và LMHT",
           level: "amber",
           description: "<strong>CÁC THAY ĐỔI HỆ THỐNG:</strong><br>" +
-            "1. Tắt <code>VulnerableDriverBlocklistEnable=0</code> để tránh chặn driver mod.<br>" +
-            "2. Gán CMP làm <code>HighPerfAdapter</code> toàn cục cho DirectX.<br>" +
-            "3. Cấu hình game.cfg Liên Minh Huyền Thoại sang <code>WindowMode=2</code> và <code>DX11Support=1</code>.<br>" +
-            "4. Dọn dẹp triệt để các driver tạm thời trong kernel.",
-          rollback: "Bấm nút [Hoàn Tác Riot] để bật lại Blocklist và xoá định tuyến DirectX.",
+            "1. Cập nhật cấu hình đồ họa và ưu tiên card CMP cho DirectX.<br>" +
+            "2. Cấu hình game.cfg Liên Minh Huyền Thoại sang <code>WindowMode=2</code> và <code>DX11Support=1</code>.",
+          rollback: "Bấm [Hoàn Tác Riot] để gỡ định tuyến DirectX toàn cục trỏ tới card CMP.",
           onConfirm: () => {
             if (window.go && window.go.main && window.go.main.App) {
               window.go.main.App.RiotOptimize(true).then(() => this.refreshRiot());
@@ -127,9 +125,9 @@ const Actions = {
       btnRiotRevert.addEventListener('click', () => {
         Modal.show({
           title: "Hoàn Tác Cấu Hình Riot Games",
-          subtitle: "Khôi phục cài đặt bảo mật mặc định",
+          subtitle: "Gỡ định tuyến DirectX toàn cục trỏ tới card CMP",
           level: "amber",
-          description: "Thao tác sẽ bật lại <code>VulnerableDriverBlocklistEnable=1</code> và xoá bỏ cấu hình định tuyến DirectX toàn cục.",
+          description: "Thao tác sẽ kiểm tra lựa chọn GPU hiện tại và gỡ định tuyến nếu đang trỏ tới CMP 30HX hoặc CMP 40HX.",
           rollback: "Có thể bấm [Tối Ưu 1-Chạm] để cấu hình lại bất cứ lúc nào.",
           onConfirm: () => {
             if (window.go && window.go.main && window.go.main.App) {

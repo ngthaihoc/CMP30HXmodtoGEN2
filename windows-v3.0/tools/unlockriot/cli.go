@@ -42,6 +42,13 @@ func ParseFlags(args []string) (CLIOptions, error) {
 	return opts, err
 }
 
+func (opts CLIOptions) validateConfirmation() error {
+	if opts.Optimize && !opts.Confirmed && !opts.JSONStatus {
+		return fmt.Errorf("cần xác nhận thay đổi hệ thống bằng -confirm-riot hoặc -y để tối ưu Riot")
+	}
+	return nil
+}
+
 // RunCLI điều phối thực thi các tác vụ theo cờ dòng lệnh
 func RunCLI(opts CLIOptions, log io.Writer, uefiMgr UEFIManager) error {
 	if log == nil {
@@ -51,6 +58,10 @@ func RunCLI(opts CLIOptions, log io.Writer, uefiMgr UEFIManager) error {
 		uefiMgr = &DefaultUEFIManager{}
 	}
 
+	if err := opts.validateConfirmation(); err != nil {
+		fmt.Fprintln(log, err)
+		return err
+	}
 	prof, _ := hxcore.FindGPUWithProfile()
 	sbOn := hxcore.SecureBootOn()
 	isWin11 := isWindows11()
@@ -75,10 +86,6 @@ func RunCLI(opts CLIOptions, log io.Writer, uefiMgr UEFIManager) error {
 	}
 
 	if opts.Optimize {
-		if !opts.Confirmed {
-			fmt.Fprintln(log, "CẢNH BÁO: Tối ưu Riot sẽ thay đổi cấu hình bảo mật hệ thống. Thêm -y để xác nhận.")
-			return nil
-		}
 		if err := runOptimization(log, is40HX, is30HX, sbOn, isWin11); err != nil {
 			return err
 		}
@@ -94,13 +101,7 @@ func RunCLI(opts CLIOptions, log io.Writer, uefiMgr UEFIManager) error {
 				fmt.Fprintf(log, "[V] Chữ ký số driver HỢP LỆ (%s): %s\n", cat, info)
 			} else {
 				fmt.Fprintf(log, "[!] CẢNH BÁO CHỮ KÝ: Driver nvwgf2umx.dll (%s) không phải WHQL gốc!\n    %s\n", cat, info)
-				if cat == SigCategoryDartraiden {
-					fmt.Fprintln(log, "    => Phát hiện driver mod Dartraiden. UnlockRiotGame đã tự động tắt VulnerableDriverBlocklist.")
-					fmt.Fprintln(log, "    => Khuyến nghị: Nếu vẫn bị Vanguard chặn, dùng driver RainCandy Mode 2 hoặc bản WHQL 460.89.")
-				} else {
-					fmt.Fprintln(log, "    => Riot Vanguard có thể chặn DLL này khi khởi động LoL / Valorant.")
-					fmt.Fprintln(log, "    => Khắc phục: Sử dụng driver Studio hoặc bản mod driver có kèm chứng chỉ được tin cậy.")
-				}
+				fmt.Fprintln(log, "    => Kiểm tra chữ ký và phiên bản trình điều khiển NVIDIA đang cài.")
 			}
 		}
 	}

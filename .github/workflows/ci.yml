@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
 
@@ -13,10 +14,12 @@ jobs:
   test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: windows-v3.0/tools/aio/go.mod
           cache-dependency-path: windows-v3.0/tools/*/go.sum
@@ -42,6 +45,9 @@ jobs:
 
       - name: Test boot persistence in isolation
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Test-AIO-Persistence.ps1
+
+      - name: Test ReBAR setup and removal in isolation
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Test-ReBar-Mock.ps1
 
       - name: Test frontend telemetry
         run: node --test windows-v3.0/tools/aio/tests/telemetry.test.cjs
@@ -75,15 +81,35 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item -LiteralPath build/bin/UnlockAIO.exe -Destination ../../release/UnlockAIO.exe
 
+      - name: Upload freshly built Windows tools
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-build
+          if-no-files-found: error
+          path: |
+            windows-v3.0/release/40HXInstaller.exe
+            windows-v3.0/release/40HXCheck.exe
+            windows-v3.0/release/40HXUninstaller.exe
+            windows-v3.0/release/UnlockRiotGame.exe
+            windows-v3.0/release/FixCMP30HX_CSM.exe
+            windows-v3.0/release/UnlockAIO.exe
+
   linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Check Bash syntax
         shell: bash
         run: |
           bash -n Setup_CMP30HX_LinuxAIO.sh
           bash -n windows-v3.0/tools/unlock40x/build_v70.sh
+
+      - name: Test EFI build error propagation
+        run: bash scripts/Test-EFI-Build.sh
 
       - name: Test Linux setup and removal in mock mode
         shell: bash
@@ -97,6 +123,10 @@ jobs:
       - name: Test Linux uninstall ownership and error reporting
         shell: bash
         run: bash scripts/Test-Linux-Uninstall.sh
+
+      - name: Test Linux PCIe failure handling and link verification
+        run: bash scripts/Test-Linux-PCIe.sh
+
       - name: Verify mock mode skips BAR0 access
         shell: bash
         run: |
@@ -107,3 +137,69 @@ jobs:
           }
           IS_MOCK=1
           unlock_gpu_pcie '0000:01:00.0'
+
+      - name: Build and test Linux MMIO injector
+        run: |
+          mkdir -p rebuilt/linux-mmio
+          gcc -std=c11 -O2 -Wall -Wextra -Werror -static linux-mmio/mmio_injector.c -o rebuilt/linux-mmio/mmio_injector
+          bash scripts/Test-Linux-MMIO.sh
+
+      - name: Upload freshly built Linux MMIO injector
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-mmio-build
+          if-no-files-found: error
+          path: rebuilt/linux-mmio/mmio_injector
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [test, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-build
+          path: rebuilt
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: linux-mmio-build
+          path: rebuilt/linux-mmio
+
+      - name: Assemble and verify release package
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF_NAME" in
+            */*) echo "Release tags cannot contain /" >&2; exit 1 ;;
+          esac
+          mkdir package
+          git archive HEAD | tar -x -C package
+          for file in 40HXInstaller.exe 40HXCheck.exe 40HXUninstaller.exe UnlockRiotGame.exe FixCMP30HX_CSM.exe UnlockAIO.exe; do
+            test -s "rebuilt/$file"
+            cp "rebuilt/$file" "package/windows-v3.0/release/$file"
+          done
+          test -s rebuilt/linux-mmio/mmio_injector
+          install -m 0755 rebuilt/linux-mmio/mmio_injector package/linux-mmio/mmio_injector
+          for file in README.md README_EN.md README_ZH.md LICENSE Setup_CMP30HX_WindowsAIO.bat Setup_CMP30HX_LinuxAIO.sh Setup_ReBar_CMP30HX.bat Launch_WebUI.bat windows-v3.0/release/README.md windows-v3.0/release/files/40HXUNLK.EFI windows-v3.0/release/make_usb_efi.bat windows-v3.0/release/EFI应急修复指南.md; do
+            test -s "package/$file"
+          done
+          (cd package && zip -qr "../CMP-Unlock-${GITHUB_REF_NAME}.zip" .)
+          sha256sum "CMP-Unlock-${GITHUB_REF_NAME}.zip" > SHA256SUMS.txt
+      - name: Upload package for review
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-package
+          path: |
+            CMP-Unlock-*.zip
+            SHA256SUMS.txt
+          if-no-files-found: error
+      - name: Create draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "CMP-Unlock-${GITHUB_REF_NAME}.zip" SHA256SUMS.txt --draft --verify-tag --generate-notes

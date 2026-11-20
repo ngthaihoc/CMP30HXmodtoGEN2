@@ -54,35 +54,16 @@ cd ..\check40x        && go build -a -trimpath -ldflags="-H=windowsgui -s -w" -o
 > [!NOTE]
 > CMP 30HX (mã GPU `10DE:2189`, ví dụ Gigabyte GV-N30HXD6-6G) sau khi đã hàn trở mod vật lý các lane PCIe để nhận x16 Gen1, sử dụng công cụ này để nâng băng thông lên **PCIe Gen2 x16** (~6.4 GB/s).
 
-### 0.1 Bản chất kỹ thuật: Tại sao chỉ lên được Gen2 mà không lên được Gen3?
+### 0.1 Mục tiêu PCIe của CMP 30HX
 
-> [!IMPORTANT]
-> - **Gen2 (5.0 GT/s)**: Bị khoá mềm bởi thanh ghi bóng (VBIOS shadow registers). Công cụ can thiệp qua BAR0 MMIO để ghi đè vector tốc độ link và huấn luyện lại link thành công 100%.
-> - **Gen3 (8.0 GT/s)**: Bị **đứt eFuse ở cấp độ chip silicon (Physical Silicon eFuse Blown)** do NVIDIA cấu hình khi xuất xưởng:
->   - Ghi `0x0E` vào `LNKCAP2` (`0x0880A4`) $\rightarrow$ đọc ngược lại chỉ trả về `0x00000006` (Bit 3 bị ngắt vật lý).
->   - Ghi `0x00010003` vào `LNKCTL2` (`0x0880A8`) $\rightarrow$ đọc ngược lại chỉ trả về `0x00010002` (Target Link Speed bị kẹp ở Gen2).
->   - Xung nhịp PHY Lane 0 (`0x08C4B0`) cố định ở 5.0 GHz (`0x50000000`), không thể nâng lên 8.0 GHz.
-> - Do đó, **Gen2 x16 là giới hạn vật lý tối đa của CMP 30HX**. Không cố ép Gen3 để tránh lỗi vòng lặp retrain.
+Công cụ đặt mục tiêu **Gen2 x16 (5,0 GT/s)** cho CMP 30HX. Trên mẫu TU116 đã thử, `LNKCAP2` chỉ quảng bá Gen1 và Gen2, còn `LNKCTL2` đọc lại vẫn báo mục tiêu Gen2 sau yêu cầu Gen3. Kết quả trên mẫu này chưa xác định được nguyên nhân phần cứng. Đối chiếu tốc độ đích, tốc độ hiện tại và số lane khi GPU có tải.
 
-### 0.2 Tinh chỉnh DEVCTL MRRS (Mở khoá toàn bộ băng thông DMA)
-Mặc định `DEVCTL` (`cap + 0x08`) có Max Read Request Size (MRRS) đặt là 128 Bytes, gây phân mảnh gói tin TLP khiến tốc độ AIDA64 Memory Copy bị nghẽn ở ~2.5 GB/s (như Gen1).  
-Công cụ tự động nâng MRRS lên **512 Bytes** (`0x2000`) và khởi động lại `NVDisplay.ContainerLocalSystem`, giúp băng thông đạt tối đa **~6.3 – 6.4 GB/s** (đạt ~98% lý thuyết của Gen2 x16).
+### 0.2 Tối ưu DEVCTL MRRS
+Công cụ nâng kích thước yêu cầu đọc tối đa (MRRS) lên 512 byte khi giá trị hiện tại thấp hơn. Kiểm tra giá trị MRRS trong chẩn đoán và đo băng thông dưới tải trên hệ thống của bạn.
 
-### 0.3 Lệnh khởi động tự động Gen2 cho CMP 30HX khi bật máy
-Khuyến nghị chạy script **`Setup_CMP30HX_WindowsAIO.bat`** ở thư mục gốc để tự cấu hình 1-chạm.  
-Nếu muốn cấu hình thủ công:
-- **Trên PowerShell**:
-```powershell
-$a = New-ScheduledTaskAction -Execute "$PWD\windows-v3.0\release\40HXInstaller.exe" -Argument '-gen2-30hx -silent'
-$t = New-ScheduledTaskTrigger -AtLogOn
-$p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest
-Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action $a -Trigger $t -Principal $p -Force
-```
-- **Trên Command Prompt (CMD)**:
-```cmd
-schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%CD%\windows-v3.0\release\40HXInstaller.exe\" -gen2-30hx -silent" /sc onlogon /rl highest /f
-```
-*(Nếu từng bị lỗi vòng lặp thử lại 1 phút do bản cũ, xoá bằng: `schtasks /delete /tn "40HXGen2Retry" /f`)*.
+### 0.3 Đăng ký tác vụ khởi động cho CMP 30HX
+
+Dùng `Setup_CMP30HX_WindowsAIO.bat` ở thư mục gốc để cài đặt. Sau khi cấu hình Gen2 thành công, bộ cài tạo tác vụ `CMP30HX_Batch_Gen2_Unlock` chạy khi khởi động Windows và khi đăng nhập. Dùng tùy chọn `-cleantasks` của bộ cài để dọn các tác vụ và mục tự khởi động cũ mà bộ cài nhận diện.
 
 ---
 
@@ -146,13 +127,13 @@ schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%CD%\windows-v3.0\release\40HX
 > - **KHÔNG nạp tệp EFI (`40HXUNLK.EFI`)**: CMP 30HX chạy hoàn toàn trên môi trường Windows thông qua MMIO override, không sử dụng firmware bootloader.
 > - **KHÔNG nhấn "Cài đặt toàn bộ" trên GUI của `40HXInstaller.exe`**: Nút bấm này sẽ cấu hình EFI và GSP dành riêng cho nhân TU106 (40HX).
 > - **KHÔNG kích hoạt GSP Firmware (`EnableGpuFirmware=1`)**: Kiến trúc TU116 của 30HX không hỗ trợ và không cần GSP.
-> - **Hỗ trợ mọi phiên bản Driver**: Tương thích với bất kỳ driver NVIDIA nào (chính thức, desktop, mod, không giới hạn phiên bản).
+> - **Driver**: Xác minh Windows nhận đúng CMP 30HX và xem nhật ký nếu driver truy cập phần cứng bị Windows chặn.
 
 #### Các bước cài đặt chi tiết:
 
 1. **Chuẩn bị môi trường & Driver**:
    - Đảm bảo card CMP 30HX đã được mod hàn trở lane vật lý x16 và nhận diện ổn định trong Device Manager (thường ở tốc độ mặc định Gen1 x16).
-   - Cài đặt driver NVIDIA: Hỗ trợ **mọi phiên bản driver** (driver chính thức NVIDIA, driver desktop, driver mod hoặc bản mới nhất đều được, không giới hạn phiên bản).
+   - Kiểm tra trạng thái driver NVIDIA trong Device Manager.
 
 2. **Chạy mở khoá Gen2 ngay lần đầu (Không cần khởi động lại)**:
    - Nhấp chuột phải vào nút Start menu $\rightarrow$ Chọn **Terminal (Admin)** hoặc **Command Prompt (Administrator)**.
@@ -164,30 +145,13 @@ schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%CD%\windows-v3.0\release\40HX
      ```cmd
      .\windows-v3.0\release\40HXInstaller.exe -gen2-30hx
      ```
-   - Công cụ sẽ mở driver `WinRing0x64.sys`, ghi đè các thanh ghi bóng BAR0 (`0x08841C`, `0x08872C`, `0x08C040`, `0x08C2C0`), nâng MRRS lên 512B và gửi tín hiệu retrain. Thông báo `[Gen2-30HX] ✅ Gen2 Thành công: Link hiện tại Gen2 x16` xuất hiện.
+   - Công cụ thử cấu hình PCIe Gen2 và MRRS 512 byte. Kiểm tra mã trạng thái và xác minh Gen2 x16 dưới tải.
 
-3. **Thiết lập tự động mở khoá khi đăng nhập Windows**:
-   - Do phần cứng GPU trở về trạng thái gốc Gen1 sau mỗi lần khởi động lại máy tính (cold boot / reboot), bạn chỉ cần tạo một Scheduled Task để tự động kích hoạt khi đăng nhập tài khoản.
-   - **Cách 1: Khuyến nghị cho PowerShell (Native, không lo lỗi escape ngoặc kép)**:
-     ```powershell
-     $a = New-ScheduledTaskAction -Execute "$PWD\windows-v3.0\release\40HXInstaller.exe" -Argument '-gen2-30hx -silent'
-     $t = New-ScheduledTaskTrigger -AtLogOn
-     $p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest
-     Register-ScheduledTask -TaskName 'CMP30HX_Gen2_Unlock' -Action $a -Trigger $t -Principal $p -Force
-     ```
-   - **Cách 2: Dành cho Command Prompt (CMD)**:
-     ```cmd
-     schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%CD%\windows-v3.0\release\40HXInstaller.exe\" -gen2-30hx -silent" /sc onlogon /rl highest /f
-     ```
-     *(Mẹo: Nếu dùng `schtasks` trên PowerShell, thêm `--%` để tránh PowerShell nuốt ngoặc kép: `schtasks --% /create /tn "CMP30HX_Gen2_Unlock" /tr "\"$PWD\windows-v3.0\release\40HXInstaller.exe\" -gen2-30hx -silent" /sc onlogon /rl highest /f`).*
-   - **Giải thích tham số**:
-     - `-gen2-30hx`: Kích hoạt chế độ mở khoá riêng biệt cho nhân TU116 (kẹp cứng Gen2, cấm ép Gen3, tối ưu MRRS 512B).
-     - `-silent`: Chạy hoàn toàn ngầm không hiện cửa sổ, tự kết thúc sau ~1-2 giây và tự giải phóng driver `WinRing0x64.sys` khỏi RAM.
+3. **Thiết lập tự động mở khoá khi khởi động hoặc đăng nhập Windows**:
+   - Dùng bộ cài batch ở mục 0.3 để đăng ký tác vụ. Sau khi khởi động lại, kiểm tra kết quả lần chạy gần nhất trong Task Scheduler.
 
-4. **Dọn dẹp tác vụ lặp cũ (Nếu từng dùng bản cũ trước đây)**:
-   ```cmd
-   schtasks /delete /tn "40HXGen2Retry" /f
-   ```
+4. **Dọn dẹp tác vụ cũ**:
+   - Dùng `Setup_CMP30HX_WindowsAIO.bat -cleantasks` để dọn mục tự khởi động thuộc bộ cài.
 
 5. **Xác nhận tốc độ và băng thông thực tế**:
    - Nhấp đúp vào `40HXCheck.exe`: Xác nhận mục `PCIe: Gen2 x16`.
@@ -202,8 +166,7 @@ schtasks /create /tn "CMP30HX_Gen2_Unlock" /tr "\"%CD%\windows-v3.0\release\40HX
 40HXInstaller.exe -uninstall    # Gỡ bỏ sạch sẽ toàn bộ dịch vụ, tác vụ và EFI
 
 UnlockRiotGame.exe              # Khởi chạy giao diện GUI hỗ trợ Riot Vanguard & Secure Boot
-UnlockRiotGame.exe -status      # Kiểm tra GPU, phiên bản Windows và trạng thái Secure Boot
-UnlockRiotGame.exe -sign        # Ký số tự động cho 40HXUNLK.EFI và xuất CMP40HX_Key.cer
+UnlockRiotGame.exe -json-status # Xuất trạng thái GPU, Windows và Secure Boot dưới dạng JSON
 ```
 
 ---
@@ -225,9 +188,9 @@ Sau khi vào Windows, nhấp đúp vào **`40HXCheck.exe`**:
 
 | Hiện tượng | Nguyên nhân | Hướng khắc phục |
 |---|---|---|
-| **Khởi động lại bị về Gen1** | Chưa đăng ký tác vụ tự khởi động khi đăng nhập | Tạo Scheduled Task theo mục 0.3 (đối với 30HX) hoặc mục 3.1 (đối với 40HX). |
+| **Khởi động lại bị về Gen1** | Tác vụ tự khởi động chưa đăng ký hoặc chạy lỗi | Đối chiếu kết quả chạy tác vụ và đo lại tốc độ link dưới tải. Xem mục 0.3 cho 30HX và mục 3.1 cho 40HX. |
 | **GPU-Z báo Gen2 nhưng AIDA64 chỉ đạt 2.5 GB/s** | DEVCTL MRRS bị kẹp ở 128B mặc định | Chạy `40HXInstaller.exe -gen2-30hx` để kích hoạt tối ưu MRRS 512B và nạp lại hàng đợi DMA. |
-| **Bị treo ở vòng lặp tác vụ 40HXGen2Retry** | Do phiên bản cũ ép cờ Gen3 trên CMP 30HX | Chạy `schtasks /delete /tn "40HXGen2Retry" /f` và cập nhật bản `40HXInstaller.exe` mới nhất đã kẹp cứng Gen2. |
+| **Tác vụ 40HXGen2Retry từ bản cũ lặp lại** | Tác vụ khởi động cũ vẫn còn đăng ký | Dùng tùy chọn `-cleantasks` của bộ cài batch nếu tác vụ thuộc bộ cài. |
 | **Không nhận diện được GPU** | Chưa cắm chắc card hoặc thiếu driver NVIDIA | Cài đặt driver NVIDIA (hỗ trợ mọi phiên bản driver chính thức hoặc mod) và kiểm tra Device Manager. |
 | **Màn hình đen sau khi mở khoá 40HX** | Chưa bật GSP Firmware (`EnableGpuFirmware=1`) | Chạy `40HXInstaller.exe -status` để kiểm tra cờ GSP và bật lại qua GUI. |
 
@@ -236,36 +199,29 @@ Sau khi vào Windows, nhấp đúp vào **`40HXCheck.exe`**:
 ## <img src="https://api.iconify.design/lucide/cpu.svg?color=%2310b981" width="22" height="22" align="center" /> 6. Kiến Trúc Deep Module & Cơ Chế An Toàn (v3.0.0)
 
 Phiên bản v3.0.0 áp dụng kiến trúc **Deep Module** với các tầng trừu tượng hoá mạnh mẽ:
-- **`LinkNegotiator`**: Đóng gói toàn bộ máy trạng thái huấn luyện link PCIe, kẹp eFuse Gen2 cho TU116, tối ưu hóa DEVCTL MRRS 512B (`0x2000`) và chuỗi ghi shadow register MMIO (`PRIV_MISC_1`, `XVE_OVR`, `LINK_CONFIG_0`, `PL_LINK_RATE`, `CYA_0`).
+- **`LinkNegotiator`** điều phối huấn luyện link PCIe với mục tiêu tối đa Gen2 theo profile TU116, tối ưu DEVCTL MRRS và cấu hình thanh ghi bóng MMIO.
 - **`ComputeInspector`**: Kiểm tra an toàn `BOOT_0` (`0x16` cho TU106) chống crash hệ thống và giải mã định kiểu Tensor Core (`SS0 == 0x88888888`, `SS1 == 0x40966C`).
 - **`HardwareBus` (Seam 1)**: Tách biệt hoàn toàn kernel driver (`WinRing0`, `ThrottleStop`) khỏi nghiệp vụ chính, kèm `MockHardwareBus` cho phép kiểm thử đơn vị độc lập.
 - **`StatusContract` (Seam 2)**: Chuẩn hoá hợp đồng trạng thái định kiểu (`STATUS_CODE=GEN2_SUCCESS`, v.v.) giữa Go Engine và các script Batch.
-- **Tương thích Anti-Cheat (Riot Vanguard / EAC / BattlEye) qua `UnlockRiotGame.exe`**:
-  - **CMP 40HX**: Riot Vanguard trên Windows 11 yêu cầu Secure Boot = Enabled và TPM 2.0. `UnlockRiotGame.exe` tự động ký số Authenticode cho `40HXUNLK.EFI`, xuất chứng chỉ `CMP40HX_Key.cer` ra ổ C:, Desktop và ESP, hướng dẫn người dùng nạp key vào BIOS `db` (Custom Mode). Nhờ vậy, Secure Boot vẫn BẬT cho Vanguard trong khi `40HXUNLK.EFI` vẫn chạy được để mở khoá Tensor Core `SS0=0x88888888` và Gen2.
-  - **CMP 30HX**: Hoàn toàn không dùng firmware EFI (mở khoá qua MMIO ring-0), vì vậy Secure Boot có thể giữ nguyên BẬT trong BIOS, tương thích 100% với Riot Vanguard mà không cần nạp key.
-  - **Mô hình Dùng-Xong-Rút (Transient BYOVD)**: Driver kernel chỉ nạp trong mili-giây lúc khởi động rồi giải phóng ngay lập tức, không để lại driver trong danh sách đen khi game kiểm tra.
+- **`UnlockRiotGame.exe`** báo trạng thái GPU, driver và Secure Boot, đồng thời hỗ trợ cấu hình game. CMP 30HX dùng luồng PCIe trong hệ điều hành. Tính tương thích với Vanguard phụ thuộc vào driver và cấu hình Windows đã kiểm tra.
 - **Bộ kiểm thử tự động toàn diện**: 13 Go unit tests (`40hxcore`), 18 Go unit tests (`unlockriot`), và 8 Mock test suites Linux (`Test_Mock_CMP30HX_Linux.sh`).
 
 ---
 
-## <img src="https://api.iconify.design/lucide/trash-2.svg?color=%23ef4444" width="22" height="22" align="center" /> 7. Gỡ Cài Đặt Hoàn Toàn
+## <img src="https://api.iconify.design/lucide/trash-2.svg?color=%23ef4444" width="22" height="22" align="center" /> 7. Gỡ Cài Đặt
 
-Để đưa hệ thống về trạng thái nguyên bản xuất xưởng:
-1. Nhấp đúp vào **`40HXUninstaller.exe`** với quyền Administrator (hoặc chạy `40HXInstaller.exe -uninstall`).
-2. Chương trình sẽ tự động xoá:
-   - Các tác vụ lịch trình Scheduled Tasks (`CMP30HX_Gen2_Unlock`, `40HXGen2Retry`, v.v.).
-   - Khoá tự khởi động Run trong Registry.
-   - Mục khởi động EFI trong NVRAM và tệp mở khoá trong phân vùng ESP.
-   - Driver dịch vụ và tệp tạm trong `%ProgramData%\40HXUnlock`.
-3. Khởi động lại máy tính.
+- **CMP 30HX cài bằng batch**: Dùng `Setup_CMP30HX_WindowsAIO.bat -uninstall` để dọn tác vụ, mục tự khởi động cũ và các tệp của bộ cài.
+- **CMP 40HX cài bằng 40HXInstaller**: Chạy `40HXUninstaller.exe` với quyền Administrator. Xem [phạm vi gỡ và hoàn nguyên](release/README.md#8-gỡ-cài-đặt-và-hoàn-nguyên).
+
+Kiểm tra nhật ký gỡ và xác minh lại trạng thái sau khi khởi động lại.
 
 ---
 
 ## <img src="https://api.iconify.design/lucide/shield-alert.svg?color=%23ef4444" width="22" height="22" align="center" /> 8. Quy Tắc An Toàn Phần Cứng Cốt Lõi
 
 1. **Không nạp firmware 40HX lên 30HX**: Tuyệt đối không sao chép `40HXUNLK.EFI` hay blob GA102/TU106 lên CMP 30HX. Cấu trúc VBIOS và bộ điều khiển hoàn toàn khác biệt.
-2. **Không ép Gen3 trên CMP 30HX**: eFuse đã đứt vật lý, mọi thao tác ép Gen3 đều vô hiệu và kích hoạt vòng lặp lỗi retrain.
-3. **Không gọi Reset cứng**: Không kích hoạt `gen2RootLinkDisable`, `gen2HardFallback` hoặc PnP device restart tự ý trên CMP 30HX (chỉ chạy khi có cờ `-hard`).
+2. **CMP 30HX dùng mục tiêu Gen2**. Đối chiếu TLS và link dưới tải khi chẩn đoán.
+3. **Giữ thiết bị hoạt động trong Device Manager**. Luồng 30HX tránh Link Disable, hard fallback và khởi động lại thiết bị qua PnP.
 4. **Nguyên tắc Fail-closed**: Luôn kiểm tra tính sẵn sàng của PCIe Capability và readback an toàn trước khi thực hiện bất kỳ lệnh ghi nào vào PCI Config hoặc MMIO.
 
 ---

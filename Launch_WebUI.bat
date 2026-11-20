@@ -12,7 +12,7 @@ REM 2. Kiem tra co lap UAC de tranh loop vo tan
 if "%__ELEVATING__%"=="1" goto :elevation_failed
 
 :check_elevated
-REM 3. Kiem tra quyen Administrator bang da tang phong thu (fltmc, fsutil, write check)
+REM 3. Kiem tra quyen Administrator bang fltmc, fsutil hoac WindowsPrincipal
 REM Khong dung 'net session' vi neu dich vu LanmanServer bi tat se luon bao loi
 set "IS_ADMIN=0"
 fltmc >nul 2>&1 && set "IS_ADMIN=1"
@@ -20,10 +20,7 @@ if "%IS_ADMIN%"=="0" (
     fsutil dirty query %systemdrive% >nul 2>&1 && set "IS_ADMIN=1"
 )
 if "%IS_ADMIN%"=="0" (
-    copy /b nul "%SystemRoot%\System32\__admintest_%random%.tmp" >nul 2>&1 && (
-        del "%SystemRoot%\System32\__admintest_%random%.tmp" >nul 2>&1
-        set "IS_ADMIN=1"
-    )
+    powershell -NoProfile -Command "if (([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 0 }; exit 1" >nul 2>&1 && set "IS_ADMIN=1"
 )
 
 if "%IS_ADMIN%"=="1" goto :run_app
@@ -34,7 +31,7 @@ if /i "%~1"=="-elevated" goto :elevation_failed
 echo [!] Yeu cau quyen Administrator. Dang tu dong kich hoat UAC...
 set "CURRENT_SCRIPT=%~f0"
 set "CURRENT_DIR=%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$script=$env:CURRENT_SCRIPT; $dir=$env:CURRENT_DIR; $q=[char]34; Start-Process -FilePath $env:ComSpec -ArgumentList ('/c ' + $q + $script + $q + ' -elevated') -WorkingDirectory $dir -Verb RunAs" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$script=$env:CURRENT_SCRIPT; $dir=$env:CURRENT_DIR; $q=[char]34; Start-Process -FilePath $env:ComSpec -ArgumentList ('/d /c ' + $q + $q + $script + $q + ' -elevated' + $q) -WorkingDirectory $dir -Verb RunAs -ErrorAction Stop" >nul 2>&1
 if errorlevel 1 goto :elevation_failed
 exit /b
 
@@ -50,10 +47,14 @@ pause
 exit /b 1
 
 :run_app
-cd /d "%~dp0windows-v3.0\release"
+cd /d "%~dp0windows-v3.0\release" 2>nul || (
+    echo [X] Khong tim thay thu muc windows-v3.0\release.
+    exit /b 1
+)
 if exist "UnlockAIO.exe" (
-    echo [*] Đang khởi chạy CMP Control Center AIO (Wails v2)...
+    echo [*] Dang khoi chay CMP Control Center AIO - Wails v2...
     start "" "UnlockAIO.exe"
+    if errorlevel 1 exit /b 1
     exit /b 0
 )
 
@@ -64,7 +65,7 @@ if not exist "40HXInstaller.exe" (
 )
 
 echo [*] Dang khoi chay CMP Control Center Web UI...
-start "" "40HXInstaller.exe" -web
+start "" "40HXInstaller.exe" -web || exit /b 1
 
 echo.
 echo ================================================================

@@ -1109,7 +1109,7 @@ func gen2Main() {
 			}
 			targetGen := input.TargetGen
 			if profile.MaxSupportedGen > 0 && targetGen > profile.MaxSupportedGen {
-				fmt.Printf("[Gen] Profile %s giới hạn phần cứng tối đa Gen%d (eFuse lock), tự động chuyển về chế độ Gen%d\n", profile.Name, profile.MaxSupportedGen, profile.MaxSupportedGen)
+				fmt.Printf("[Gen] Mục tiêu được hỗ trợ cho %s tối đa là Gen%d. Chuyển về Gen%d.\n", profile.Name, profile.MaxSupportedGen, profile.MaxSupportedGen)
 				targetGen = profile.MaxSupportedGen
 			}
 			gpuBus := (gpuBDF >> 8) & 0xFF

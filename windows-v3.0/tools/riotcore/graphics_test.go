@@ -3,6 +3,7 @@ package riotcore
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"testing"
@@ -91,7 +92,7 @@ func TestConfigureDriverClassRegistryRoutesCMPAndPreservesDisplayHost(t *testing
 	if host["EnableMsHybrid"] != uint32(2) || host["FeatureScore"] != nil || cmp["EnableMsHybrid"] != uint32(1) || cmp["EnableCrossAdapterScanOut"] != uint32(1) {
 		t.Fatalf("Phân vai GPU sai: host=%v, CMP=%v", host, cmp)
 	}
-	if !res.DirectXGlobalConfigured || res.HighPerfDID != "10DE&2189" || !res.TdrConfigured || !res.BlocklistDisabled {
+	if !res.DirectXGlobalConfigured || res.HighPerfDID != "10DE&2189" || !res.TdrConfigured {
 		t.Fatalf("Kết quả thiếu bước: %+v", res)
 	}
 }
@@ -119,6 +120,56 @@ func TestConfigureDriverClassRegistryReportsPartialFailure(t *testing.T) {
 	}
 }
 
+func TestGraphicsOperationsPreserveDriverBlocklist(t *testing.T) {
+	const blocklist = "VulnerableDriverBlocklistEnable"
+	tests := []struct {
+		name         string
+		initial      map[string]interface{}
+		externalEdit bool
+		writeDenied  bool
+	}{
+		{name: "absent key"},
+		{name: "absent value", initial: map[string]interface{}{"OtherPolicy": uint32(7)}},
+		{name: "disabled", initial: map[string]interface{}{blocklist: uint32(0)}},
+		{name: "enabled and write-protected", initial: map[string]interface{}{blocklist: uint32(1)}, writeDenied: true},
+		{name: "externally updated before revert", initial: map[string]interface{}{blocklist: uint32(1)}, externalEdit: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			m := graphicsFixture(t)
+			path := registryPath(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\CI\Config`)
+			expected := test.initial
+			if expected != nil {
+				m.keys[path] = maps.Clone(expected)
+			}
+			if test.writeDenied {
+				m.failValue = blocklist
+			}
+			verifyPolicy := func(step string) {
+				t.Helper()
+				actual, exists := m.keys[path]
+				if exists != (expected != nil) || !maps.Equal(actual, expected) {
+					t.Errorf("%s changed driver blocklist policy: got %v (key exists: %v), want %v", step, actual, exists, expected)
+				}
+			}
+
+			if _, err := ConfigureDriverClassRegistry(nil, 0x2189); err != nil {
+				t.Errorf("optimize depends on blocklist writes: %v", err)
+			}
+			verifyPolicy("optimize")
+
+			if test.externalEdit {
+				expected = map[string]interface{}{blocklist: uint32(0), "OtherPolicy": uint32(7)}
+				m.keys[path] = maps.Clone(expected)
+			}
+			if err := RevertGraphicsOptimization(nil); err != nil {
+				t.Errorf("revert depends on blocklist writes: %v", err)
+			}
+			verifyPolicy("revert")
+		})
+	}
+}
+
 func TestDirectXGlobalRouterRevertKeepsOtherPreferences(t *testing.T) {
 	m := graphicsFixture(t)
 	path := registryPath(registry.CURRENT_USER, DxUserGpuPreferencesPath)
@@ -136,5 +187,31 @@ func TestDirectXGlobalRouterRevertKeepsOtherPreferences(t *testing.T) {
 	value = m.keys[path]["DirectXUserGlobalSettings"].(string)
 	if value != "OtherOption=7;SwapEffectUpgradeEnable=0;" {
 		t.Fatal(value)
+	}
+}
+
+func TestDirectXGlobalRouterRevertLeavesAnUnrelatedGPUSelection(t *testing.T) {
+	m := graphicsFixture(t)
+	path := registryPath(registry.CURRENT_USER, DxUserGpuPreferencesPath)
+	const current = "OtherOption=7; HighPerfAdapter=10DE&1F07 ; SwapEffectUpgradeEnable=0;"
+	m.keys[path] = map[string]interface{}{"DirectXUserGlobalSettings": current}
+
+	if err := RevertGraphicsOptimization(nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.keys[path]["DirectXUserGlobalSettings"]; got != current {
+		t.Fatalf("revert changed unrelated settings: got %q, want %q", got, current)
+	}
+}
+
+func TestDirectXGlobalRouterRevertKeepsMissingPreferencesKeyAbsent(t *testing.T) {
+	m := graphicsFixture(t)
+	path := registryPath(registry.CURRENT_USER, DxUserGpuPreferencesPath)
+
+	if err := RevertGraphicsOptimization(nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := m.keys[path]; exists {
+		t.Fatal("revert created a Registry key for settings that did not exist")
 	}
 }

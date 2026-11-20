@@ -351,9 +351,9 @@ echo       - Buoc 7: Sau khi cai xong, chay muc [1] hoac [3] tren menu de bat CA
 echo.
 echo B. CAU HINH BIOS BAT BUOC TREN HE THONG CHAY UEFI (DE CHONG MAT CARD VA LOI 43):
 echo    1. PCIe Slot Speed (QUAN TRONG NHAT):
-echo       - Bo phan eFuse Gen3 tren silicon TU116 cua CMP 30HX da bi NVIDIA cat bo!
+echo       - Cong cu dat muc tieu Gen2 cho CMP 30HX.
 echo       - TRONG BIOS UEFI, PHAI DUA KHE PCIe CUA CMP 30HX VE 'GEN2' (hoac Gen1).
-echo       - TUYET DOI KHONG de Auto hoac Gen3/Gen4 vi BIOS se dam phan that bai va ngat link.
+echo       - Neu che do Auto khong on dinh, doi chieu toc do khe PCIe trong BIOS.
 echo    2. Windows Fast Startup:
 echo       - Phai tat Fast Startup (Hiberboot) de Windows luon re-train PCIe khi bat may.
 echo       - Script da tu dong thuc hien viec nay qua lenh powercfg -h off.
@@ -405,7 +405,7 @@ pnputil /scan-devices >nul 2>&1
 timeout /t 2 /nobreak >nul 2>&1
 
 :: Bao cao ket qua tim kiem lai thiet bi
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$target = Get-PnpDevice | Where-Object { $_.InstanceId -like '*VEN_10DE&DEV_2189*' -or $_.FriendlyName -like '*3D*' -or ($_.Class -eq 'Display' -and $_.InstanceId -like '*VEN_10DE*') }; if ($target) { Write-Host '    [V] THANH CONG: Windows da nhin thay card do hoa!' -ForegroundColor Green; $target | Format-Table FriendlyName, InstanceId, Status -AutoSize; foreach ($t in $target) { if ($t.FriendlyName -like '*Basic Display*') { Write-Host '    [!] LUU Y: Card dang mang ten Microsoft Basic Display Adapter. Vui long chay muc [9] de cai driver NVIDIA mod DEV_2189!' -ForegroundColor Magenta } } } else { Write-Host '    [!] Card van chua xuat hien tren Device Manager (dang o trang thai an Code 45).' -ForegroundColor Yellow; Write-Host '        Nguyen nhan chinh:' -ForegroundColor Yellow; Write-Host '        1. BIOS UEFI: Khe PCIe chua duoc khoa ve Gen2 (eFuse TU116 khong the chay Gen3/Auto).' -ForegroundColor Gray; Write-Host '        2. Nguon phu 8-pin PCIe chua tiep xuc tot hoac Fast Startup chua duoc tat.' -ForegroundColor Gray; Write-Host '        Hay kiem tra muc [9] de xem huong dan cau hinh BIOS UEFI chuan.' -ForegroundColor Cyan; }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$target = Get-PnpDevice | Where-Object { $_.InstanceId -like '*VEN_10DE&DEV_2189*' -or $_.FriendlyName -like '*3D*' -or ($_.Class -eq 'Display' -and $_.InstanceId -like '*VEN_10DE*') }; if ($target) { Write-Host '    [V] THANH CONG: Windows da nhin thay card do hoa!' -ForegroundColor Green; $target | Format-Table FriendlyName, InstanceId, Status -AutoSize; foreach ($t in $target) { if ($t.FriendlyName -like '*Basic Display*') { Write-Host '    [!] LUU Y: Card dang mang ten Microsoft Basic Display Adapter. Vui long chay muc [9] de cai driver NVIDIA mod DEV_2189!' -ForegroundColor Magenta } } } else { Write-Host '    [!] Card van chua xuat hien tren Device Manager (dang o trang thai an Code 45).' -ForegroundColor Yellow; Write-Host '        Nguyen nhan chinh:' -ForegroundColor Yellow; Write-Host '        1. BIOS UEFI: Khe PCIe chua duoc khoa ve Gen2 theo muc tieu ho tro cua CMP 30HX.' -ForegroundColor Gray; Write-Host '        2. Nguon phu 8-pin PCIe chua tiep xuc tot hoac Fast Startup chua duoc tat.' -ForegroundColor Gray; Write-Host '        Hay kiem tra muc [9] de xem huong dan cau hinh BIOS UEFI chuan.' -ForegroundColor Cyan; }"
 exit /b 0
 
 :: -------------------------------------------------------------------------------

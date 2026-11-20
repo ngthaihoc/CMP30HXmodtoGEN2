@@ -27,6 +27,7 @@ windows-v3.0/tools/**/*.exe
 # Whitelist tracked documentation
 !README*.md
 !docs/specs/**
+!docs/research/**
 !windows-v3.0/*.md
 !windows-v3.0/release/*.md
 AGENTS.md

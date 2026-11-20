@@ -103,6 +103,45 @@ func (h *sseLogHub) removeClient(ch chan string) {
 	close(ch)
 }
 
+func legacyWebHandler(addr string, api, static http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/api/", api)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "Phương thức không được hỗ trợ.", http.StatusMethodNotAllowed)
+			return
+		}
+		static.ServeHTTP(w, r)
+	})
+	allowedOrigin := "http://" + addr
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origins := r.Header.Values("Origin")
+		var validOrigin bool
+		switch len(origins) {
+		case 0:
+			validOrigin = r.Method == http.MethodGet || r.Method == http.MethodHead
+		case 1:
+			validOrigin = origins[0] == allowedOrigin
+		}
+		fetchSite := r.Header.Get("Sec-Fetch-Site")
+		if r.Host != addr || !validOrigin || fetchSite == "cross-site" || fetchSite == "same-site" {
+			http.Error(w, "Yêu cầu không hợp lệ hoặc khác nguồn.", http.StatusForbidden)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+func requireRiotOptimizationConfirmation(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusConflict)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Mở UnlockRiotGame và xác nhận cảnh báo trước khi tối ưu hóa.",
+	})
+}
+
 func runWebGUI() {
 	if !isAdmin() {
 		selfElevate()
@@ -138,11 +177,11 @@ func runWebGUI() {
 		staticFS = subWeb
 	}
 
-	mux := http.NewServeMux()
+	api := http.NewServeMux()
 
 	// 1. Static Web Files
 	fsServer := http.FileServer(http.FS(staticFS))
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	staticHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
 		if strings.HasSuffix(p, ".html") || p == "/" || p == "" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -155,11 +194,13 @@ func runWebGUI() {
 	})
 
 	// 2. Real-time Logs SSE Stream
-	mux.HandleFunc("/api/logs/stream", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("GET /api/logs/stream", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if r.Method == http.MethodHead {
+			return
+		}
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -192,7 +233,7 @@ func runWebGUI() {
 	})
 
 	// 3. Status API
-	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		items := scanStatus()
 
@@ -281,7 +322,7 @@ func runWebGUI() {
 	})
 
 	// 4. Unlock Gen2 Now
-	mux.HandleFunc("/api/unlock-now", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("POST /api/unlock-now", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		if !tryAcquireOp("Mở khoá PCIe ngay") {
 			w.WriteHeader(http.StatusConflict)
@@ -297,7 +338,7 @@ func runWebGUI() {
 	})
 
 	// 4b. Force Root Port Retrain (Tự động phát hiện 30HX/40HX & cách ly an toàn)
-	mux.HandleFunc("/api/force-root-gen2", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("POST /api/force-root-gen2", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		if !tryAcquireOp("Ép mở khoá Gen2 qua Root Port") {
 			w.WriteHeader(http.StatusConflict)
@@ -312,7 +353,7 @@ func runWebGUI() {
 				fmt.Printf("[PCIe] 🛡️ Tự động nhận diện phần cứng: %s [%s] (DEV_%04X)\n", prof.Name, prof.Family, prof.DeviceID)
 				if prof.DeviceID == 0x2189 || prof.Family == "TU116" {
 					fmt.Println("[PCIe] 🔒 Kích hoạt ranh giới bảo vệ CMP 30HX:")
-					fmt.Println("  [✓] Khóa eFuse cứng tại Gen2 (5.0 GT/s), tuyệt đối không ép Gen3")
+					fmt.Println("  [✓] Công cụ chỉ nhắm tới Gen2 (5.0 GT/s) trên CMP 30HX")
 					fmt.Println("  [✓] Không áp dụng microcode hay EFI payload của 40HX")
 					fmt.Println("  [✓] Tắt toàn bộ reset PnP và Root Link Disable nguy hiểm")
 					fmt.Println("  [✓] Nạp chuỗi thanh ghi MMIO TU116ShadowSequence và ép Root Port huấn luyện lại!")
@@ -335,7 +376,7 @@ func runWebGUI() {
 	})
 
 	// 5. Full Install 1-Click
-	mux.HandleFunc("/api/full-install", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("POST /api/full-install", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		if !tryAcquireOp("Cài đặt toàn bộ") {
 			w.WriteHeader(http.StatusConflict)
@@ -351,7 +392,7 @@ func runWebGUI() {
 	})
 
 	// 6. Gen2 and Autostart Task
-	mux.HandleFunc("/api/gen2-and-task", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("POST /api/gen2-and-task", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		if !tryAcquireOp("Mở khoá & Cài tự khởi động") {
 			w.WriteHeader(http.StatusConflict)
@@ -384,7 +425,7 @@ func runWebGUI() {
 	})
 
 	// 7. Install Selected Components
-	mux.HandleFunc("/api/install", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("POST /api/install", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		var sel map[string]bool
 		if err := json.NewDecoder(r.Body).Decode(&sel); err != nil {
@@ -404,7 +445,7 @@ func runWebGUI() {
 	})
 
 	// 8. Save Policy
-	mux.HandleFunc("/api/save-policy", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("POST /api/save-policy", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		var req struct {
 			Strategy      int `json:"strategy"`
@@ -431,7 +472,7 @@ func runWebGUI() {
 	})
 
 	// 9. Riot Games & Vanguard Status Query
-	mux.HandleFunc("/api/riot/status", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("GET /api/riot/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		exePath := findUnlockRiotExe()
 		if exePath != "" {
@@ -515,34 +556,11 @@ func runWebGUI() {
 		json.NewEncoder(w).Encode(st)
 	})
 
-	// 10. Riot Games 1-Click Optimize
-	mux.HandleFunc("/api/riot/optimize", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		if !tryAcquireOp("Tối ưu hóa Riot Games (1-Chạm)") {
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]string{"message": "Hệ thống đang bận thao tác khác."})
-			return
-		}
-		go func() {
-			defer releaseOp()
-			fmt.Println("== [Riot Vanguard] Bắt đầu tối ưu hóa hệ thống và dọn dẹp driver ==")
-			exePath := findUnlockRiotExe()
-			if exePath != "" {
-				cmd := exec.Command(exePath, "-silent", "-optimize")
-				cmd.Stdout = hub
-				cmd.Stderr = hub
-				if err := cmd.Run(); err != nil {
-					fmt.Fprintf(hub, "[!] Lỗi khi chạy UnlockRiotGame: %v\n", err)
-				}
-			} else {
-				fmt.Fprintf(hub, "[!] Không tìm thấy UnlockRiotGame.exe để thực thi tối ưu.\n")
-			}
-		}()
-		json.NewEncoder(w).Encode(map[string]string{"status": "started"})
-	})
+	// 10. Chuyển người dùng sang giao diện Riot để xác nhận thay đổi bảo mật.
+	api.HandleFunc("POST /api/riot/optimize", requireRiotOptimizationConfirmation)
 
 	// 11. Riot EFI Signing (Authenticode)
-	mux.HandleFunc("/api/riot/sign-efi", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("POST /api/riot/sign-efi", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		if !tryAcquireOp("Ký chữ ký số EFI cá nhân") {
 			w.WriteHeader(http.StatusConflict)
@@ -568,7 +586,7 @@ func runWebGUI() {
 	})
 
 	// 12. Reboot to BIOS Firmware Setup
-	mux.HandleFunc("/api/riot/reboot-bios", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("POST /api/riot/reboot-bios", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		fmt.Println("[BIOS] Nhận yêu cầu khởi động lại máy tính vào BIOS Setup...")
 		cmd := exec.Command("shutdown", "/r", "/fw", "/t", "2")
@@ -579,7 +597,7 @@ func runWebGUI() {
 	})
 
 	// 13. Launch standalone UnlockRiotGame.exe GUI
-	mux.HandleFunc("/api/riot/launch-gui", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("POST /api/riot/launch-gui", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		exePath := findUnlockRiotExe()
 		if exePath == "" {
@@ -597,7 +615,7 @@ func runWebGUI() {
 	})
 
 	// 14. Launch Classic Walk Go GUI
-	mux.HandleFunc("/api/launch-classic-gui", func(w http.ResponseWriter, r *http.Request) {
+	api.HandleFunc("POST /api/launch-classic-gui", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		exePath, err := os.Executable()
 		if err != nil {
@@ -640,7 +658,7 @@ func runWebGUI() {
 		openBrowser(url)
 	}()
 
-	server := &http.Server{Handler: mux}
+	server := &http.Server{Handler: legacyWebHandler(addr, api, staticHandler)}
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		fmt.Println("[!] Máy chủ web dừng:", err)
 	}

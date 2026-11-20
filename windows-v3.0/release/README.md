@@ -313,10 +313,9 @@ Khi chơi các tựa game của Riot Games (Valorant, League of Legends, TFT) đ
 
 ## 8. Gỡ cài đặt và hoàn nguyên
 
-- Tự động: Nhấp đúp chuột vào `40HXUninstaller.exe` (Dùng chung bộ lõi gỡ cài đặt sạch sẽ với `40HXInstaller.exe -uninstall`).
-- Quá trình này sẽ xoá sạch: Các Scheduled Task (kể cả tác vụ thử lại khi lỗi) cùng khoá tự khởi động / Mục boot firmware / Firmware mở khoá trong phân vùng ESP (khôi phục lại file bootx64.efi gốc) / Dịch vụ và file driver / Cấu hình GSP / Khoá chính sách trong Registry / Thư mục đệm ProgramData / Danh sách loại trừ Defender.
-- Các thiết lập nguồn điện (Fast Startup / ASPM / High Performance Plan) **sẽ được giữ nguyên**, nếu muốn khôi phục thủ công xem tại mục 2.4.
-- Sau khi khởi động lại máy, card đồ hoạ sẽ trở về trạng thái xuất xưởng ban đầu. Nếu trong BIOS vẫn còn sót tên mục boot, bạn có thể vào BIOS xoá thủ công.
+- Dùng `40HXUninstaller.exe` hoặc `40HXInstaller.exe -uninstall` cho các thành phần được cài bằng bộ cài 40HX. Nếu đã cài CMP 30HX bằng batch, dùng `Setup_CMP30HX_WindowsAIO.bat -uninstall`.
+- Công cụ dọn các mục khởi động, dịch vụ, tệp driver và cấu hình của bộ cài. Trên UEFI, công cụ xử lý tệp mở khoá trên ESP và khôi phục `bootx64.efi` khi có bản sao lưu. Kiểm tra nhật ký và xử lý lỗi khôi phục trước khi tiếp tục.
+- Việc khôi phục các thiết lập nguồn cần thực hiện riêng theo mục 2.4. Sau khi khởi động lại, đối chiếu trạng thái boot, driver và thiết lập với kết quả đã ghi trước khi cài.
 
 ---
 
@@ -341,7 +340,7 @@ Gắn ổ đĩa cho phân vùng EFI → Xoá thư mục `\EFI\40HX` → Chạy `
 ## 10. Lịch sử phiên bản
 
 - **v3.0.0 (Deep Module Architecture & Vanguard Clean)**: Tái cấu trúc toàn diện kiến trúc phần mềm theo nguyên lý Deep Module với 2 ranh giới Seams rõ ràng:
-  - **`LinkNegotiator`**: Đóng gói toàn bộ máy trạng thái huấn luyện PCIe, kẹp cứng giới hạn phần cứng eFuse Gen2 trên TU116, tối ưu DEVCTL MRRS 512B (`0x2000`) nâng băng thông thực tế lên ~6.4 GB/s, chuỗi nạp shadow register MMIO (`PRIV_MISC_1`, `XVE_OVR`, `LINK_CONFIG_0`, `PL_LINK_RATE`, `CYA_0`) và phục hồi an toàn PnP (thời gian xả tụ 2.0s).
+  - **`LinkNegotiator`**: Điều phối huấn luyện PCIe, dùng mục tiêu tối đa Gen2 cho profile TU116, tối ưu DEVCTL MRRS và nạp chuỗi thanh ghi bóng MMIO.
   - **`ComputeInspector`**: Tích hợp chốt an toàn phần cứng kiểm tra `BOOT_0` (`0x16xxxxxx` họ TU106) chống crash hệ thống và giải mã định kiểu thanh ghi kép `SS0` (`0x409664` == `0x88888888`) và `SS1` (`0x40966C`).
   - **`HardwareBus` (Seam 1)**: Tách biệt hoàn toàn tầng driver I/O (`WinRing0`, `ThrottleStop`) khỏi logic nghiệp vụ, hỗ trợ `MockHardwareBus` cho kiểm thử đơn vị.
   - **`StatusContract` (Seam 2)**: Chuẩn hóa hợp đồng trạng thái có cấu trúc (`STATUS_CODE=GEN2_SUCCESS`, v.v.) giữa Go engine và các script Batch.

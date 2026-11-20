@@ -6,7 +6,7 @@
 #   - 仅新增 SEC2 CPUCTL/DMATRFCMD/BCR/HWCFG2/RESET_PLM/WPR2 只读打印（v90 pre-flight）
 # 工具链：MSYS2 便携版 D:\Code\40HX\.scratch\msys64（PATH=/mingw64/bin:/usr/bin）
 # =============================================================================
-set -e
+set -euo pipefail
 cd "$(dirname "$0")"
 
 export PATH=/mingw64/bin:/usr/bin:$PATH
@@ -29,9 +29,12 @@ EFI_INC="${EFI_INC:-/usr/include/efi}"
 EFI_LIB="${EFI_LIB:-/usr/lib}"
 
 SRC=unlock40x_v70.c
-OBJ=unlock40x_v70.o
-OUT=unlock40x_v70.so
 EFIOUT=unlock40x_v70.efi
+BUILD_DIR="$(mktemp -d ./.efi-build.XXXXXX)"
+OBJ="$BUILD_DIR/unlock40x_v70.o"
+OUT="$BUILD_DIR/unlock40x_v70.so"
+trap 'rm -f -- "$BUILD_DIR"/*.o "$OUT" "$BUILD_DIR/$EFIOUT"; rmdir -- "$BUILD_DIR"' EXIT
+OBJS=("$OBJ")
 
 echo "=== 1. compile $SRC ==="
 gcc -c -O2 -fno-stack-protector -fno-pie -ffreestanding \
@@ -51,7 +54,8 @@ embed() {
     --redefine-sym "_binary_${base}_start=${tgt}" \
     --redefine-sym "_binary_${base}_end=${tgt}_end" \
     --redefine-sym "_binary_${base}_size=${tgt}_size" \
-    "$f" "${tgt}.o"
+    "$f" "$BUILD_DIR/${tgt}.o"
+  OBJS+=("$BUILD_DIR/${tgt}.o")
   echo "embedded $f -> $tgt"
 }
 embed v67_payload.bin         v67_payload_bin
@@ -66,20 +70,18 @@ embed sec2_ucode_vbios_49.bin sec2_ucode_vbios_49
 embed sec2_ucode_vbios_89.bin sec2_ucode_vbios_89
 embed bl_gsp_tu102.bin        gsp_bl_tu102
 
-OBJS="$OBJ v67_payload_bin.o booter_ucode_dbg.o booter_ucode_prod.o \
-gsp_rm_boot_dbg.o fwsec_ga102_bin.o fwsec_ga102_sig.o \
-fwsec_40hx_prod_bin.o fwsec_40hx_dbg_bin.o \
-sec2_ucode_vbios_49.o sec2_ucode_vbios_89.o gsp_bl_tu102.o"
-
 echo "=== 3. link ==="
-ld -mi386pep --subsystem 10 -e u40x_entry -o "$OUT" $OBJS "$EFI_LIB/libefi.a" 2>&1 | tail -12 || true
+ld -mi386pep --subsystem 10 -e u40x_entry -o "$OUT" "${OBJS[@]}" "$EFI_LIB/libefi.a"
 
 echo "=== 4. convert ==="
-if [ -f "$OUT" ]; then
-  objcopy -j .text -j .data -j .rdata -j .reloc \
-    --target=efi-app-x86_64 "$OUT" "$EFIOUT" 2>&1 | tail -4 || true
-  ls -la "$EFIOUT" 2>/dev/null && echo v70_EFI_OK || echo CONVERT_FAIL
+objcopy -j .text -j .data -j .rdata -j .reloc \
+  --target=efi-app-x86_64 "$OUT" "$BUILD_DIR/$EFIOUT"
+if [[ ! -s "$BUILD_DIR/$EFIOUT" ]]; then
+  echo "Lỗi: Tệp EFI được tạo bị thiếu hoặc rỗng." >&2
+  exit 1
 fi
-echo DONE
+
+mv -f -- "$BUILD_DIR/$EFIOUT" "$EFIOUT"
+echo v70_EFI_OK
 
 

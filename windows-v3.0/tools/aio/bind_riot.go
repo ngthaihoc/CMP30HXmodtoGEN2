@@ -89,7 +89,7 @@ func (a *App) GetRiotStatus() RiotStatusReport {
 			}
 		}
 	} else if is30HX {
-		st.GpuDesc = "NVIDIA CMP 30HX [TU116] (Gen 2 Hardware Lock)"
+		st.GpuDesc = "NVIDIA CMP 30HX [TU116] (mục tiêu PCIe Gen2)"
 		st.CanPlayValorant = (!isWin11 || sbOn)
 		if !isWin11 || sbOn {
 			st.ValorantDesc = "Sẵn sàng (CMP 30HX giữ Secure Boot BẬT bình thường)"
@@ -138,6 +138,7 @@ func (a *App) RiotOptimize(confirmed bool) error {
 	cfgCount := len(modifiedCfgs)
 	if cfgErr != nil {
 		a.Log(fmt.Sprintf("[!] Lỗi cấu hình game.cfg: %v", cfgErr))
+		return fmt.Errorf("cấu hình game.cfg chưa hoàn tất: %w", cfgErr)
 	}
 	if cfgCount > 0 {
 		a.Log(fmt.Sprintf("  [✓] Đã tối ưu %d cấu hình game.cfg (WindowMode=2, Borderless=1, DX11Support=1).", cfgCount))
@@ -151,14 +152,14 @@ func (a *App) RiotOptimize(confirmed bool) error {
 	return nil
 }
 
-// RiotRevertOptimization hoàn tác cấu hình Riot (bật lại Blocklist, xoá định tuyến)
+// RiotRevertOptimization gỡ định tuyến DirectX toàn cục trỏ tới card CMP.
 func (a *App) RiotRevertOptimization() error {
 	if !a.tryAcquire("Hoàn tác tối ưu Riot") {
 		return fmt.Errorf("hệ thống đang bận thao tác khác")
 	}
 	defer a.releaseOp()
 
-	a.Log("[Riot] Bắt đầu hoàn tác cấu hình bảo mật...")
+	a.Log("[Riot] Kiểm tra và gỡ định tuyến DirectX toàn cục trỏ tới card CMP...")
 
 	if err := riotcore.RevertGraphicsOptimization(appLogWriter{a}); err != nil {
 		a.Log(fmt.Sprintf("[!] Hoàn tác cấu hình Riot chưa hoàn tất: %v", err))

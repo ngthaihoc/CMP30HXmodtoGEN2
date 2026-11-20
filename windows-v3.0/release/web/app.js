@@ -272,7 +272,7 @@
       if (btnTitle && btnSub) {
         if (is30HX) {
           btnTitle.textContent = "⚡ Ép mở khóa Gen2 (CMP 30HX)";
-          btnSub.textContent = "Bảo vệ eFuse, nạp MMIO TU116 & ép Root Port Gen2 (Đã cách ly 40HX)";
+          btnSub.textContent = "Mục tiêu Gen2, nạp MMIO TU116 và cách ly luồng 40HX";
         } else if (is40HX) {
           btnTitle.textContent = "⚡ Ép mở khóa Gen2 (CMP 40HX)";
           btnSub.textContent = "Bỏ qua kẹt LNKCAP Gen1, nạp MMIO TU106 & ép Root Port Gen2";
@@ -288,7 +288,7 @@
     if (tipTitle && tipDesc) {
       if (is30HX) {
         tipTitle.textContent = "🔒 BẢO VỆ PHẦN CỨNG CMP 30HX (TU116)";
-        tipDesc.innerHTML = "Đã nhận diện <strong>NVIDIA CMP 30HX</strong>. Hệ thống tự động cách ly: khóa cứng eFuse ở Gen2 (không ép Gen3), không áp dụng microcode/reset của 40HX. Bấm <strong>[⚡ Ép mở khóa Gen2 (CMP 30HX)]</strong> để nạp chuỗi MMIO TU116 và ép Root Port huấn luyện lại an toàn!";
+        tipDesc.innerHTML = "Đã nhận diện <strong>NVIDIA CMP 30HX</strong>. Công cụ chỉ nhắm tới Gen2 (5,0 GT/s) và cách ly microcode, EFI và reset của 40HX. Bấm <strong>[⚡ Ép mở khóa Gen2 (CMP 30HX)]</strong> để nạp chuỗi MMIO TU116 và huấn luyện lại liên kết.";
       } else if (is40HX) {
         tipTitle.textContent = "⚡ KHUYẾN NGHỊ CMP 40HX (TU106) - BỎ QUA KẸT GEN1";
         tipDesc.innerHTML = "Đã nhận diện <strong>NVIDIA CMP 40HX</strong>. Khi chưa reboot EFI hoặc Fast Startup chặn UEFI, thanh ghi LNKCAP sẽ tạm thời báo Gen1 (0x00463D01). Bấm <strong>[⚡ Ép mở khóa Gen2 (CMP 40HX)]</strong> để nạp chuỗi MMIO TU106 và ép Root Port bo mạch chủ nâng tốc độ lên Gen2 x16 tức thì!";
@@ -329,8 +329,8 @@
     { id: 'btnForceRootGen2', url: '/api/force-root-gen2', log: '[PCIe] ⚡ Bắt đầu Ép Mở Khoá Gen2 qua Root Port (-force-root-gen2)...' },
     { id: 'btnFullInstall', url: '/api/full-install', log: '[INSTALL] Bắt đầu quy trình triển khai toàn diện một chạm...' },
     { id: 'btnGen2AndTask', url: '/api/gen2-and-task', log: '[PCIe] Mở khoá và đăng ký tác vụ tự khởi động...' },
-    { id: 'btnRiotOptimize', url: '/api/riot/optimize', log: '[RIOT] Bắt đầu tối ưu hóa hệ thống cho Riot Games & dọn dẹp driver...' },
-    { id: 'btnRiotOptimizeInner', url: '/api/riot/optimize', log: '[RIOT] Bắt đầu tối ưu hóa hệ thống cho Riot Games & dọn dẹp driver...' },
+    { id: 'btnRiotOptimize', url: '/api/riot/launch-gui', log: '[RIOT] Mở UnlockRiotGame để xem cảnh báo và xác nhận tối ưu hóa...' },
+    { id: 'btnRiotOptimizeInner', url: '/api/riot/launch-gui', log: '[RIOT] Mở UnlockRiotGame để xem cảnh báo và xác nhận tối ưu hóa...' },
     { id: 'btnLaunchUnlockRiotExe', url: '/api/riot/launch-gui', log: '[EXE] Khởi chạy ứng dụng chuyên sâu UnlockRiotGame.exe...' },
     { id: 'btnLaunchClassicGui', url: '/api/launch-classic-gui', log: '[GUI] Khởi chạy Giao diện Cổ điển (Go Walk GUI)...' },
     { id: 'btnModalRebootBios', url: '/api/riot/reboot-bios', log: '[BIOS] Đang khởi động lại vào BIOS Setup...' }

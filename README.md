@@ -40,11 +40,13 @@ Giải pháp mở khoá băng thông **PCIe Gen2 x16 (~6.4 GB/s)** và tối ưu
 
 | Tính năng | CMP 30HX (TU116) | CMP 40HX (TU106) |
 |---|---|---|
-| **Giới hạn phần cứng (eFuse)** | Bị cắt eFuse Gen3 (chỉ đạt tối đa Gen2 x16) | Hỗ trợ Gen2 x16 / Gen3 x4 tuỳ cấu hình |
+| **Mục tiêu PCIe của công cụ** | Gen2 x16 | Gen2 x16 |
 | **Cơ chế mở khoá PCIe** | BAR0 MMIO runtime (Windows / Linux) | EFI Loader (`40HXUNLK.EFI`) hoặc runtime MMIO |
 | **Tensor Core Compute** | Không có trên kiến trúc TU116 | Có hỗ trợ (~50 TFLOPS khi mở qua EFI) |
 | **Riot Vanguard / Secure Boot** | Mở khoá trực tiếp trong OS, Secure Boot bật nguyên bản | Ký số EFI với `UnlockRiotGame.exe` nạp vào Secure Boot `db` |
 | **DirectX Global Router** | Tự động điều hướng sang card CMP | Tự động điều hướng sang card CMP |
+
+Trên mẫu TU116 đã thử, tốc độ đích đọc lại vẫn là Gen2 sau yêu cầu Gen3. Nguyên nhân phần cứng của quan sát này chưa được xác định.
 
 ---
 
@@ -64,23 +66,20 @@ Bấm **Code -> Download ZIP** trên GitHub hoặc tải bản phát hành trong
 
 ## <img src="https://api.iconify.design/lucide/terminal.svg?color=%2310b981" width="22" height="22" align="center" /> 2. Cài đặt trên Windows
 
-### ⭐ Cách nhanh nhất: Giao diện Web Control Center (Khuyên dùng)
+### ⭐ Giao diện CMP Control Center
 
 > **Chỉ 1 thao tác**: Nhấp đúp vào `Launch_WebUI.bat`.
 
-Trình duyệt sẽ tự động mở trang điều khiển cục bộ (`http://127.0.0.1:8080`) với đầy đủ bảng ma trận 16-lane PCIe thời gian thực, thông số xung nhịp GPU, nhiệt độ và nút bấm **1-Chạm Mở Khoá Gen2**.
+Launcher ưu tiên mở ứng dụng desktop `UnlockAIO.exe` (Wails). Nếu thiếu tệp này, launcher dùng giao diện web cục bộ của `40HXInstaller.exe` và tự mở trình duyệt tại địa chỉ mà công cụ hiển thị.
 
 ### Cách 2: Script tự động trọn gói (All-In-One)
 
 > Nhấp chuột phải vào `Setup_CMP30HX_WindowsAIO.bat` -> **Run as administrator**.
 
-Script sẽ tự động thực hiện toàn diện các bước:
-1. **Tắt PCIe ASPM và Hybrid Sleep**: Ngăn hệ điều hành Windows hạ tốc độ link PCIe khi GPU ở trạng thái chờ (idle).
-2. **Tắt Fast Startup (hiberboot)**: Tránh hiện tượng kẹt link Gen1 sau khi khởi động lại máy.
-3. **Tắt Vulnerable Driver Blocklist**: Cho phép hệ điều hành nạp driver kernel an toàn trong tích tắc.
-4. **Tắt Memory Integrity (HVCI / Core Isolation)**: Cho phép nạp thanh ghi BAR0 MMIO (nếu đang bật, script sẽ tắt và yêu cầu bạn khởi động lại máy 1 lần).
-5. **Đăng ký cơ chế Resident Guard (Thường trú)**: Tạo Scheduled Task đa tầng (Startup delay 45s + Logon delay 10s + Wake from Sleep) và Registry Run Key, tự động bù tốc nếu card bị vBIOS reset về Gen1.
-6. **Mở khoá Gen2 x16 + MRRS 512B**: Kích hoạt toàn bộ băng thông DMA ngay lập tức.
+Script dành cho CMP 30HX (`10DE:2189`).
+1. Kiểm tra card, các tệp cài đặt và driver cần thiết.
+2. Sao chép tệp chạy, thử cấu hình PCIe Gen2 và đọc kết quả. Xác minh Gen2 x16 dưới tải.
+3. Sau khi mở khoá đạt yêu cầu, đăng ký tác vụ khi khởi động Windows và khi đăng nhập. Bộ cài báo lỗi nếu driver bị chặn hoặc tác vụ không đăng ký được.
 
 ---
 
@@ -88,13 +87,13 @@ Script sẽ tự động thực hiện toàn diện các bước:
 
 Nếu bạn chơi **Liên Minh Huyền Thoại (LoL), Đấu Trường Chân Lý (TFT), Valorant** hoặc các tựa game đồ hoạ khác:
 
-Chạy ứng dụng `windows-v3.0\release\UnlockRiotGame.exe` và bấm **[⚡ 1-CHẠM Tối Ưu Hóa]** (hoặc chạy lệnh `UnlockRiotGame.exe -silent -optimize`).
+Nút **[⚡ 1-CHẠM Tối Ưu Hóa]** trong `windows-v3.0\release\UnlockRiotGame.exe` có thể thay đổi cấu hình bảo mật Windows. Trên dòng lệnh, chế độ `-silent -optimize` yêu cầu xác nhận rõ ràng bằng `-confirm-riot` hoặc `-y`.
 
-Công cụ sẽ tự động xử lý trong 2 giây:
+Các chức năng tối ưu bao gồm:
 - **Tự nhận diện GPU xuất hình & GPU render**: Quét màn hình đang cắm vào card nào để gán làm Display Host (`EnableMsHybrid=2`), đồng thời gán CMP làm Render 3D dGPU (`EnableMsHybrid=1`, `CASO=1`, `FeatureScore=0xD1`).
 - **DirectX Global Router**: Đăng ký Hardware ID của CMP vào `DirectXUserGlobalSettings` (`HighPerfAdapter`). Toàn bộ game 3D sẽ tự động chạy trên card CMP mà bạn không cần phải add thủ công từng file exe trong Windows Graphics Settings.
 - **Khắc phục triệt để lỗi "Không thể khởi động thiết bị đồ họa"**: Quét thư mục cài đặt LoL (Riot, VNG) và tự động cấu hình `game.cfg` sang chuẩn `WindowMode=2`, `BorderlessWindow=1`, `PreferDX9LegacyMode=0`, `DX11Support=1`.
-- **Vanguard Unblocker cho Driver 5xx/6xx**: Vô hiệu hoá VulnerableDriverBlocklist, tự import chứng chỉ driver mod vào Windows Root Certificate Store, và dọn dẹp sạch sẽ các driver tạm để giữ hệ thống sạch với Vanguard (`testsigning` luôn tắt).
+- **Thay đổi cấu hình bảo mật**: Tuỳ cấu hình hệ thống, quá trình tối ưu có thể thay đổi chính sách driver hoặc kho chứng chỉ Windows. Kết quả tương thích Vanguard phụ thuộc vào driver và môi trường đã kiểm tra.
 
 ---
 
@@ -105,7 +104,7 @@ chmod +x Setup_CMP30HX_LinuxAIO.sh
 sudo ./Setup_CMP30HX_LinuxAIO.sh
 ```
 
-Script Linux tự động xử lý: tắt ASPM, quét toàn bộ card CMP 30HX/40HX trong máy, ghi thanh ghi BAR0 MMIO, nâng MRRS lên 512B, retrain link Gen2, và cài đặt systemd service + hook sleep để duy trì sau mỗi lần bật máy hoặc resume từ chế độ ngủ.
+Script Linux dành cho CMP 30HX (`10DE:2189`). Công cụ cấu hình PCIe với mục tiêu Gen2 x16 và MRRS tối thiểu 512 byte, đồng thời có thể cài dịch vụ systemd và hook đánh thức. Xác minh tốc độ dưới tải sau khi khởi động lại và sau khi đánh thức máy.
 
 | Lệnh | Chức năng |
 |---|---|
@@ -141,15 +140,15 @@ Trong thư mục dự án có sẵn các công cụ tiện ích hỗ trợ ngư�
 
 | Hiện tượng | Nguyên nhân | Hướng giải quyết |
 |---|---|---|
-| **Kẹt ở Gen1 (GPU TLS=Gen1, Root TLS=Gen2)** | - Hệ thống GPU kép (CMP 30HX + iGPU AMD/Intel) hoặc driver mod (RainCandy) khởi tạo lại, tự động reset GPU TLS về Gen1.<br>- Hoặc Windows bật Memory Integrity (HVCI), hoặc cáp Riser tiếp xúc kém | 1. **Tự động**: `Setup_CMP30HX_WindowsAIO.bat` bản mới kích hoạt chế độ **Thường trú (Resident Guard)** và tác vụ Logon (delay 10s) tự bù tốc Gen2.<br>2. **Thủ công**: Giữ card ở trạng thái **Enable** trong Device Manager (tuyệt đối **KHÔNG** Disable vì sẽ ngắt kết nối BAR0 MMIO) -> Chạy `Setup_CMP30HX_WindowsAIO.bat` hoặc `40HXInstaller.exe -gen2-30hx` khi desktop đã ổn định.<br>3. Nếu HVCI đang bật: Tắt HVCI và **Khởi động lại máy tính (Reboot)**. |
-| **Mất kích hoạt Gen2 sau khi khởi động lại máy** | - Driver NVIDIA/RainCandy nạp trễ trên hệ thống APU hoặc ghi đè trạng thái vBIOS sau khi khởi động.<br>- Xung đột cấu hình driver cũ hoặc Fast Startup còn bật | 1. `Setup_CMP30HX_WindowsAIO.bat` đã tích hợp Scheduled Task đa tầng (Logon delay 10s + Startup delay 45s) kèm chế độ **DriverStrategy=2 (Resident Guard)** tự động kiểm tra mỗi phút và retrain lại khi mất Gen2.<br>2. **Khuyến cáo DDU**: Dùng **DDU (Display Driver Uninstaller)** trong chế độ Safe Mode gỡ sạch toàn bộ driver hiển thị cũ trước khi cài lại driver mod để tránh lỗi xung đột registry. |
-| **Bị tụt về Gen1 x16 khi card ở chế độ rảnh (Idle)** | Tính năng tiết kiệm điện PCIe ASPM của Windows đang bật | Chạy lại `Setup_CMP30HX_WindowsAIO.bat` (script tự động tắt ASPM) hoặc chỉnh trong Power Options -> PCI Express -> Link State Power Management: **Off**. |
+| **Kẹt ở Gen1 (GPU TLS=Gen1, Root TLS=Gen2)** | Driver khởi tạo lại GPU, hệ điều hành chặn driver truy cập phần cứng hoặc khe cắm/riser có vấn đề | Giữ card ở trạng thái bật trong Device Manager. Dùng `Setup_CMP30HX_WindowsAIO.bat -preflight` để kiểm tra nhận diện card và xem thông tin chẩn đoán khi bộ cài báo lỗi driver. |
+| **Mất kích hoạt Gen2 sau khi khởi động lại máy** | Tác vụ khởi động chạy lỗi, chưa đăng ký hoặc driver thay đổi trạng thái card | Kiểm tra `CMP30HX_Batch_Gen2_Unlock` trong Task Scheduler và đối chiếu kết quả chẩn đoán sau khi đăng nhập. |
+| **Bị tụt về Gen1 x16 khi card ở chế độ rảnh (Idle)** | Cơ chế tiết kiệm điện có thể giảm tốc độ liên kết khi GPU nhàn rỗi | Đối chiếu tốc độ đích (TLS) và kiểm tra tốc độ, chiều rộng liên kết dưới tải. |
 | **GPU-Z báo Gen2 x16 nhưng AIDA64 chỉ đạt ~2.5 GB/s** | Giá trị Max Read Request Size (MRRS) của card bị kẹp ở 128 Bytes mặc định | Chạy lệnh `40HXInstaller.exe -gen2-30hx` để nâng MRRS lên 512 Bytes và nạp lại hàng đợi DMA. |
 | **Không nhận diện được GPU / Mã lỗi 43** | Mối hàn trở mod lane x16 chưa tiếp xúc tốt hoặc card chưa nhận driver | 1. Kiểm tra lại mối hàn trở trên card.<br>2. Chạy `Fix_CMP30HX_CSM_Error43.bat` nếu bo mạch chủ đang bật chế độ CSM.<br>3. Cài lại driver NVIDIA (dùng DDU gỡ sạch driver cũ rồi cài bản mới nhất). |
 | **Đã thử mọi cách fix vẫn không được** | Driver NVIDIA bị xung đột cấu hình, profile registry lưu đè hoặc service driver lỗi | Gỡ sạch driver cũ bằng **DDU (Display Driver Uninstaller)** trong Safe Mode rồi tiến hành cài đặt lại driver. |
-| **Lỗi "Không thể khởi động thiết bị đồ họa" / màn hình đen khi vào LMHT (LoL)** | Chế độ Fullscreen độc quyền bị xung đột trên hệ thống card đồ họa không có cổng xuất hình | Mở `windows-v3.0\release\UnlockRiotGame.exe` bấm **[⚡ 1-CHẠM Tối Ưu Hóa]** (hoặc chạy lệnh `UnlockRiotGame.exe -silent -optimize`) để công cụ tự ép `WindowMode=2`, `BorderlessWindow=1`, `PreferDX9LegacyMode=0`, `DX11Support=1` vào file cấu hình `game.cfg` của LoL. |
+| **Lỗi “Không thể khởi động thiết bị đồ họa” / màn hình đen khi vào LMHT (LoL)** | Xung đột chế độ toàn màn hình độc quyền trên card không có cổng xuất hình | Dùng tính năng tối ưu ở phần 3 để cấu hình chế độ cửa sổ không viền và DirectX 11 trong `game.cfg`. |
 | **Game 3D không nhận card CMP, chỉ chạy bằng card onboard (iGPU)** | Windows chưa cấu hình định tuyến đồ họa toàn cục cho ứng dụng DirectX | Chạy `UnlockRiotGame.exe` bấm **[⚡ 1-CHẠM Tối Ưu Hóa]**. Công cụ sẽ tự gán Hardware ID của CMP vào `DirectXUserGlobalSettings` (`HighPerfAdapter`), tự động ép tất cả game 3D chạy trên card CMP mà không cần thêm thủ công từng game trong Graphics Settings. |
-| **Vanguard hoặc Windows chặn nạp driver mod 5xx/6xx / Báo lỗi chứng chỉ** | Tính năng Microsoft Vulnerable Driver Blocklist kích hoạt hoặc thiếu chứng chỉ mod driver | Chạy `UnlockRiotGame.exe` để tự động tắt `VulnerableDriverBlocklistEnable=0`, nạp chứng chỉ mod driver (.cer) vào Windows Root Certificate Store và dọn dẹp sạch sẽ các driver xung đột. Tuyệt đối không bật `testsigning` vì Vanguard sẽ chặn 100%. |
+| **Vanguard hoặc Windows chặn driver / báo lỗi chữ ký** | Chính sách bảo mật hoặc chữ ký driver chưa được Windows tin cậy | Kiểm tra trạng thái chữ ký driver và thông báo lỗi của Windows trước khi xác nhận thay đổi. |
 
 ---
 
@@ -157,11 +156,11 @@ Trong thư mục dự án có sẵn các công cụ tiện ích hỗ trợ ngư�
 
 | Hệ điều hành | Phương thức gỡ |
 |---|---|
-| **Windows** (script) | Chạy lệnh `Setup_CMP30HX_WindowsAIO.bat -uninstall` |
-| **Windows** (giao diện) | Nhấp chuột phải vào `windows-v3.0\release\40HXUninstaller.exe` -> **Run as administrator** |
-| **Linux** | Chạy lệnh `sudo ./Setup_CMP30HX_LinuxAIO.sh --uninstall` |
+| **Windows (CMP 30HX cài bằng batch)** | Chạy `Setup_CMP30HX_WindowsAIO.bat -uninstall` |
+| **Windows (CMP 40HX cài bằng 40HXInstaller)** | Mở `windows-v3.0\release\40HXUninstaller.exe` với quyền Administrator |
+| **Linux (CMP 30HX)** | Chạy `sudo ./Setup_CMP30HX_LinuxAIO.sh --uninstall` |
 
-Quá trình gỡ cài đặt sẽ tự động xoá toàn bộ Scheduled Task, Registry Run Key, thư mục chương trình và khôi phục cài đặt hệ thống về trạng thái ban đầu.
+`-uninstall` của bộ cài batch dọn các tác vụ, mục tự khởi động cũ và tệp thuộc bộ cài. Dùng `-cleantasks` khi chỉ cần dọn tác vụ và mục tự khởi động do bộ cài nhận diện. Luồng Linux gỡ dịch vụ systemd, hook đánh thức và các tệp đã cài. Với bộ cài 40HX, xem [phạm vi gỡ và hoàn nguyên](windows-v3.0/release/README.md#8-gỡ-cài-đặt-và-hoàn-nguyên).
 
 ---
 

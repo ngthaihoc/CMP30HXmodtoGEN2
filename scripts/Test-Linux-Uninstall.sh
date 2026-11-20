@@ -80,3 +80,22 @@ if bash -c '
 fi
 grep -Fxq 'STATUS_CODE=GEN2_FAILED' "$scratch/status"
 echo 'PASS Linux setup skips persistence after PCIe failure'
+
+# Status must report the PCIe signaling rate for the negotiated generation.
+status_output=$(bash "$script" --status -test)
+grep -Fq 'Gen2 (5.0 GT/s)' <<< "$status_output"
+status_output=$(bash "$script" --status -mock-idle)
+grep -Fq 'Gen1 (2.5 GT/s)' <<< "$status_output"
+echo 'PASS Linux status reports the correct PCIe signaling rates'
+
+# Parse and validate the entire command line before executing any action.
+for args in '--unknown' '--status --unknown' '--uninstall --status' '--status-file' '--status-file='; do
+    read -ra flags <<< "$args"
+    if bash "$script" -test "${flags[@]}" >/dev/null 2>&1; then
+        echo "FAIL Linux accepted invalid arguments: $args" >&2
+        exit 1
+    fi
+done
+bash "$script" --uninstall -test --status-file "$scratch/ordered-status" >/dev/null
+grep -Fxq 'STATUS_CODE=UNINSTALLED' "$scratch/ordered-status"
+echo 'PASS Linux validates options before running the selected action'

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -151,14 +152,27 @@ func (a *App) ScanEnvironment() EnvironmentReport {
 	gspOK := hxcore.GspEnabled()
 
 	// Kiểm tra trạng thái Microsoft Vulnerable Driver Blocklist
-	blocklistDisabled := false
+	blocklistProtected := true
+	blocklistNote := "Windows quản lý theo chính sách mặc định"
 	kCi, errCi := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\CI\Config`, registry.QUERY_VALUE)
 	if errCi == nil {
 		v, _, errVal := kCi.GetIntegerValue("VulnerableDriverBlocklistEnable")
-		if errVal == nil && v == 0 {
-			blocklistDisabled = true
+		switch {
+		case errVal == nil && v == 0:
+			blocklistProtected = false
+			blocklistNote = "Đã tắt trong Registry"
+		case errVal == nil && v == 1:
+			blocklistNote = "Đang bật"
+		case errors.Is(errVal, registry.ErrNotExist):
+			// Windows chooses the default when no explicit policy is set.
+		default:
+			blocklistProtected = false
+			blocklistNote = "Không xác định được chính sách"
 		}
 		kCi.Close()
+	} else if !errors.Is(errCi, registry.ErrNotExist) {
+		blocklistProtected = false
+		blocklistNote = "Không đọc được chính sách"
 	}
 
 	items := []EnvCheckItem{
@@ -173,9 +187,9 @@ func (a *App) ScanEnvironment() EnvironmentReport {
 			Note: map[bool]string{true: "Đang Bật (Cần kiểm tra tương thích key)", false: "Đã Tắt (OK)"}[sbOn],
 		},
 		{
-			Name: "Danh sách đen driver (Blocklist)",
-			Ok:   blocklistDisabled,
-			Note: map[bool]string{true: "Đã Tắt (VulnerableDriverBlocklistEnable=0 — nạp driver mod OK)", false: "Đang Bật (Có thể chặn driver mod và công cụ can thiệp)"}[blocklistDisabled],
+			Name: "Danh sách chặn driver (Blocklist)",
+			Ok:   blocklistProtected,
+			Note: blocklistNote,
 		},
 		{
 			Name: "Card đồ hoạ",

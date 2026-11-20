@@ -136,6 +136,20 @@ class FakeInstaller {
         }
         Write-Host "PASS uninstall pass $pass"
     }
+
+    $launcher = Join-Path $tempRoot 'Launch_WebUI.bat'
+    Copy-Item -LiteralPath (Join-Path $root 'Launch_WebUI.bat') -Destination $launcher
+    $launcherArgs = '"' + $launcher + '" -noadmin'
+    $output = & $env:ComSpec /d /c $launcherArgs 2>&1
+    if ($LASTEXITCODE -ne 1) { throw "Launcher accepted missing release directory: $output" }
+    Write-Host 'PASS launcher rejects missing release directory'
+
+    $releaseDir = Join-Path $tempRoot 'windows-v3.0/release'
+    New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+    Copy-Item -LiteralPath (Join-Path $tempRoot 'UnlockAIO.exe') -Destination $releaseDir
+    $output = & $env:ComSpec /d /c $launcherArgs 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "Launcher failed from a path with spaces: $output" }
+    Write-Host 'PASS launcher starts the packaged executable from a path with spaces'
 } finally {
     foreach ($name in $previous.Keys) { [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process') }
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

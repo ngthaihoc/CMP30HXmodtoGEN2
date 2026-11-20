@@ -137,16 +137,12 @@ func showDriverSignatureCheck(owner walk.Form, log io.Writer) {
 	if valid {
 		fmt.Fprintf(log, "[V] Chữ ký số driver HỢP LỆ (%s): %s\n", cat, info)
 		walk.MsgBox(owner, "Chữ Ký Driver Hợp Lệ",
-			fmt.Sprintf("Driver nvwgf2umx.dll có chữ ký số hợp lệ (%s):\n%s\n\n✓ An toàn tuyệt đối với Riot Vanguard!", cat, info),
+			fmt.Sprintf("Driver nvwgf2umx.dll có chữ ký số hợp lệ (%s):\n%s", cat, info),
 			walk.MsgBoxIconInformation)
 	} else {
 		fmt.Fprintf(log, "[!] CẢNH BÁO CHỮ KÝ: Driver nvwgf2umx.dll (%s) không phải WHQL gốc!\n    %s\n", cat, info)
-		if cat == SigCategoryDartraiden {
-			fmt.Fprintln(log, "    => Phát hiện driver mod Dartraiden. UnlockRiotGame đã tự động tắt VulnerableDriverBlocklist để mở khóa.")
-			fmt.Fprintln(log, "    => Nếu Vanguard vẫn chặn, hãy dùng driver RainCandy Mode 2 hoặc gói WHQL 460.89.")
-		}
 		walk.MsgBox(owner, "Cảnh Báo Chữ Ký Driver",
-			fmt.Sprintf("Driver nvwgf2umx.dll (%s):\n%s\n\n⚠️ Đã tự động tắt VulnerableDriverBlocklist để chống chặn nạp DLL.\nNếu gặp lỗi khởi tạo đồ họa, hãy dùng driver ký chuẩn hoặc WHQL!", cat, info),
+			fmt.Sprintf("Driver nvwgf2umx.dll (%s):\n%s\n\nHãy kiểm tra phiên bản và chữ ký trình điều khiển NVIDIA đang cài.", cat, info),
 			walk.MsgBoxIconWarning)
 	}
 }
@@ -167,21 +163,30 @@ func (g *guiLog) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func confirmRiotChange(owner walk.Form, title, warning string) bool {
+	style := walk.MsgBoxYesNo | walk.MsgBoxIconWarning | walk.MsgBoxDefButton2
+	return walk.MsgBox(owner, title, warning, style) == walk.DlgCmdYes
+}
+
 func main() {
+	opts, flagErr := ParseFlags(os.Args[1:])
+	if flagErr == nil {
+		if err := opts.validateConfirmation(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+
 	if !isAdmin() {
 		selfElevate()
 		return
 	}
 
-	// Xử lý chế độ dòng lệnh (CLI flags) nếu có truyền tham số
-	if len(os.Args) > 1 {
-		opts, err := ParseFlags(os.Args[1:])
-		if err == nil && (opts.Silent || opts.Optimize || opts.AutoSign || opts.CheckSig || opts.Gen2Warning || opts.JSONStatus) {
-			if err := RunCLI(opts, os.Stdout, &DefaultUEFIManager{}); err != nil {
-				os.Exit(1)
-			}
-			return
+	if flagErr == nil && (opts.Silent || opts.Optimize || opts.AutoSign || opts.CheckSig || opts.Gen2Warning || opts.JSONStatus) {
+		if err := RunCLI(opts, os.Stdout, &DefaultUEFIManager{}); err != nil {
+			os.Exit(1)
 		}
+		return
 	}
 
 	prof, _ := hxcore.FindGPUWithProfile()
@@ -310,15 +315,18 @@ func main() {
 
 			// KHỐI 2: THAO TÁC MỞ KHÓA & TỐI ƯU HÓA
 			GroupBox{
-				Title:  "② Thao Tác Kích Hoạt & Tối Ưu Hóa (Khuyên Dùng Nút 1-Chạm)",
+				Title:  "② Cấu hình đồ họa và ký EFI",
 				Layout: VBox{Spacing: 6},
 				Children: []Widget{
 					// Nút chính: 1-Chạm tối ưu
 					PushButton{
 						AssignTo: &pbRun,
 						MinSize:  Size{Height: 42},
-						Text:     "⚡ [1-CHẠM] Tối Ưu Hóa Game & Dọn Dẹp Driver Riot Vanguard (Khuyên Dùng)",
+						Text:     "⚡ Tối ưu cấu hình đồ họa Riot Games",
 						OnClicked: func() {
+							if !confirmRiotChange(mw, "Xác nhận tối ưu Riot", "Thao tác sẽ cập nhật cấu hình Test Signing, ưu tiên GPU trong Registry và cấu hình LMHT. Bạn có muốn tiếp tục?") {
+								return
+							}
 							pbRun.SetEnabled(false)
 							mw.Synchronize(func() {
 								teLog.SetText("")
@@ -352,7 +360,7 @@ func main() {
 						},
 					},
 					Label{
-						Text: "   -> Tự động: Dọn dẹp WinRing0/ThrottleStop + Tắt Testsigning + Cấu hình MSHybrid CASO + DirectX High-Perf + LoL Borderless.",
+						Text: "   -> Tắt Test Signing, cấu hình MSHybrid CASO, DirectX High-Perf và chế độ cửa sổ không viền cho LMHT.",
 					},
 
 					// Nút phụ: Ký chữ ký số EFI cho Valorant Win 11
@@ -362,6 +370,9 @@ func main() {
 						Text:     "🔐 Tự Động Ký Chữ Ký Số EFI Cá Nhân (Cho Valorant Win 11 + Tensor Core)",
 						Enabled:  is40HX,
 						OnClicked: func() {
+							if !confirmRiotChange(mw, "Xác nhận ký tệp EFI", "Thao tác sẽ tạo chứng chỉ cá nhân và ghi chữ ký vào tệp EFI dành cho CMP 40HX. Hãy sao lưu tệp EFI và kiểm tra đường khôi phục boot trước khi tiếp tục.") {
+								return
+							}
 							pbSign.SetEnabled(false)
 							mw.Synchronize(func() {
 								if lblLogStatus != nil {

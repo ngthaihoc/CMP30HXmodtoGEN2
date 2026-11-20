@@ -84,20 +84,6 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# Ham tien ich: Chuyen doi chuoi hex sang thap phan an toan (tranh loi syntax bash)
-# ------------------------------------------------------------------------------
-parse_hex() {
-    local raw="${1:-}"
-    local clean
-    clean=$(echo "${raw}" | tr -dc '0-9a-fA-F')
-    if [[ -z "${clean}" ]]; then
-        echo "0"
-    else
-        echo "$((16#$clean))"
-    fi
-}
-
-# ------------------------------------------------------------------------------
 # Kiem tra quyen root / sudo
 # ------------------------------------------------------------------------------
 ensure_root() {
@@ -123,8 +109,8 @@ usage() {
     echo ""
     echo "Tuy chon:"
     echo "  (khong tham so)    Cai dat toan dien: Mo khoa Gen2 x16, MRRS 512B va tao systemd service"
-    echo "  -s, --status       Kiem tra toc do link PCIe va bang thong hien tai cua CMP 30HX"
-    echo "  -u, --uninstall    Go bo systemd service va khoi phuc thiet lap goc"
+    echo "  -s, --status       Đọc trạng thái liên kết PCIe của CMP 30HX hoặc 40HX"
+    echo "  -u, --uninstall    Go bo service, sleep hook va tep cua cong cu"
     echo "  -d, --daemon       Che do chay ngam (danh cho systemd service luc khoi dong)"
     echo "  -test, --test      Kiem thu mo phong thanh cong (Mock Happy Path: Gen1 -> Gen2)"
     echo "  -mock-fail         Kiem thu mo phong that bai (Mock Failure: Retrain Timeout)"
@@ -133,11 +119,11 @@ usage() {
     echo "  --no-root          Bo qua kiem tra quyen root (danh cho moi truong test CI/WSL)"
     echo "  -h, --help         Hien thi thong tin huong dan nay"
     echo ""
-    exit 0
+    exit "${1:-0}"
 }
 
 # ------------------------------------------------------------------------------
-# Kiem tra phan mem can thiet (pciutils, python3)
+# Kiểm tra các công cụ của pciutils.
 # ------------------------------------------------------------------------------
 check_dependencies() {
     if [[ "${IS_MOCK}" -eq 1 ]]; then
@@ -166,35 +152,28 @@ get_pcie_cap_offset() {
         echo "CAP_EXP"
         return 0
     fi
-    # Truong hop 1: setpci ho tro truc tiep alias CAP_EXP va doc dung Cap ID 0x10 (16)
-    local test_exp
-    test_exp=$(setpci -s "${bdf}" CAP_EXP+0x00.b 2>/dev/null || true)
-    if [[ "$(parse_hex "${test_exp}")" -eq 16 ]]; then
+    local cap_id ptr cur tries=0
+    if cap_id=$(setpci -s "$bdf" CAP_EXP+0x00.b 2>&1) && [[ "$cap_id" == 10 ]]; then
         echo "CAP_EXP"
         return 0
     fi
 
-    # Truong hop 2: Quet danh sach PCI Capabilities thu cong tu offset 0x34
-    local ptr
-    ptr=$(setpci -s "${bdf}" 0x34.b 2>/dev/null || true)
-    local cur
-    cur=$(parse_hex "${ptr}")
-    local safety=0
-
-    while [[ ${cur} -gt 0 && ${cur} -lt 256 && ${safety} -lt 48 ]]; do
-        local cap_id_raw
-        cap_id_raw=$(setpci -s "${bdf}" "$(printf "%x" "${cur}")".b 2>/dev/null || true)
-        if [[ "$(parse_hex "${cap_id_raw}")" -eq 16 ]]; then # 0x10 = PCI Express
-            printf "0x%02x\n" "${cur}"
+    # Duyệt danh sách capability khi pciutils không hỗ trợ bí danh CAP_EXP.
+    ptr=$(setpci -s "$bdf" 0x34.b 2>&1) || return 1
+    [[ "$ptr" =~ ^[0-9a-fA-F]{2}$ ]] || return 1
+    cur=$((16#$ptr))
+    while (( cur >= 0x40 && cur <= 0xfc && cur % 4 == 0 && tries < 48 )); do
+        cap_id=$(setpci -s "$bdf" "$(printf '%02x.b' "$cur")" 2>&1) || return 1
+        [[ "$cap_id" =~ ^[0-9a-fA-F]{2}$ && "${cap_id,,}" != ff ]] || return 1
+        if [[ "$cap_id" == 10 ]]; then
+            printf '0x%02x\n' "$cur"
             return 0
         fi
-        local next_ptr_raw
-        next_ptr_raw=$(setpci -s "${bdf}" "$(printf "%x" "$((cur + 1))")".b 2>/dev/null || true)
-        cur=$(parse_hex "${next_ptr_raw}")
-        safety=$((safety + 1))
+        ptr=$(setpci -s "$bdf" "$(printf '%02x.b' "$((cur + 1))")" 2>&1) || return 1
+        [[ "$ptr" =~ ^[0-9a-fA-F]{2}$ ]] || return 1
+        cur=$((16#$ptr))
+        tries=$((tries + 1))
     done
-
-    echo ""
     return 1
 }
 
@@ -241,100 +220,8 @@ find_upstream_root_port() {
 }
 
 # ------------------------------------------------------------------------------
-# Buoc 1: Tat PCIe ASPM & Runtime PM trong Linux
-# ------------------------------------------------------------------------------
-disable_aspm() {
-    echo -e "${C_BOLD}[1/6] Dang tat PCIe ASPM va Runtime Power Management tren Linux...${C_RESET}"
-    if [[ "${IS_MOCK}" -eq 1 ]]; then
-        echo -e "      ${C_GREEN}[OK]${C_RESET} [MOCK] Da chuyen /sys/module/pcie_aspm/parameters/policy -> performance"
-        echo -e "      ${C_GREEN}[OK]${C_RESET} [MOCK] Da dat power/control=on cho cac thiet bi PCI (chong ha link khi idle)"
-        return 0
-    fi
-
-    # 1. Chinh sach PCIe ASPM cua Kernel
-    if [[ -w /sys/module/pcie_aspm/parameters/policy ]]; then
-        echo performance > /sys/module/pcie_aspm/parameters/policy 2>/dev/null || true
-        echo -e "      ${C_GREEN}[OK]${C_RESET} Da chuyen /sys/module/pcie_aspm/parameters/policy -> performance"
-    else
-        echo -e "      ${C_YELLOW}[!]${C_RESET} /sys/module/pcie_aspm/parameters/policy khong kha dung (co the he thong dung pcie_aspm=off)"
-    fi
-
-    # 2. Tat Runtime D3 Power Suspend tren toan bo bus PCI
-    local count=0
-    for ctrl in /sys/bus/pci/devices/*/power/control; do
-        if [[ -w "${ctrl}" ]]; then
-            echo on > "${ctrl}" 2>/dev/null || true
-            count=$((count + 1))
-        fi
-    done
-    echo -e "      ${C_GREEN}[OK]${C_RESET} Da dat power/control=on cho ${count} thiet bi PCI (chong ha link khi idle)"
-
-    # 3. Them pcie_aspm=force vao GRUB neu chua co
-    if [[ -f "/etc/default/grub" ]]; then
-        if grep -q "pcie_aspm=force" /etc/default/grub; then
-            echo -e "      ${C_GREEN}[OK]${C_RESET} GRUB da co san pcie_aspm=force"
-        else
-            echo -e "      [*] Dang them pcie_aspm=force vao /etc/default/grub..."
-            local grub_file="/etc/default/grub"
-            local param="pcie_aspm=force"
-            local injected=0
-
-            # Case 1: variable present — try Python (handles single/double quotes, spaces)
-            if grep -qE '^[[:space:]]*GRUB_CMDLINE_LINUX_DEFAULT[[:space:]]*=' "${grub_file}"; then
-                if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
-                    local _py
-                    _py=$(command -v python3 2>/dev/null || command -v python 2>/dev/null)
-                    "${_py}" - "${grub_file}" "${param}" 2>/dev/null <<'_PYEOF'
-import sys, re
-path, param = sys.argv[1], sys.argv[2]
-text = open(path).read()
-def inject(m):
-    q1, val, q2 = m.group(2), m.group(3), m.group(4)
-    parts = [p for p in val.split() if p != param]
-    parts.append(param)
-    return m.group(1) + q1 + ' '.join(parts) + q2
-pat = re.compile(
-    r"^([ \t]*GRUB_CMDLINE_LINUX_DEFAULT[ \t]*=[ \t]*)(['\"])(.*?)(\2)",
-    re.MULTILINE | re.DOTALL
-)
-open(path, 'w').write(pat.sub(inject, text))
-_PYEOF
-                    grep -q "${param}" "${grub_file}" && injected=1
-                fi
-
-                # Fallback: sed — handles the common GRUB_CMDLINE_LINUX_DEFAULT="..." form
-                if [[ "${injected}" -eq 0 ]]; then
-                    sed -i -E \
-                        "s|^([[:space:]]*GRUB_CMDLINE_LINUX_DEFAULT[[:space:]]*=[[:space:]]*\")(.*)(\")|\1\2 ${param}\3|" \
-                        "${grub_file}"
-                    grep -q "${param}" "${grub_file}" && injected=1
-                fi
-            else
-                # Case 2: variable absent — add it
-                printf '\nGRUB_CMDLINE_LINUX_DEFAULT="%s"\n' "${param}" >> "${grub_file}"
-                grep -q "${param}" "${grub_file}" && injected=1
-            fi
-
-            if [[ "${injected}" -eq 1 ]]; then
-                if command -v update-grub >/dev/null 2>&1; then
-                    update-grub >/dev/null 2>&1
-                    echo -e "      ${C_GREEN}[OK]${C_RESET} Da cap nhat GRUB (update-grub)"
-                elif command -v grub2-mkconfig >/dev/null 2>&1; then
-                    grub2-mkconfig -o /boot/grub2/grub.cfg >/dev/null 2>&1
-                    echo -e "      ${C_GREEN}[OK]${C_RESET} Da cap nhat GRUB (grub2-mkconfig)"
-                else
-                    echo -e "      ${C_YELLOW}[!]${C_RESET} Da them vao /etc/default/grub nhung khong tim thay cong cu cap nhat GRUB."
-                fi
-            else
-                echo -e "      ${C_YELLOW}[!]${C_RESET} Khong the them ${param} vao /etc/default/grub tu dong. Vui long them thu cong."
-            fi
-        fi
-    fi
-}
-
-# ------------------------------------------------------------------------------
-# Buoc 2: Inject MMIO BAR0 (XVE_OVR, LINK_CONFIG_0, PRIV_MISC_1, LNKCAP/LNKCTL2)
-# Su dung Python mmap (hoac lseek fallback) dam bao ghi atomic 32-bit Dword
+# Cấu hình các thanh ghi MMIO BAR0 của CMP 30HX.
+# Trình ghi MMIO kiểm tra BAR0 trước khi ghi hoặc đọc lại thanh ghi.
 # ------------------------------------------------------------------------------
 inject_bar0_mmio() {
     local gpu_bdf="$1"
@@ -345,24 +232,74 @@ inject_bar0_mmio() {
 
     local res0="${sys_dev}/resource0"
     if [[ ! -e "${res0}" ]]; then
-        echo -e "      ${C_YELLOW}[!] Khong tim thay resource0 tai ${res0}, bo qua inject MMIO truc tiep.${C_RESET}"
-        return 0
+        echo "[X] Không tìm thấy BAR0 tại ${res0}." >&2
+        return 1
     fi
 
     local injector_bin
     injector_bin="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/linux-mmio/mmio_injector"
-
     if [[ ! -x "${injector_bin}" ]]; then
-        echo -e "      ${C_RED}[X] Loi: Khong tim thay executable mmio_injector tai ${injector_bin}. Vui long compile binary truoc khi chay script.${C_RESET}"
+        echo "[X] Không tìm thấy tệp thực thi mmio_injector tại ${injector_bin}." >&2
         return 1
     fi
 
-    echo -e "      [*] Dang kiem tra va ghi de thanh ghi BAR0 MMIO (TU116 XVE)..."
+    echo "    [*] Kiểm tra và cấu hình BAR0 của CMP 30HX."
     "${injector_bin}" "${res0}"
 }
 
+read_pcie_word() {
+    local bdf="$1" register="$2" raw
+    if ! raw=$(setpci -s "$bdf" "$register" 2>&1) ||
+        [[ ! "$raw" =~ ^[0-9a-fA-F]{4}$ || "${raw,,}" == ffff ]]; then
+        echo "[X] Không đọc được thanh ghi PCIe $register trên $bdf." >&2
+        return 1
+    fi
+    printf '%d\n' "$((16#$raw))"
+}
+
+write_pcie_bits() {
+    local bdf="$1" register="$2" value="$3" mask="$4" output
+    # setpci có thể chỉ báo lỗi I/O trên stderr dù mã thoát bằng 0.
+    if ! output=$(setpci -s "$bdf" "$register=$(printf '%04x:%04x' "$value" "$mask")" 2>&1) ||
+        [[ -n "$output" ]]; then
+        echo "[X] Không ghi được thanh ghi PCIe $register trên $bdf." >&2
+        return 1
+    fi
+}
+
+set_pcie_bits() {
+    local bdf="$1" register="$2" value="$3" mask="$4" current
+    current=$(read_pcie_word "$bdf" "$register") || return 1
+    if (( (current & mask) != value )); then
+        write_pcie_bits "$bdf" "$register" "$value" "$mask" || return 1
+        current=$(read_pcie_word "$bdf" "$register") || return 1
+        if (( (current & mask) != value )); then
+            echo "[X] Giá trị đọc lại của $register trên $bdf khác giá trị yêu cầu." >&2
+            return 1
+        fi
+    fi
+}
+
+read_pcie_link() {
+    local bdf="$1" cap="$2" status control
+    status=$(read_pcie_word "$bdf" "$cap+0x12.w") || return 1
+    control=$(read_pcie_word "$bdf" "$cap+0x30.w") || return 1
+    printf '%d %d %d %d\n' "$((status & 0xf))" "$(((status >> 4) & 0x3f))" "$((control & 0xf))" "$((status & 0x0800))"
+}
+
+pcie_link_result() {
+    local speed="$1" width="$2" tls="$3" training="$4"
+    (( tls == 2 && width == 16 && training == 0 )) || return 1
+    if (( speed == 2 )); then
+        return 0
+    elif (( speed == 1 )); then
+        return 2
+    fi
+    return 1
+}
+
 # ------------------------------------------------------------------------------
-# Buoc 3 & 4: Cau hinh LNKCTL2, DEVCTL (MRRS 512B), LNKCTL va Huan luyen lai
+# Cấu hình LNKCTL2, DEVCTL, LNKCTL và huấn luyện lại liên kết.
 # ------------------------------------------------------------------------------
 unlock_gpu_pcie() {
     local gpu_bdf="$1"
@@ -379,8 +316,7 @@ unlock_gpu_pcie() {
         if [[ "${MOCK_FAIL}" -eq 1 ]]; then
             echo -e "    [-] Luot #1 (ROOT): Dang o Gen1 x16, dang thu lai..."
             echo -e "    [-] Luot #2 (GPU): Dang o Gen1 x16, dang thu lai..."
-            echo -e "    ${C_YELLOW}[!] Retrain lan 1 chua dat Gen2. Dang thuc thi Stage 2: Soft Reset PCI bus (cmpunlocker2 method)...${C_RESET}"
-            echo -e "    ${C_RED}[X] Stage 2 Soft Reset that bai! Link giu nguyen Gen1 x16.${C_RESET}"
+            echo -e "    ${C_RED}[X] Không đạt Gen2 sau các lần huấn luyện lại.${C_RESET}"
             return 1
         elif [[ "${MOCK_IDLE}" -eq 1 ]]; then
             echo -e "    [-] Luot #1 (ROOT): Dang o Gen1 x16, dang thu lai..."
@@ -393,210 +329,77 @@ unlock_gpu_pcie() {
         fi
     fi
 
-    local gpu_cap
-    gpu_cap=$(get_pcie_cap_offset "${gpu_bdf}")
-    if [[ -z "${gpu_cap}" ]]; then
-        echo -e "    ${C_RED}[X] Khong tim thay PCIe Capability tren GPU ${gpu_bdf}!${C_RESET}"
+    local gpu_cap root_bdf root_cap=""
+    if ! gpu_cap=$(get_pcie_cap_offset "$gpu_bdf"); then
+        echo "[X] Không tìm thấy PCIe Capability trên GPU $gpu_bdf." >&2
         return 1
     fi
-
-    local root_bdf
-    root_bdf=$(find_upstream_root_port "${gpu_bdf}")
-    local root_cap=""
-    if [[ -n "${root_bdf}" ]]; then
-        root_cap=$(get_pcie_cap_offset "${root_bdf}")
-        echo -e "    [*] Tim thay Upstream Root Port: ${root_bdf} (Cap: ${root_cap})"
+    if root_bdf=$(find_upstream_root_port "$gpu_bdf"); then
+        if ! root_cap=$(get_pcie_cap_offset "$root_bdf"); then
+            echo "[X] Không xác minh được PCIe Capability của cổng upstream $root_bdf." >&2
+            return 1
+        fi
+        echo "    [*] Cổng upstream: $root_bdf ($root_cap)."
     else
-        echo -e "    ${C_YELLOW}[!] Khong tim thay Root Port; se chi huan luyen tren endpoint GPU.${C_RESET}"
+        echo "    [!] Không tìm thấy cổng upstream. Chỉ cấu hình GPU."
     fi
 
-    # 1. MMIO BAR0 Injection
-    inject_bar0_mmio "${gpu_bdf}" || return 1
+    inject_bar0_mmio "$gpu_bdf" || return 1
 
-    # 2. Cai dat Target Link Speed = Gen2 (TLS=2) tren GPU LNKCTL2 (Cap + 0x30)
-    local cur_gpu_ctl2_raw
-    cur_gpu_ctl2_raw=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x30.w 2>/dev/null || true)
-    local cur_gpu_ctl2
-    cur_gpu_ctl2=$(parse_hex "${cur_gpu_ctl2_raw}")
-    local new_gpu_ctl2
-    new_gpu_ctl2=$(printf "%04x" $(( (cur_gpu_ctl2 & ~0xF) | 2 )))
-    setpci -s "${gpu_bdf}" "${gpu_cap}"+0x30.w="${new_gpu_ctl2}" 2>/dev/null || true
-    echo -e "    [OK] GPU LNKCTL2 TLS -> Gen2 (0x$(printf "%04x" ${cur_gpu_ctl2}) -> 0x${new_gpu_ctl2})"
-
-    # 3. Cai dat Target Link Speed = Gen2 (TLS=2) tren Root Port LNKCTL2
-    if [[ -n "${root_bdf}" && -n "${root_cap}" ]]; then
-        local cur_root_ctl2_raw
-        cur_root_ctl2_raw=$(setpci -s "${root_bdf}" "${root_cap}"+0x30.w 2>/dev/null || true)
-        local cur_root_ctl2
-        cur_root_ctl2=$(parse_hex "${cur_root_ctl2_raw}")
-        local new_root_ctl2
-        new_root_ctl2=$(printf "%04x" $(( (cur_root_ctl2 & ~0xF) | 2 )))
-        setpci -s "${root_bdf}" "${root_cap}"+0x30.w="${new_root_ctl2}" 2>/dev/null || true
-        echo -e "    [OK] Root Port LNKCTL2 TLS -> Gen2 (0x$(printf "%04x" ${cur_root_ctl2}) -> 0x${new_root_ctl2})"
+    # LNKCTL2 TLS = 2, giữ các bit khác.
+    set_pcie_bits "$gpu_bdf" "$gpu_cap+0x30.w" 2 0xf || return 1
+    if [[ -n "$root_cap" ]]; then
+        set_pcie_bits "$root_bdf" "$root_cap+0x30.w" 2 0xf || return 1
     fi
 
-    # 4. Toi uu Max Read Request Size (MRRS) len 512 Bytes (DEVCTL, Cap + 0x08)
-    # Bits [14:12] = 010b = 512B (2 << 12 = 0x2000)
-    local cur_devctl_raw
-    cur_devctl_raw=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x08.w 2>/dev/null || true)
-    local cur_devctl
-    cur_devctl=$(parse_hex "${cur_devctl_raw}")
-    local cur_mrrs=$(( (cur_devctl >> 12) & 0x7 ))
-    if [[ ${cur_mrrs} -lt 2 ]]; then
-        local new_devctl
-        new_devctl=$(printf "%04x" $(( (cur_devctl & ~0x7000) | 0x2000 )))
-        setpci -s "${gpu_bdf}" "${gpu_cap}"+0x08.w="${new_devctl}" 2>/dev/null || true
-        echo -e "    [OK] Tối ưu MRRS GPU: 128B -> 512B (DEVCTL: 0x$(printf "%04x" ${cur_devctl}) -> 0x${new_devctl})"
-    else
-        echo -e "    [OK] MRRS GPU hien tai da toi uu (>= 512B, DEVCTL=0x$(printf "%04x" ${cur_devctl}))"
+    # Giữ MRRS hiện tại nếu đã từ 512 byte trở lên.
+    local devctl
+    devctl=$(read_pcie_word "$gpu_bdf" "$gpu_cap+0x08.w") || return 1
+    if (( (devctl & 0x7000) < 0x2000 )); then
+        set_pcie_bits "$gpu_bdf" "$gpu_cap+0x08.w" 0x2000 0x7000 || return 1
     fi
 
-    # 5. Khoi phuc / Tat ASPM tren LNKCTL (Cap + 0x10) va bat Common Clock (bit 6) + Extended Synch (bit 8) = 0x0140
-    local cur_gpu_lnkctl_raw
-    cur_gpu_lnkctl_raw=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x10.w 2>/dev/null || true)
-    local cur_gpu_lnkctl
-    cur_gpu_lnkctl=$(parse_hex "${cur_gpu_lnkctl_raw}")
-    local new_gpu_lnkctl
-    new_gpu_lnkctl=$(printf "%04x" $(( (cur_gpu_lnkctl & ~0x3) | 0x0140 )))
-    setpci -s "${gpu_bdf}" "${gpu_cap}"+0x10.w="${new_gpu_lnkctl}" 2>/dev/null || true
-
-    if [[ -n "${root_bdf}" && -n "${root_cap}" ]]; then
-        local cur_root_lnkctl_raw
-        cur_root_lnkctl_raw=$(setpci -s "${root_bdf}" "${root_cap}"+0x10.w 2>/dev/null || true)
-        local cur_root_lnkctl
-        cur_root_lnkctl=$(parse_hex "${cur_root_lnkctl_raw}")
-        local new_root_lnkctl
-        new_root_lnkctl=$(printf "%04x" $(( (cur_root_lnkctl & ~0x3) | 0x0140 )))
-        setpci -s "${root_bdf}" "${root_cap}"+0x10.w="${new_root_lnkctl}" 2>/dev/null || true
+    # Giữ cấu hình Common Clock/CLKREQ hiện hành của công cụ khi tắt ASPM.
+    set_pcie_bits "$gpu_bdf" "$gpu_cap+0x10.w" 0x0140 0x0143 || return 1
+    if [[ -n "$root_cap" ]]; then
+        set_pcie_bits "$root_bdf" "$root_cap+0x10.w" 0x0140 0x0143 || return 1
     fi
 
-    # 6. Huan luyen lai link PCIe (Retrain Link Pulse - Bit 5 LNKCTL)
-    echo -e "    [*] Bat dau chu trinh huan luyen lai link PCIe (toi da 6 luot)..."
-    local attempt=1
-    local speed_achieved=0
-    while [[ ${attempt} -le 6 ]]; do
-        local target_bdf="${gpu_bdf}"
-        local target_cap="${gpu_cap}"
-        local tag="GPU"
-
-        # Uu tien phat xung retrain tu Root Port truoc (attempt le) vi Root Port dieu khien LTSSM
-        if [[ $((attempt % 2)) -ne 0 && -n "${root_bdf}" && -n "${root_cap}" ]]; then
-            target_bdf="${root_bdf}"
-            target_cap="${root_cap}"
-            tag="ROOT"
+    echo "    [*] Huấn luyện lại liên kết PCIe (tối đa 6 lần)."
+    local attempt target_bdf target_cap link speed width tls training result
+    for ((attempt = 1; attempt <= 6; attempt++)); do
+        target_bdf="$gpu_bdf"
+        target_cap="$gpu_cap"
+        if [[ -n "$root_cap" ]] && (( attempt % 2 == 1 )); then
+            target_bdf="$root_bdf"
+            target_cap="$root_cap"
         fi
 
-        # Nhip phat retrain: Xoa bit 5 -> sleep 300ms -> Dat bit 5 -> sleep 2.2s
-        local ctl_val_raw
-        ctl_val_raw=$(setpci -s "${target_bdf}" "${target_cap}"+0x10.w 2>/dev/null || true)
-        local ctl_val
-        ctl_val=$(parse_hex "${ctl_val_raw}")
-        local ctl_clear
-        ctl_clear=$(printf "%04x" $(( ctl_val & ~0x0020 )))
-        setpci -s "${target_bdf}" "${target_cap}"+0x10.w="${ctl_clear}" 2>/dev/null || true
+        # Retrain là bit điều khiển tự xóa. Xác nhận bằng Link Status sau khi ghi.
+        write_pcie_bits "$target_bdf" "$target_cap+0x10.w" 0 0x0020 || return 1
         sleep 0.3
-
-        local ctl_set
-        ctl_set=$(printf "%04x" $(( (ctl_val & ~0x0020) | 0x0020 )))
-        setpci -s "${target_bdf}" "${target_cap}"+0x10.w="${ctl_set}" 2>/dev/null || true
-
-        # Cho 2.2 giay de LTSSM PCIe thoa thuan toc do (tuong dong ban Windows)
+        write_pcie_bits "$target_bdf" "$target_cap+0x10.w" 0x0020 0x0020 || return 1
         sleep 2.2
 
-        # Doc lai toc do hien tai tu LNKSTA (Cap + 0x12)
-        local cur_lnksta_raw
-        cur_lnksta_raw=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x12.w 2>/dev/null || true)
-        local cur_lnksta
-        cur_lnksta=$(parse_hex "${cur_lnksta_raw}")
-        local cur_speed=$(( cur_lnksta & 0xF ))
-        local cur_width=$(( (cur_lnksta >> 4) & 0x3F ))
-
-        if [[ ${cur_speed} -ge 2 ]]; then
-            echo -e "    ${C_GREEN}[V] Luot #${attempt} (${tag}): DA DAT GEN${cur_speed} x${cur_width}!${C_RESET}"
-            speed_achieved=1
-            break
-        else
-            echo -e "    [-] Luot #${attempt} (${tag}): Dang o Gen${cur_speed} x${cur_width}, dang thu lai..."
+        link=$(read_pcie_link "$gpu_bdf" "$gpu_cap") || return 1
+        read -r speed width tls training <<< "$link"
+        if pcie_link_result "$speed" "$width" "$tls" "$training"; then
+            return 0
         fi
-        attempt=$((attempt + 1))
+        echo "    [-] Lần $attempt: Gen$speed x$width (TLS=$tls)."
     done
 
-    # Stage 2: Tu dong Soft Reset PCI bus va giai phong GPU process neu Stage 1 chua dat
-    if [[ ${speed_achieved} -eq 0 ]]; then
-        echo -e "    ${C_YELLOW}[!] Retrain lan 1 chua dat Gen2. Dang thuc thi Stage 2: Soft Reset PCI bus (cmpunlocker2 method)...${C_RESET}"
-        if command -v fuser >/dev/null 2>&1; then
-            fuser -k /dev/nvidia* /dev/dri/* 2>/dev/null || true
-            sleep 1.0
-        fi
-
-        local dev_sys="/sys/bus/pci/devices/${gpu_bdf}"
-        if [[ ! -d "${dev_sys}" ]]; then
-            dev_sys="/sys/bus/pci/devices/0000:${gpu_bdf}"
-        fi
-
-        if [[ -e "${dev_sys}/remove" ]]; then
-            echo 1 > "${dev_sys}/remove" 2>/dev/null || true
-            sleep 2.0
-            echo 1 > /sys/bus/pci/rescan 2>/dev/null || true
-            sleep 2.0
-
-            # Tai inject MMIO va retrain lai sau reset
-            inject_bar0_mmio "${gpu_bdf}"
-            setpci -s "${gpu_bdf}" "${gpu_cap}"+0x30.w="${new_gpu_ctl2}" 2>/dev/null || true
-            if [[ -n "${root_bdf}" && -n "${root_cap}" ]]; then
-                setpci -s "${root_bdf}" "${root_cap}"+0x30.w="${new_root_ctl2}" 2>/dev/null || true
-            fi
-
-            # Retrain lai sau Soft Reset
-            for r_att in 1 2; do
-                local t_bdf="${gpu_bdf}"
-                local t_cap="${gpu_cap}"
-                if [[ ${r_att} -eq 1 && -n "${root_bdf}" && -n "${root_cap}" ]]; then
-                    t_bdf="${root_bdf}"
-                    t_cap="${root_cap}"
-                fi
-                local cv_raw
-                cv_raw=$(setpci -s "${t_bdf}" "${t_cap}"+0x10.w 2>/dev/null || true)
-                local cv
-                cv=$(parse_hex "${cv_raw}")
-                setpci -s "${t_bdf}" "${t_cap}"+0x10.w="$(printf "%04x" $(( cv | 0x0020 )))" 2>/dev/null || true
-                sleep 2.0
-
-                local r_sta_raw
-                r_sta_raw=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x12.w 2>/dev/null || true)
-                local r_speed=$(( $(parse_hex "${r_sta_raw}") & 0xF ))
-                if [[ ${r_speed} -ge 2 ]]; then
-                    echo -e "    ${C_GREEN}[V] Stage 2 Soft Reset: DA DAT GEN${r_speed}!${C_RESET}"
-                    speed_achieved=1
-                    break
-                fi
-            done
-        fi
-    fi
-
-    # Doc lai ket qua cuoi cung
-    local final_sta_raw
-    final_sta_raw=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x12.w 2>/dev/null || true)
-    local final_speed=$(( $(parse_hex "${final_sta_raw}") & 0xF ))
-
-    local final_ctl2_raw
-    final_ctl2_raw=$(setpci -s "${gpu_bdf}" "${gpu_cap}"+0x30.w 2>/dev/null || true)
-    local final_tls=$(( $(parse_hex "${final_ctl2_raw}") & 0xF ))
-
-    if [[ ${final_speed} -ge 2 ]]; then
-        return 0
-    elif [[ ${final_tls} -ge 2 ]]; then
-        return 2  # Da cau hinh TLS=2, link co the tam o Gen1 do che do tiet kiem dien khi idle
-    else
-        return 1  # That bai hoan toan
-    fi
+    # Không gỡ thiết bị khỏi bus hay dừng tiến trình GPU khi retrain không đạt.
+    result=0
+    pcie_link_result "$speed" "$width" "$tls" "$training" || result=$?
+    return "$result"
 }
 
 # ------------------------------------------------------------------------------
-# Buoc 5: Cai dat Systemd Service duy tri sau khi khoi dong & sleep
+# Đăng ký dịch vụ systemd và sleep hook.
 # ------------------------------------------------------------------------------
 install_systemd_service() {
-    echo -e "${C_BOLD}[5/6] Dang tao va kich hoat Systemd Service khoi dong tu dong...${C_RESET}"
+    echo -e "${C_BOLD}Đang đăng ký dịch vụ systemd và sleep hook...${C_RESET}"
     if [[ "${IS_MOCK}" -eq 1 ]]; then
         echo -e "      ${C_GREEN}[OK]${C_RESET} [MOCK] Da tao Systemd Service: ${SYSTEMD_SVC_NAME}"
         echo -e "      ${C_GREEN}[OK]${C_RESET} [MOCK] Da tao Sleep/Resume Hook: ${SUSPEND_HOOK_PATH}"
@@ -677,7 +480,6 @@ uninstall_service() {
 
     if [[ "${IS_MOCK}" -eq 1 ]]; then
         echo -e "${C_GREEN}[V] [MOCK] Da go bo hoan toan Systemd Service va Sleep Hook.${C_RESET}"
-        echo "    He thong da duoc khoi phuc trang thai ban dau."
         write_status_file "UNINSTALLED" "1" "16" "1" "NONE" "Da go bo thanh cong service tren Linux."
         exit 0
     fi
@@ -720,7 +522,24 @@ uninstall_service() {
 # ------------------------------------------------------------------------------
 # Hien thi trang thai chi tiet (Status)
 # ------------------------------------------------------------------------------
+pcie_rate() {
+    case "$1" in
+        1) echo "2.5 GT/s" ;;
+        2) echo "5.0 GT/s" ;;
+        3) echo "8.0 GT/s" ;;
+        4) echo "16.0 GT/s" ;;
+        5) echo "32.0 GT/s" ;;
+        6) echo "64.0 GT/s" ;;
+        7) echo "128.0 GT/s" ;;
+        *) echo "khong ro" ;;
+    esac
+}
+
 show_status() {
+    if [[ "${IS_MOCK}" -ne 1 ]] && { ! command -v lspci >/dev/null || ! command -v setpci >/dev/null; }; then
+        echo "[X] Can cai pciutils (lspci va setpci) de xem trang thai PCIe." >&2
+        return 1
+    fi
     echo -e "${C_BOLD}================================================================${C_RESET}"
     echo -e "${C_BOLD}        TRANG THAI PCIE LINK CUA NVIDIA CMP 30HX / 40HX        ${C_RESET}"
     echo -e "${C_BOLD}================================================================${C_RESET}"
@@ -767,7 +586,7 @@ show_status() {
                 mock_spd=1
                 mock_tls=2
             fi
-            echo -e "  - Link Speed hien tai    : Gen${mock_spd} (${mock_spd}.0 GT/s)"
+            echo -e "  - Link Speed hien tai    : Gen${mock_spd} ($(pcie_rate "${mock_spd}"))"
             echo -e "  - Link Width hien tai    : x16"
             echo -e "  - Target Link Speed (TLS): Gen${mock_tls}"
             echo -e "  - Max Read Request Size  : 512 Bytes (DEVCTL: 0x2000)"
@@ -776,43 +595,33 @@ show_status() {
             echo "  Chi tiet thanh ghi PCIe (lspci):"
             echo "    LnkCap: Port #0, Speed 8GT/s, Width x16, ASPM L0s L1, Exit Latency L0s <512ns, L1 <16us"
             echo "    LnkCtl: ASPM Disabled; Disabled- CommClk+ ExtSynch- ClockPM- AutWidDis- BWInt- AutBWInt-"
-            echo "    LnkSta: Speed ${mock_spd}.0GT/s, Width x16, TrErr- Train- SlotClk+ DLActive- BWMgmt- ABWMgmt-"
+            echo "    LnkSta: Speed $(pcie_rate "${mock_spd}"), Width x16, TrErr- Train- SlotClk+ DLActive- BWMgmt- ABWMgmt-"
             echo "    DevCtl: CorrErr- NonFatalErr- FatalErr- UnsupReq- MaxPayload 256 bytes, MaxReadReq 512 bytes"
-            echo "    LnkCtl2: Target Link Speed: ${mock_tls}.0GT/s, EnterCompliance- SpeedDis-"
+            echo "    LnkCtl2: Target Link Speed: $(pcie_rate "${mock_tls}"), EnterCompliance- SpeedDis-"
             continue
         fi
 
         lspci -s "${gpu}"
         echo ""
 
-        local cap
-        cap=$(get_pcie_cap_offset "${gpu}")
-        if [[ -n "${cap}" ]]; then
-            local sta_raw
-            sta_raw=$(setpci -s "${gpu}" "${cap}"+0x12.w 2>/dev/null || true)
-            local speed=$(( $(parse_hex "${sta_raw}") & 0xF ))
-            local width=$(( ($(parse_hex "${sta_raw}") >> 4) & 0x3F ))
-
-            local ctl2_raw
-            ctl2_raw=$(setpci -s "${gpu}" "${cap}"+0x30.w 2>/dev/null || true)
-            local tls=$(( $(parse_hex "${ctl2_raw}") & 0xF ))
-
-            local devctl_raw
-            devctl_raw=$(setpci -s "${gpu}" "${cap}"+0x08.w 2>/dev/null || true)
-            local mrrs_val=$(( ($(parse_hex "${devctl_raw}") >> 12) & 0x7 ))
-            local mrrs_bytes=$(( 128 << mrrs_val ))
-
-            local lnkctl_raw
-            lnkctl_raw=$(setpci -s "${gpu}" "${cap}"+0x10.w 2>/dev/null || true)
-            local aspm_bits=$(( $(parse_hex "${lnkctl_raw}") & 0x3 ))
+        local cap link speed width tls training devctl lnkctl
+        if cap=$(get_pcie_cap_offset "$gpu") &&
+            link=$(read_pcie_link "$gpu" "$cap") &&
+            devctl=$(read_pcie_word "$gpu" "$cap+0x08.w") &&
+            lnkctl=$(read_pcie_word "$gpu" "$cap+0x10.w"); then
+            read -r speed width tls training <<< "$link"
+            local mrrs_bytes=$((128 << ((devctl >> 12) & 0x7)))
+            local aspm_bits=$((lnkctl & 0x3))
             local aspm_str="Tat (Disabled)"
             if [[ ${aspm_bits} -eq 1 ]]; then aspm_str="L0s Bat"; elif [[ ${aspm_bits} -eq 2 ]]; then aspm_str="L1 Bat"; elif [[ ${aspm_bits} -eq 3 ]]; then aspm_str="L0s & L1 Bat"; fi
 
-            echo -e "  - Link Speed hien tai    : Gen${speed} (${speed}.0 GT/s)"
-            echo -e "  - Link Width hien tai    : x${width}"
-            echo -e "  - Target Link Speed (TLS): Gen${tls}"
-            echo -e "  - Max Read Request Size  : ${mrrs_bytes} Bytes (DEVCTL: 0x${devctl_raw})"
-            echo -e "  - PCIe ASPM trang thai   : ${aspm_str}"
+            echo "  - Link Speed hien tai    : Gen$speed ($(pcie_rate "$speed"))"
+            echo "  - Link Width hien tai    : x$width"
+            echo "  - Target Link Speed (TLS): Gen$tls"
+            printf '  - Max Read Request Size  : %d Bytes (DEVCTL: 0x%04x)\n' "$mrrs_bytes" "$devctl"
+            echo "  - PCIe ASPM trang thai   : $aspm_str"
+        else
+            echo "[!] Không đọc đủ thông tin PCIe cho $gpu." >&2
         fi
 
         echo ""
@@ -829,101 +638,57 @@ show_status() {
 # HAM CHINH (MAIN)
 # ------------------------------------------------------------------------------
 main() {
-    # Quet qua cac tham so dac biet truoc khi kiem tra quyen root
-    for arg in "$@"; do
-        case "${arg}" in
-            -h|--help|-help)
-                usage
-                ;;
-            --no-root)
-                NO_ROOT=1
-                ;;
-            -test|--test)
-                IS_MOCK=1
-                NO_ROOT=1
-                ;;
-            -mock-fail|--mock-fail)
-                IS_MOCK=1
-                MOCK_FAIL=1
-                NO_ROOT=1
-                ;;
-            -mock-idle|--mock-idle)
-                IS_MOCK=1
-                MOCK_IDLE=1
-                NO_ROOT=1
-                ;;
-            -mock-nogpu|--mock-nogpu)
-                IS_MOCK=1
-                MOCK_NOGPU=1
-                NO_ROOT=1
-                ;;
-            --status-file=*)
-                CUSTOM_STATUS_FILE="${arg#*=}"
-                ;;
-        esac
-    done
-
-    ensure_root "$@"
-
+    local original_args=("$@")
+    local action=
     local is_daemon=0
-
-    # Xu ly tham so dong lenh
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -u|--uninstall|-uninstall)
-                uninstall_service
+            -u|--uninstall|-uninstall|-s|--status|-status|-d|--daemon|-daemon|--silent|-silent)
+                if [[ -n "${action}" ]]; then
+                    echo "[X] Chi chon mot che do: status, uninstall hoac daemon." >&2
+                    return 2
+                fi
+                case "$1" in
+                    -u|--uninstall|-uninstall) action=uninstall ;;
+                    -s|--status|-status) action=status ;;
+                    *) action=daemon; is_daemon=1 ;;
+                esac
                 ;;
-            -s|--status|-status)
-                show_status
-                ;;
-            -d|--daemon|-daemon|--silent|-silent)
-                is_daemon=1
-                shift
-                ;;
-            -test|--test)
-                IS_MOCK=1
-                NO_ROOT=1
-                shift
-                ;;
-            -mock-fail|--mock-fail)
-                IS_MOCK=1
-                MOCK_FAIL=1
-                NO_ROOT=1
-                shift
-                ;;
-            -mock-idle|--mock-idle)
-                IS_MOCK=1
-                MOCK_IDLE=1
-                NO_ROOT=1
-                shift
-                ;;
-            -mock-nogpu|--mock-nogpu)
-                IS_MOCK=1
-                MOCK_NOGPU=1
-                NO_ROOT=1
-                shift
-                ;;
-            --no-root)
-                NO_ROOT=1
-                shift
-                ;;
+            -test|--test) IS_MOCK=1 ;;
+            -mock-fail|--mock-fail) IS_MOCK=1; MOCK_FAIL=1 ;;
+            -mock-idle|--mock-idle) IS_MOCK=1; MOCK_IDLE=1 ;;
+            -mock-nogpu|--mock-nogpu) IS_MOCK=1; MOCK_NOGPU=1 ;;
+            --no-root) NO_ROOT=1 ;;
             --status-file)
+                if [[ -z "${2:-}" || "$2" == -* ]]; then
+                    echo "[X] --status-file can duong dan tep." >&2
+                    return 2
+                fi
                 CUSTOM_STATUS_FILE="$2"
-                shift 2
-                ;;
-            --status-file=*)
-                CUSTOM_STATUS_FILE="${1#*=}"
                 shift
                 ;;
-            -h|--help|-help)
-                usage
+            --status-file=)
+                echo "[X] --status-file can duong dan tep." >&2
+                return 2
                 ;;
+            --status-file=*) CUSTOM_STATUS_FILE="${1#*=}" ;;
+            -h|--help|-help) usage ;;
             *)
-                echo "Tham so khong hop le: $1"
-                usage
+                echo "Tham so khong hop le: $1" >&2
+                usage 2 >&2
                 ;;
         esac
+        shift
     done
+
+    if [[ "${IS_MOCK}" -eq 1 ]]; then
+        NO_ROOT=1
+    fi
+    ensure_root "${original_args[@]}"
+    case "${action}" in
+        uninstall) uninstall_service; return $? ;;
+        status) show_status; return $? ;;
+    esac
 
     if [[ ${is_daemon} -eq 0 ]]; then
         echo -e "${C_BOLD}================================================================${C_RESET}"
@@ -935,11 +700,8 @@ main() {
 
     check_dependencies
 
-    # 1. Tat PCIe ASPM & Runtime PM
-    disable_aspm
-
-    # 2. Quet tat ca card CMP 30HX (10de:2189)
-    echo -e "\n${C_BOLD}[2/6] Dang tim kiem card do hoa NVIDIA CMP 30HX tren he thong...${C_RESET}"
+    # Chỉ cấu hình thanh ghi của CMP 30HX và cổng upstream tương ứng.
+    echo -e "\n${C_BOLD}Đang tìm card NVIDIA CMP 30HX (10de:2189)...${C_RESET}"
     local gpus=()
     if [[ "${IS_MOCK}" -eq 1 ]]; then
         if [[ "${MOCK_NOGPU}" -eq 1 ]]; then
@@ -953,15 +715,6 @@ main() {
                 gpus+=("${line}")
             fi
         done < <(lspci -d 10de:2189 2>/dev/null | awk '{print $1}')
-
-        # Neu khong co 30HX, kiem tra them 40HX (10de:1f0b)
-        if [[ ${#gpus[@]} -eq 0 ]]; then
-            while IFS= read -r line; do
-                if [[ -n "${line}" ]]; then
-                    gpus+=("${line}")
-                fi
-            done < <(lspci -d 10de:1f0b 2>/dev/null | awk '{print $1}')
-        fi
     fi
 
     if [[ ${#gpus[@]} -eq 0 ]]; then
@@ -971,143 +724,87 @@ main() {
         exit 1
     fi
 
-    echo -e "      ${C_GREEN}[OK]${C_RESET} Phat hien ${#gpus[@]} card CMP tren he thong: ${gpus[*]}"
+    echo -e "      ${C_GREEN}[OK]${C_RESET} Phát hiện ${#gpus[@]} card CMP 30HX: ${gpus[*]}"
 
-    # 3 & 4. Tien hanh mo khoa tung card va thu thap ket qua
-    echo -e "\n${C_BOLD}[3/6 & 4/6] Dang mo khoa Gen2 x16 va toi uu MRRS 512B cho tung card...${C_RESET}"
-    local count_gen2=0
-    local count_idle=0
-    local count_fail=0
+    echo -e "\n${C_BOLD}Đang kiểm tra và cấu hình Gen2 x16, MRRS từ 512 byte.${C_RESET}"
+    local count_fail=0 final_priority=-1 final_status_code final_speed final_width final_tls final_err final_detail
+    local res speed width tls training cap link priority status_code err detail
 
     for gpu_bdf in "${gpus[@]}"; do
-        local res=0
-        unlock_gpu_pcie "${gpu_bdf}" || res=$?
-        if [[ ${res} -eq 0 ]]; then
-            count_gen2=$((count_gen2 + 1))
-        elif [[ ${res} -eq 2 ]]; then
-            count_idle=$((count_idle + 1))
+        res=0
+        speed=0
+        width=0
+        tls=0
+        unlock_gpu_pcie "$gpu_bdf" || res=$?
+
+        if [[ "$IS_MOCK" -eq 1 ]]; then
+            speed=1
+            width=16
+            tls=2
+            if (( res == 0 )); then speed=2; fi
+            if (( res == 1 )); then tls=1; fi
+        elif cap=$(get_pcie_cap_offset "$gpu_bdf") && link=$(read_pcie_link "$gpu_bdf" "$cap"); then
+            read -r speed width tls training <<< "$link"
+            if (( res != 1 )); then
+                res=0
+                pcie_link_result "$speed" "$width" "$tls" "$training" || res=$?
+            fi
         else
-            count_fail=$((count_fail + 1))
+            res=1
+        fi
+
+        err="NONE"
+        case "$res" in
+            0)
+                priority=0
+                status_code="GEN2_SUCCESS"
+                detail="Đã xác nhận PCIe Gen2 x16."
+                ;;
+            2)
+                priority=1
+                status_code="GEN2_IDLE"
+                detail="TLS Gen2, liên kết Gen1 x16. Kiểm tra lại khi GPU có tải."
+                ;;
+            *)
+                priority=2
+                count_fail=$((count_fail + 1))
+                status_code="GEN2_FAILED"
+                err="ERR_RETRAIN_FAILED"
+                if [[ "$IS_MOCK" -eq 1 ]]; then err="ERR_RETRAIN_TIMEOUT"; fi
+                detail="Không xác minh được cấu hình và liên kết PCIe Gen2 x16."
+                ;;
+        esac
+        echo "    [$gpu_bdf] $detail Gen$speed x$width (TLS=$tls)."
+
+        # Tệp trạng thái đại diện cho kết quả xấu nhất, không phụ thuộc thứ tự card.
+        if (( priority > final_priority )); then
+            final_priority="$priority"
+            final_status_code="$status_code"
+            final_speed="$speed"
+            final_width="$width"
+            final_tls="$tls"
+            final_err="$err"
+            final_detail="$gpu_bdf: $detail"
         fi
     done
 
-    # 5. Cai dat Systemd Service
-    if [[ ${is_daemon} -eq 0 ]]; then
-        echo ""
-        if [[ ${count_fail} -gt 0 ]]; then
-            echo -e "${C_YELLOW}[!] Khong dang ky service khi mo khoa PCIe that bai.${C_RESET}"
-        elif ! install_systemd_service; then
-            write_status_file "INSTALL_FAILED" "0" "0" "0" "ERR_PERSISTENCE" "Khong the cai dat service tu dong khoi dong."
-            echo -e "${C_RED}[X] Khong the cai dat service tu dong khoi dong.${C_RESET}" >&2
-            exit 1
-        fi
+    if (( count_fail > 0 )); then
+        echo "[!] Có $count_fail/${#gpus[@]} card chưa đạt yêu cầu. Bỏ qua đăng ký dịch vụ." >&2
+    elif (( is_daemon == 0 )) && ! install_systemd_service; then
+        write_status_file "INSTALL_FAILED" "0" "0" "0" "ERR_PERSISTENCE" "Không thể cài dịch vụ tự động khởi động."
+        echo "[X] Không thể cài dịch vụ tự động khởi động." >&2
+        return 1
     fi
 
-    # 6. Tong ket va Kiem tra
-    echo ""
-    echo -e "${C_BOLD}================================================================${C_RESET}"
-    echo -e "${C_BOLD}[6/6] KET QUA XAC NHAN BANG THONG PCIE:${C_RESET}"
-    local final_status_code="UNKNOWN"
-    local final_speed="1"
-    local final_width="16"
-    local final_tls="2"
-    local final_err="NONE"
-    local final_detail=""
-
-    if [[ "${IS_MOCK}" -eq 1 ]]; then
-        for gpu_bdf in "${gpus[@]}"; do
-            if [[ "${MOCK_FAIL}" -eq 1 ]]; then
-                echo -e "  [${gpu_bdf}] ${C_RED}[X] CHUA DAT GEN2:${C_RESET} Hien tai Gen1 x16 (TLS=1)"
-                final_status_code="GEN2_FAILED"
-                final_speed="1"
-                final_width="16"
-                final_tls="1"
-                final_err="ERR_RETRAIN_TIMEOUT"
-                final_detail="Huan luyen lai PCIe link that bai sau 6 luot retrain va Stage 2 soft reset."
-            elif [[ "${MOCK_IDLE}" -eq 1 ]]; then
-                echo -e "  [${gpu_bdf}] ${C_YELLOW}[!] DA CAU HINH GEN2 (TLS=2):${C_RESET} Hien dang Gen1 x16 (che do tiet kiem dien khi idle)"
-                echo "      -> Card se tu dong nhay len Gen2 x16 khi co tai CUDA/3D/Mining!"
-                final_status_code="GEN2_IDLE"
-                final_speed="1"
-                final_width="16"
-                final_tls="2"
-                final_err="NONE"
-                final_detail="Da thiet lap TLS=2 thanh cong. Link o Gen1 do che do tiet kiem dien khi ranh (ASPM/idle)."
-            else
-                echo -e "  [${gpu_bdf}] ${C_GREEN}${C_BOLD}[V] HOAN TAT:${C_RESET} PCIe Gen2 x16 (~6.4 GB/s)"
-                final_status_code="GEN2_SUCCESS"
-                final_speed="2"
-                final_width="16"
-                final_tls="2"
-                final_err="NONE"
-                final_detail="Mo khoa PCIe Gen2 x16 thanh cong. Bang thong dat khoang 6.4 GB/s voi MRRS 512B."
-            fi
-        done
-    else
-        for gpu_bdf in "${gpus[@]}"; do
-            local cap
-            cap=$(get_pcie_cap_offset "${gpu_bdf}")
-            if [[ -n "${cap}" ]]; then
-                local sta_raw
-                sta_raw=$(setpci -s "${gpu_bdf}" "${cap}"+0x12.w 2>/dev/null || true)
-                local speed=$(( $(parse_hex "${sta_raw}") & 0xF ))
-                local width=$(( ($(parse_hex "${sta_raw}") >> 4) & 0x3F ))
-
-                local ctl2_raw
-                ctl2_raw=$(setpci -s "${gpu_bdf}" "${cap}"+0x30.w 2>/dev/null || true)
-                local tls=$(( $(parse_hex "${ctl2_raw}") & 0xF ))
-
-                final_speed="${speed}"
-                final_width="${width}"
-                final_tls="${tls}"
-
-                if [[ ${speed} -ge 2 ]]; then
-                    echo -e "  [${gpu_bdf}] ${C_GREEN}${C_BOLD}[V] HOAN TAT:${C_RESET} PCIe Gen${speed} x${width} (~6.4 GB/s)"
-                    final_status_code="GEN2_SUCCESS"
-                    final_err="NONE"
-                    final_detail="Mo khoa PCIe Gen${speed} x${width} thanh cong."
-                elif [[ ${tls} -ge 2 ]]; then
-                    echo -e "  [${gpu_bdf}] ${C_YELLOW}[!] DA CAU HINH GEN2 (TLS=${tls}):${C_RESET} Hien dang Gen${speed} x${width} (che do tiet kiem dien khi idle)"
-                    echo "      -> Card se tu dong nhay len Gen2 x16 khi co tai CUDA/3D/Mining!"
-                    final_status_code="GEN2_IDLE"
-                    final_err="NONE"
-                    final_detail="TLS da dat Gen${tls}, link dang Gen${speed} do tiet kiem dien."
-                else
-                    echo -e "  [${gpu_bdf}] ${C_RED}[X] CHUA DAT GEN2:${C_RESET} Hien tai Gen${speed} x${width} (TLS=${tls})"
-                    final_status_code="GEN2_FAILED"
-                    final_err="ERR_RETRAIN_FAILED"
-                    final_detail="Chua dat Gen2 sau khi cau hinh."
-                fi
-            fi
-        done
+    write_status_file "$final_status_code" "$final_speed" "$final_width" "$final_tls" "$final_err" "$final_detail"
+    if (( count_fail > 0 )); then
+        return 1
     fi
-
-    # Ghi file Seam 2 Status Contract
-    write_status_file "${final_status_code}" "${final_speed}" "${final_width}" "${final_tls}" "${final_err}" "${final_detail}"
-
-    echo -e "${C_BOLD}================================================================${C_RESET}"
-    if [[ ${is_daemon} -eq 0 ]]; then
-        if [[ ${count_fail} -eq 0 ]]; then
-            echo -e "${C_GREEN}[V] CAI DAT HOAN TAT TREN LINUX!${C_RESET}"
-            echo "  - Systemd Service se tu dong chay moi khi khoi dong he thong."
-            echo "  - Khi ranh, PCIe co the ha ve Gen1 x16 de tiet kiem dien."
-            echo "  - De kiem tra trang thai bat cu luc nao, chay: sudo $0 --status"
-            echo ""
-            exit 0
-        else
-            echo -e "${C_RED}[!] CANH BAO: Co ${count_fail}/${#gpus[@]} card chua the thiet lap TLS Gen2.${C_RESET}"
-            echo "  - Vui long kiem tra lai khe cam PCIe, tiep xuc chan, hoac BIOS tren bo mach chu."
-            echo "  - Chay: sudo $0 --status de kiem tra chi tiet."
-            echo ""
-            exit 1
-        fi
+    if (( is_daemon == 0 )); then
+        echo "[$final_status_code] Đã cài dịch vụ tự động khởi động."
+        echo "    Kiểm tra trạng thái bằng: sudo $0 --status"
     fi
-
-    # Neu la daemon mode
-    if [[ ${count_fail} -gt 0 ]]; then
-        exit 1
-    fi
-    exit 0
+    return 0
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

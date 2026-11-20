@@ -13,7 +13,6 @@ const (
 	GpuClassPath             = `SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}`
 	GraphicsDriversKey       = `SYSTEM\CurrentControlSet\Control\GraphicsDrivers`
 	PciEnumKey               = `SYSTEM\CurrentControlSet\Enum\PCI`
-	CiConfigPath             = `SYSTEM\CurrentControlSet\Control\CI\Config`
 	DxGraphicsSettingsPath   = `Software\Microsoft\DirectX\GraphicsSettings`
 	DxUserGpuPreferencesPath = `Software\Microsoft\DirectX\UserGpuPreferences`
 
@@ -70,7 +69,6 @@ type RegistryConfigResult struct {
 	TdrConfigured           bool
 	IcdRegistered           bool
 	FriendlyNamed           bool
-	BlocklistDisabled       bool
 	DirectXGlobalConfigured bool
 	HighPerfDID             string
 	Details                 []string
@@ -92,11 +90,6 @@ func setDWords(root registry.Key, path string, values map[string]uint32) error {
 	return errors.Join(errs...)
 }
 
-// DisableVulnerableDriverBlocklist giữ chính sách cấu hình chung của dự án.
-func DisableVulnerableDriverBlocklist(log io.Writer) error {
-	return setDWords(registry.LOCAL_MACHINE, CiConfigPath, map[string]uint32{"VulnerableDriverBlocklistEnable": 0})
-}
-
 // routingSettings giữ nguyên tùy chọn DirectX ngoài HighPerfAdapter.
 func routingSettings(current, did string) string {
 	var parts []string
@@ -112,37 +105,61 @@ func routingSettings(current, did string) string {
 		}
 		parts = append(parts, part)
 	}
-	if did != "" {
-		parts = append(parts, "HighPerfAdapter="+did)
-		if !hasSwap {
-			parts = append(parts, "SwapEffectUpgradeEnable=1")
-		}
-	}
-	if len(parts) == 0 {
-		return ""
+	parts = append(parts, "HighPerfAdapter="+did)
+	if !hasSwap {
+		parts = append(parts, "SwapEffectUpgradeEnable=1")
 	}
 	return strings.Join(parts, ";") + ";"
 }
 
 func writeGlobalRouting(did string) error {
-	k, _, err := graphicsRegistry.CreateKey(registry.CURRENT_USER, DxUserGpuPreferencesPath, registry.QUERY_VALUE|registry.SET_VALUE)
+	var k registryKey
+	var err error
+	const access = registry.QUERY_VALUE | registry.SET_VALUE
+	if did == "" {
+		k, err = graphicsRegistry.OpenKey(registry.CURRENT_USER, DxUserGpuPreferencesPath, access)
+		if errors.Is(err, registry.ErrNotExist) {
+			return nil
+		}
+	} else {
+		k, _, err = graphicsRegistry.CreateKey(registry.CURRENT_USER, DxUserGpuPreferencesPath, access)
+	}
 	if err != nil {
 		return err
 	}
 	defer k.Close()
-	current, _, readErr := k.GetStringValue("DirectXUserGlobalSettings")
+
+	const setting = "DirectXUserGlobalSettings"
+	current, _, readErr := k.GetStringValue(setting)
 	if readErr != nil && !errors.Is(readErr, registry.ErrNotExist) {
 		return readErr
 	}
-	value := routingSettings(current, did)
-	if value == "" {
-		err = k.DeleteValue("DirectXUserGlobalSettings")
-		if errors.Is(err, registry.ErrNotExist) {
-			return nil
-		}
-		return err
+	if did != "" {
+		return k.SetStringValue(setting, routingSettings(current, did))
 	}
-	return k.SetStringValue("DirectXUserGlobalSettings", value)
+
+	var remaining []string
+	for _, part := range strings.Split(current, ";") {
+		key, target, _ := strings.Cut(part, "=")
+		target = strings.ToUpper(strings.TrimSpace(target))
+		if strings.EqualFold(strings.TrimSpace(key), "HighPerfAdapter") &&
+			(target == "10DE&2189" || target == "10DE&1F0B") {
+			continue
+		}
+		remaining = append(remaining, part)
+	}
+	value := strings.Join(remaining, ";")
+	if value == current {
+		return nil
+	}
+	if value != "" {
+		return k.SetStringValue(setting, value)
+	}
+	err = k.DeleteValue(setting)
+	if errors.Is(err, registry.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // ConfigureDirectXGlobalRouting định tuyến CMP và phản ánh lỗi ghi thực tế.
@@ -187,7 +204,6 @@ func ConfigureDriverClassRegistry(log io.Writer, deviceID uint16) (*RegistryConf
 		res.Details = append(res.Details, label)
 		return true
 	}
-	res.BlocklistDisabled = record("Cấu hình danh sách chặn driver", DisableVulnerableDriverBlocklist(log))
 	for _, gpu := range topo.RenderGPUs {
 		if gpu.DID != res.HighPerfDID {
 			continue
@@ -292,7 +308,7 @@ func syncFriendlyNames(did string) (bool, error) {
 	return changed, nil
 }
 
-// RevertGraphicsOptimization khôi phục blocklist và gỡ riêng lựa chọn HighPerfAdapter.
+// RevertGraphicsOptimization gỡ lựa chọn HighPerfAdapter dành cho CMP.
 func RevertGraphicsOptimization(log io.Writer) error {
-	return errors.Join(setDWords(registry.LOCAL_MACHINE, CiConfigPath, map[string]uint32{"VulnerableDriverBlocklistEnable": 1}), writeGlobalRouting(""))
+	return writeGlobalRouting("")
 }
