@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Chính sách dữ liệu và yêu cầu xóa báo cáo VGA
+    url: https://github.com/ngthaihoc/CMP30HXmodtoGEN2/blob/main/docs/vga-report/policy.md
+    about: Xem danh sách trường thu thập, giới hạn lưu trữ và cách yêu cầu xóa issue báo cáo VGA.

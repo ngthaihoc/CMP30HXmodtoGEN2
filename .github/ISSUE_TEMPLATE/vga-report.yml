@@ -1,0 +1,34 @@
+name: Báo cáo chẩn đoán VGA (dự phòng thủ công)
+description: Gửi báo cáo JSON từ Collect_VGA_Report.bat khi máy không gửi trực tiếp được qua endpoint.
+title: "[VGA Report] "
+labels:
+  - vga-report
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### Lưu ý trước khi gửi
+        - Biểu mẫu này là phương án dự phòng khi `Collect_VGA_Report.bat` không kết nối được với máy chủ tiếp nhận.
+        - **Issue GitHub là công khai.** Hãy kiểm tra lại nội dung JSON trước khi bấm gửi để chắc chắn không có đường dẫn cá nhân, địa chỉ IP/MAC hoặc số serial.
+        - Chỉ dán nội dung tệp `.json` do `Collect_VGA_Report.bat` tạo ra. Không dán tệp nhị phân hoặc ảnh chụp có thông tin riêng tư.
+  - type: textarea
+    id: report
+    attributes:
+      label: Nội dung JSON báo cáo VGA
+      description: Dán toàn bộ nội dung tệp JSON đã tạo bởi Collect_VGA_Report.bat (đã được chép sẵn vào clipboard nếu chọn mở biểu mẫu dự phòng).
+      placeholder: |
+        {
+          "schema_version": 1,
+          ...
+        }
+      render: json
+    validations:
+      required: true
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Xác nhận đồng ý công khai dữ liệu kỹ thuật
+      description: Đánh dấu để xác nhận bạn đã xem trước báo cáo và đồng ý đăng công khai lên repository.
+      options:
+        - label: Tôi đồng ý công khai dữ liệu phần cứng trong báo cáo này và đã kiểm tra không chứa thông tin cá nhân (PII).
+          required: true
