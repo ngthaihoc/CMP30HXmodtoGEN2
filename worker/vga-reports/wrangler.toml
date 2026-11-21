@@ -1,0 +1,21 @@
+name = "cmp-vga-reports"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+# Đặt repo thử trước (ví dụ: ngthaihoc/vga-report-sandbox), sau khi đạt mới đổi sang ngthaihoc/CMP30HXmodtoGEN2
+TARGET_REPO = "ngthaihoc/vga-report-sandbox"
+INTAKE_ENABLED = "true"
+DAILY_CAP = "200"
+IP_LIMIT = "10"
+
+[[kv_namespaces]]
+binding = "REPORTS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Bí mật cần nạp bằng `pnpm dlx wrangler secret put`:
+# - GITHUB_APP_ID
+# - GITHUB_APP_INSTALLATION_ID
+# - GITHUB_APP_PRIVATE_KEY (định dạng PKCS#8 PEM)
+# - IP_SALT
+# - SIGNING_KEYS (JSON, ví dụ: {"k1":"<base64 32 byte>"})
