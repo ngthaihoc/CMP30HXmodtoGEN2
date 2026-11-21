@@ -52,6 +52,12 @@ jobs:
       - name: Test frontend telemetry
         run: node --test windows-v3.0/tools/aio/tests/telemetry.test.cjs
 
+      - name: Test VGA report validator and intake worker
+        run: node --test scripts/vga-report/report.test.cjs worker/vga-reports/test/worker.test.cjs
+
+      - name: Test VGA collector script
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Test-VGA-Collector.ps1
+
       - name: Build standalone Windows tools
         working-directory: windows-v3.0/tools
         run: |

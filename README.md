@@ -164,6 +164,18 @@ Trong thư mục dự án có sẵn các công cụ tiện ích hỗ trợ ngư�
 
 ---
 
+## <img src="https://api.iconify.design/lucide/file-text.svg?color=%230ea5e9" width="22" height="22" align="center" /> 9. Gửi báo cáo chẩn đoán VGA (Collect_VGA_Report.bat)
+
+Để hỗ trợ kiểm tra lỗi nhận card, tốc độ liên kết PCIe và dữ liệu phần cứng trên nhiều cấu hình máy khác nhau, dự án cung cấp công cụ chỉ đọc `Collect_VGA_Report.bat` (chạy không cần quyền Administrator, không sửa registry, MMIO hay tác vụ hệ thống).
+
+- **Công cụ làm gì:** đọc thông tin GPU từ CIM/PnP và 18 trường cố định từ `nvidia-smi` (nếu có GPU NVIDIA), lọc thông tin cá nhân (PII), cho bạn xem trước tóm tắt và chỉ gửi khi bạn đồng ý.
+- **Tệp tạo cục bộ:** nằm trong thư mục `vga-reports-out\` cạnh `Collect_VGA_Report.bat`, gồm tệp `.json`, `-summary.txt`, `.zip` (chỉ lưu cục bộ, không tải ZIP lên server) và `.pending.json` (tạm giữ khi gửi chưa thành công).
+- **Tính công khai & không phải bằng chứng mở khóa:** báo cáo gửi lên sẽ tạo **GitHub Issue công khai** trên repository này. Thông số trong báo cáo phản ánh trạng thái tại thời điểm thu thập và **không phải bằng chứng mở khóa thành công**.
+- **Gửi lại khi mất mạng hoặc lỗi máy chủ:** nếu mất mạng hoặc máy chủ tiếp nhận bảo trì (`503`), tệp `.zip` và `.pending.json` được giữ lại. Khi chạy lại `Collect_VGA_Report.bat`, công cụ sẽ hỏi gửi lại báo cáo đang chờ, hoặc bạn có thể chọn mở Issue Form dự phòng để dán nội dung JSON thủ công.
+- **Chính sách dữ liệu & yêu cầu xóa:** xem chi tiết trường thu thập, dữ liệu không thu thập và cách yêu cầu xóa issue tại [docs/vga-report/policy.md](docs/vga-report/policy.md).
+
+---
+
 ## <img src="https://api.iconify.design/lucide/heart.svg?color=%23f43f5e" width="22" height="22" align="center" /> Lời cảm ơn
 
 Dự án lấy cảm hứng từ các công trình nghiên cứu ban đầu của cộng đồng **CMP40HX-Unlock**. Nếu công cụ này hữu ích cho bạn, hãy nhấn **Star** trên kho lưu trữ GitHub để ủng hộ tác giả nhé!
