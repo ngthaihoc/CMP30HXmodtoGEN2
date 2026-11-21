@@ -431,6 +431,356 @@ Invoke-TestCase 'path_with_spaces_accents_and_shell_chars_is_saved' {
     }
 }
 
+# =========================================================================
+# Task 5 Tests (12 cases)
+# =========================================================================
+
+function Start-MockHttpServer {
+    param([scriptblock]$OnRequest)
+    $listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+
+    $state = [hashtable]::Synchronized(@{
+        Listener = $listener
+        Requests = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
+        Responses = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))
+        Stop = $false
+    })
+
+    $ps = [powershell]::Create()
+    [void]$ps.AddScript({
+        param($State)
+        while (-not $State.Stop) {
+            try {
+                if (-not $State.Listener.Pending()) {
+                    Start-Sleep -Milliseconds 10
+                    continue
+                }
+                $client = $State.Listener.AcceptTcpClient()
+                try {
+                    $stream = $client.GetStream()
+                    $stream.ReadTimeout = 5000
+                    $ms = New-Object System.IO.MemoryStream
+                    $buf = New-Object byte[] 4096
+                    $headerEnd = -1
+                    $rawBytes = [byte[]]@()
+                    while ($true) {
+                        $read = $stream.Read($buf, 0, $buf.Length)
+                        if ($read -le 0) { break }
+                        $ms.Write($buf, 0, $read)
+                        $rawBytes = $ms.ToArray()
+                        $textSoFar = [System.Text.Encoding]::ASCII.GetString($rawBytes)
+                        $idx = $textSoFar.IndexOf("`r`n`r`n")
+                        if ($idx -ge 0) {
+                            $headerEnd = $idx + 4
+                            break
+                        }
+                    }
+                    if ($headerEnd -lt 0) { continue }
+                    $headerText = [System.Text.Encoding]::ASCII.GetString($rawBytes, 0, $headerEnd)
+                    $headerLines = $headerText -split "`r`n"
+                    $reqLine = $headerLines[0]
+                    $headers = @{}
+                    $contentLength = 0
+                    for ($i = 1; $i -lt $headerLines.Length; $i += 1) {
+                        $line = $headerLines[$i]
+                        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                        $colon = $line.IndexOf(':')
+                        if ($colon -gt 0) {
+                            $k = $line.Substring(0, $colon).Trim()
+                            $v = $line.Substring($colon + 1).Trim()
+                            $headers[$k] = $v
+                            if ($k.Equals('Content-Length', [StringComparison]::OrdinalIgnoreCase)) {
+                                $contentLength = [int]$v
+                            }
+                        }
+                    }
+                    while ($ms.Length -lt ($headerEnd + $contentLength)) {
+                        $read = $stream.Read($buf, 0, $buf.Length)
+                        if ($read -le 0) { break }
+                        $ms.Write($buf, 0, $read)
+                    }
+                    $allBytes = $ms.ToArray()
+                    $bodyLen = [Math]::Max(0, [Math]::Min($contentLength, $allBytes.Length - $headerEnd))
+                    $bodyBytes = New-Object byte[] $bodyLen
+                    if ($bodyLen -gt 0) {
+                        [Array]::Copy($allBytes, $headerEnd, $bodyBytes, 0, $bodyLen)
+                    }
+                    $bodyText = [System.Text.Encoding]::UTF8.GetString($bodyBytes)
+                    [void]$State.Requests.Add([pscustomobject]@{
+                        RequestLine = $reqLine
+                        Headers     = $headers
+                        BodyBytes   = $bodyBytes
+                        BodyText    = $bodyText
+                        SecurityProtocolAtReceive = [System.Net.ServicePointManager]::SecurityProtocol
+                    })
+
+                    $resp = if ($State.Responses.Count -gt 0) { $State.Responses.Dequeue() } else { @{ StatusCode = 500; Body = '{}' } }
+                    if ($resp.DelayMs -and $resp.DelayMs -gt 0) {
+                        Start-Sleep -Milliseconds ([int]$resp.DelayMs)
+                    }
+                    $respBody = if ($resp.Body) { [string]$resp.Body } else { '{}' }
+                    $respBytes = [System.Text.Encoding]::UTF8.GetBytes($respBody)
+                    $code = [int]$resp.StatusCode
+                    $extraHdrs = ''
+                    if ($resp.Headers) {
+                        foreach ($hk in $resp.Headers.Keys) {
+                            $extraHdrs += "${hk}: $($resp.Headers[$hk])`r`n"
+                        }
+                    }
+                    $headStr = "HTTP/1.1 $code OK`r`nContent-Type: application/json; charset=utf-8`r`nContent-Length: $($respBytes.Length)`r`nConnection: close`r`n$extraHdrs`r`n"
+                    $headBytes = [System.Text.Encoding]::ASCII.GetBytes($headStr)
+                    $stream.Write($headBytes, 0, $headBytes.Length)
+                    $stream.Write($respBytes, 0, $respBytes.Length)
+                    $stream.Flush()
+                } finally {
+                    $client.Close()
+                }
+            } catch {
+                if ($State.Stop) { break }
+            }
+        }
+    }).AddArgument($state)
+    $async = $ps.BeginInvoke()
+
+    return [pscustomobject]@{
+        Url       = "http://127.0.0.1:$port/v1/reports"
+        State     = $state
+        PowerShell = $ps
+        Async     = $async
+    }
+}
+
+function Stop-MockHttpServer {
+    param($Server)
+    if (-not $Server) { return }
+    $Server.State.Stop = $true
+    try { $Server.State.Listener.Stop() } catch {}
+    try { $Server.PowerShell.Stop() } catch {}
+    try { $Server.PowerShell.Dispose() } catch {}
+}
+
+function New-SampleTestReport {
+    return [ordered]@{
+        schema_version = 1
+        collector_version = '1.0.0'
+        report_id = [guid]::NewGuid().ToString()
+        created_utc = '2026-11-21T07:00:00Z'
+        experiment_id = [guid]::NewGuid().ToString()
+        consent = $true
+        gpus = @()
+        nvidia = [ordered]@{ complete = $false; missing = @(); fields = @{} }
+        pcie = [ordered]@{}
+        platform = [ordered]@{}
+        context = [ordered]@{ mod_state = 'unknown'; riser = 'unknown'; slot = 'unknown'; stage = 'unknown'; notes = 'Tiếng Việt thử nghiệm' }
+    }
+}
+
+$testSignKey = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+
+Invoke-TestCase 'send_201_returns_sent_and_url' {
+    $srv = Start-MockHttpServer
+    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-send-" + [guid]::NewGuid())
+    try {
+        $rep = New-SampleTestReport
+        $srv.State.Responses.Enqueue(@{
+            StatusCode = 201
+            Body = "{`"report_id`":`"$($rep.report_id)`",`"status`":`"issue_created`",`"issue_url`":`"https://github.com/ngthaihoc/vga-report-sandbox/issues/101`"}"
+        })
+        $res = Send-Report -Report $rep -Endpoint $srv.Url -KeyId 'k1' -Key $testSignKey -ReportDir $tmpDir -AllowLoopbackHttp
+        Assert-Equal $res.Status 'sent' '201 returns sent'
+        Assert-Equal $res.IssueUrl 'https://github.com/ngthaihoc/vga-report-sandbox/issues/101' 'returns issue_url'
+        Assert-Equal (@(Get-ChildItem -LiteralPath $tmpDir -Filter '*.pending.json').Count) 0 'pending removed after 201'
+    } finally {
+        Stop-MockHttpServer $srv
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'send_200_returns_duplicate_same_url' {
+    $srv = Start-MockHttpServer
+    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-send-" + [guid]::NewGuid())
+    try {
+        $rep = New-SampleTestReport
+        $srv.State.Responses.Enqueue(@{
+            StatusCode = 200
+            Body = "{`"report_id`":`"$($rep.report_id)`",`"status`":`"duplicate`",`"issue_url`":`"https://github.com/ngthaihoc/vga-report-sandbox/issues/101`"}"
+        })
+        $res = Send-Report -Report $rep -Endpoint $srv.Url -KeyId 'k1' -Key $testSignKey -ReportDir $tmpDir -AllowLoopbackHttp
+        Assert-Equal $res.Status 'duplicate' '200 returns duplicate'
+        Assert-Equal $res.IssueUrl 'https://github.com/ngthaihoc/vga-report-sandbox/issues/101' 'returns same issue_url'
+        Assert-Equal (@(Get-ChildItem -LiteralPath $tmpDir -Filter '*.pending.json').Count) 0 'pending removed after 200'
+    } finally {
+        Stop-MockHttpServer $srv
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'send_422_returns_rejected_no_retry' {
+    $srv = Start-MockHttpServer
+    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-send-" + [guid]::NewGuid())
+    try {
+        $rep = New-SampleTestReport
+        $srv.State.Responses.Enqueue(@{ StatusCode = 422; Body = '{"error":"pii_detected","categories":["mac"]}' })
+        $res = Send-Report -Report $rep -Endpoint $srv.Url -KeyId 'k1' -Key $testSignKey -ReportDir $tmpDir -AllowLoopbackHttp
+        Assert-Equal $res.Status 'rejected' '422 returns rejected'
+        Assert-Equal $srv.State.Requests.Count 1 '422 must not retry'
+    } finally {
+        Stop-MockHttpServer $srv
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'send_429_honors_retry_after' {
+    $srv = Start-MockHttpServer
+    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-send-" + [guid]::NewGuid())
+    try {
+        $rep = New-SampleTestReport
+        $srv.State.Responses.Enqueue(@{
+            StatusCode = 429
+            Headers = @{ 'Retry-After' = '120' }
+            Body = '{"error":"rate_limited","reason":"ip"}'
+        })
+        $res = Send-Report -Report $rep -Endpoint $srv.Url -KeyId 'k1' -Key $testSignKey -ReportDir $tmpDir -AllowLoopbackHttp
+        Assert-Equal $res.Status 'retry_later' '429 returns retry_later'
+        Assert-Equal $res.RetryAfter 120 'RetryAfter parsed from header'
+        Assert-Equal (@(Get-ChildItem -LiteralPath $tmpDir -Filter '*.pending.json').Count) 1 'pending kept on 429'
+    } finally {
+        Stop-MockHttpServer $srv
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'send_503_keeps_zip_and_returns_retry_later' {
+    $srv = Start-MockHttpServer
+    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-send-" + [guid]::NewGuid())
+    try {
+        $rep = New-SampleTestReport
+        $srv.State.Responses.Enqueue(@{ StatusCode = 503; Body = '{"error":"service_unavailable"}' })
+        $res = Send-Report -Report $rep -Endpoint $srv.Url -KeyId 'k1' -Key $testSignKey -ReportDir $tmpDir -AllowLoopbackHttp
+        Assert-Equal $res.Status 'retry_later' '503 returns retry_later'
+        Assert-Equal (@(Get-ChildItem -LiteralPath $tmpDir -Filter '*.zip').Count) 1 'zip kept on 503'
+        Assert-Equal (@(Get-ChildItem -LiteralPath $tmpDir -Filter '*.pending.json').Count) 1 'pending kept on 503'
+    } finally {
+        Stop-MockHttpServer $srv
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'send_timeout_returns_offline' {
+    $srv = Start-MockHttpServer
+    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-send-" + [guid]::NewGuid())
+    try {
+        $rep = New-SampleTestReport
+        $srv.State.Responses.Enqueue(@{ StatusCode = 201; DelayMs = 2500; Body = '{}' })
+        $res = Send-Report -Report $rep -Endpoint $srv.Url -KeyId 'k1' -Key $testSignKey -ReportDir $tmpDir -TimeoutSec 1 -AllowLoopbackHttp
+        Assert-Equal $res.Status 'offline' 'timeout returns offline'
+        Assert-Equal (@(Get-ChildItem -LiteralPath $tmpDir -Filter '*.zip').Count) 1 'zip kept on timeout'
+        Assert-Equal (@(Get-ChildItem -LiteralPath $tmpDir -Filter '*.pending.json').Count) 1 'pending kept on timeout'
+    } finally {
+        Stop-MockHttpServer $srv
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'endpoint_must_be_https_and_fixed_host' {
+    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-send-" + [guid]::NewGuid())
+    try {
+        $rep = New-SampleTestReport
+        $resHttp = Send-Report -Report $rep -Endpoint 'http://vga.example.workers.dev/v1/reports' -AllowedHost 'vga.example.workers.dev' -KeyId 'k1' -Key $testSignKey -ReportDir $tmpDir
+        Assert-Equal $resHttp.Status 'rejected' 'http rejected without AllowLoopbackHttp'
+
+        $resWrongHost = Send-Report -Report $rep -Endpoint 'https://evil.example.com/v1/reports' -AllowedHost 'vga.example.workers.dev' -KeyId 'k1' -Key $testSignKey -ReportDir $tmpDir
+        Assert-Equal $resWrongHost.Status 'rejected' 'mismatched host rejected'
+    } finally {
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'tls12_enabled_before_request' {
+    $srv = Start-MockHttpServer
+    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-send-" + [guid]::NewGuid())
+    $origProto = [System.Net.ServicePointManager]::SecurityProtocol
+    try {
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls
+        $rep = New-SampleTestReport
+        $srv.State.Responses.Enqueue(@{ StatusCode = 201; Body = '{"issue_url":"https://github.com/ngthaihoc/vga-report-sandbox/issues/1"}' })
+        $res = Send-Report -Report $rep -Endpoint $srv.Url -KeyId 'k1' -Key $testSignKey -ReportDir $tmpDir -AllowLoopbackHttp
+        Assert-Equal $res.Status 'sent' 'request succeeded'
+        Assert-True (([int]([System.Net.ServicePointManager]::SecurityProtocol) -band [int]([System.Net.SecurityProtocolType]::Tls12)) -ne 0) 'TLS 1.2 enabled'
+    } finally {
+        [System.Net.ServicePointManager]::SecurityProtocol = $origProto
+        Stop-MockHttpServer $srv
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'signature_matches_worker_test_vector' {
+    $body = '{"hello":"thế giới"}'
+    $headers = New-RequestSignature -Body $body -KeyId 'k1' -Key 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' -Timestamp 1700000000
+    Assert-Equal $headers['X-Report-Key-Id'] 'k1' 'key id header'
+    Assert-Equal $headers['X-Report-Timestamp'] '1700000000' 'timestamp header'
+    Assert-Equal $headers['X-Report-Signature'] 'a1ef303751bfa35a80ffba19567a172abfdd3047b0c9d36ffd4edd5847ddb9a7' 'matches worker vector'
+}
+
+Invoke-TestCase 'signature_covers_exact_utf8_body_bytes' {
+    $srv = Start-MockHttpServer
+    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-send-" + [guid]::NewGuid())
+    try {
+        $rep = New-SampleTestReport
+        $rep.context.notes = 'Báo cáo tiếng Việt: Đủ 18/18 trường — không lỗi!'
+        $srv.State.Responses.Enqueue(@{ StatusCode = 201; Body = '{"issue_url":"https://github.com/ngthaihoc/vga-report-sandbox/issues/5"}' })
+        $res = Send-Report -Report $rep -Endpoint $srv.Url -KeyId 'k1' -Key $testSignKey -ReportDir $tmpDir -NowUnix 1700000000 -AllowLoopbackHttp
+        Assert-Equal $res.Status 'sent' 'sent OK'
+        $captured = $srv.State.Requests[0]
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $bodyHashBytes = $sha.ComputeHash($captured.BodyBytes)
+        $bodyHashHex = -join ($bodyHashBytes | ForEach-Object { $_.ToString('x2') })
+        $hmac = New-Object System.Security.Cryptography.HMACSHA256 (,[Convert]::FromBase64String($testSignKey))
+        $expectedSig = -join ($hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes("1700000000.$bodyHashHex")) | ForEach-Object { $_.ToString('x2') })
+        Assert-Equal $captured.Headers['X-Report-Signature'] $expectedSig 'signature matches exact transmitted UTF-8 bytes'
+    } finally {
+        Stop-MockHttpServer $srv
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'clock_skew_401_retries_once_with_server_time' {
+    $srv = Start-MockHttpServer
+    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-send-" + [guid]::NewGuid())
+    try {
+        $rep = New-SampleTestReport
+        $srv.State.Responses.Enqueue(@{ StatusCode = 401; Body = '{"error":"unauthorized","reason":"clock_skew","server_time":1795245000}' })
+        $srv.State.Responses.Enqueue(@{ StatusCode = 201; Body = '{"issue_url":"https://github.com/ngthaihoc/vga-report-sandbox/issues/77"}' })
+        $res = Send-Report -Report $rep -Endpoint $srv.Url -KeyId 'k1' -Key $testSignKey -ReportDir $tmpDir -NowUnix 1795244000 -AllowLoopbackHttp
+        Assert-Equal $res.Status 'sent' 'retried once and succeeded'
+        Assert-Equal $res.IssueUrl 'https://github.com/ngthaihoc/vga-report-sandbox/issues/77' 'issue url returned'
+        Assert-Equal $srv.State.Requests.Count 2 'exactly 2 requests sent'
+        Assert-Equal $srv.State.Requests[1].Headers['X-Report-Timestamp'] '1795245000' 'retry used server_time'
+    } finally {
+        Stop-MockHttpServer $srv
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'second_401_returns_rejected_no_loop' {
+    $srv = Start-MockHttpServer
+    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-send-" + [guid]::NewGuid())
+    try {
+        $rep = New-SampleTestReport
+        $srv.State.Responses.Enqueue(@{ StatusCode = 401; Body = '{"error":"unauthorized","reason":"clock_skew","server_time":1795245000}' })
+        $srv.State.Responses.Enqueue(@{ StatusCode = 401; Body = '{"error":"unauthorized","reason":"clock_skew","server_time":1795246000}' })
+        $srv.State.Responses.Enqueue(@{ StatusCode = 201; Body = '{"issue_url":"https://should.not.reach"}' })
+        $res = Send-Report -Report $rep -Endpoint $srv.Url -KeyId 'k1' -Key $testSignKey -ReportDir $tmpDir -NowUnix 1795244000 -AllowLoopbackHttp
+        Assert-Equal $res.Status 'rejected' 'second 401 rejected without looping'
+        Assert-Equal $srv.State.Requests.Count 2 'stopped after 2 attempts'
+    } finally {
+        Stop-MockHttpServer $srv
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Host "Summary: Passed=$script:Passed Failed=$script:Failed"
 if ($script:Failed -gt 0) { exit 1 }
 exit 0

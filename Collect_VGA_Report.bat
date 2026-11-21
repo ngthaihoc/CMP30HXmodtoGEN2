@@ -31,7 +31,13 @@ if (-not [Environment]::Is64BitOperatingSystem) {
 
 $script:CollectorVersion = '1.0.0'
 $script:SchemaVersion = 1
-$script:TargetHostname = 'chua-cau-hinh.workers.dev'
+# Khóa ký công khai chống spam, không phải bí mật (điền endpoint và khóa thật sau Task 6)
+$script:AllowedEndpointHost = 'cmp-vga-reports.REPLACE_WITH_SUBDOMAIN.workers.dev'
+$script:DefaultEndpoint = "https://$($script:AllowedEndpointHost)/v1/reports"
+$script:TargetHostname = $script:AllowedEndpointHost
+$script:SigningKeyId = 'k1'
+$script:SigningKey = 'REPLACE_WITH_PUBLIC_ANTI_SPAM_SIGNING_KEY_BASE64'
+$script:FallbackIssueUrl = 'https://github.com/ngthaihoc/CMP30HXmodtoGEN2/issues/new?template=vga-report.yml'
 
 $script:NvidiaRequiredFields = @(
     'name',
@@ -758,6 +764,244 @@ function Save-LocalReport {
         SummaryPath = $summaryPath
         ZipPath     = $zipPath
         ReportId    = $Report.report_id
+        JsonText    = $jsonText
+        BaseName    = $baseName
+    }
+}
+
+function New-RequestSignature {
+    param(
+        [Parameter(Mandatory = $false)][AllowEmptyString()][string]$Body = '',
+        [Parameter(Mandatory = $false)][byte[]]$BodyBytes = $null,
+        [Parameter(Mandatory = $true)][string]$KeyId,
+        [Parameter(Mandatory = $true)][string]$Key,
+        [Parameter(Mandatory = $false)][long]$Timestamp = 0
+    )
+    if ($Timestamp -le 0) {
+        $Timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $bytes = if ($null -ne $BodyBytes) { $BodyBytes } else { $utf8NoBom.GetBytes($Body) }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hashBytes = $sha.ComputeHash($bytes)
+    } finally {
+        $sha.Dispose()
+    }
+    $bodyShaHex = -join ($hashBytes | ForEach-Object { $_.ToString('x2') })
+    $payloadBytes = $utf8NoBom.GetBytes("$Timestamp.$bodyShaHex")
+
+    $keyBytes = [Convert]::FromBase64String($Key)
+    $hmac = New-Object System.Security.Cryptography.HMACSHA256 (,$keyBytes)
+    try {
+        $sigBytes = $hmac.ComputeHash($payloadBytes)
+    } finally {
+        $hmac.Dispose()
+    }
+    $sigHex = -join ($sigBytes | ForEach-Object { $_.ToString('x2') })
+
+    return @{
+        'X-Report-Key-Id'    = $KeyId
+        'X-Report-Timestamp' = [string]$Timestamp
+        'X-Report-Signature' = $sigHex
+    }
+}
+
+function Invoke-HttpPostBytes {
+    param(
+        [string]$Url,
+        [byte[]]$BodyBytes,
+        [hashtable]$Headers,
+        [int]$TimeoutSec = 15
+    )
+    $req = [System.Net.HttpWebRequest]::Create($Url)
+    $req.Method = 'POST'
+    $req.ContentType = 'application/json; charset=utf-8'
+    $req.Timeout = $TimeoutSec * 1000
+    $req.ReadWriteTimeout = $TimeoutSec * 1000
+    $req.AllowAutoRedirect = $false
+    $req.ServicePoint.Expect100Continue = $false
+    $req.ContentLength = $BodyBytes.Length
+    foreach ($hk in $Headers.Keys) {
+        $req.Headers[$hk] = [string]$Headers[$hk]
+    }
+
+    try {
+        $reqStream = $req.GetRequestStream()
+        try {
+            $reqStream.Write($BodyBytes, 0, $BodyBytes.Length)
+        } finally {
+            $reqStream.Close()
+        }
+        $resp = [System.Net.HttpWebResponse]$req.GetResponse()
+        try {
+            $sr = New-Object System.IO.StreamReader($resp.GetResponseStream(), [System.Text.Encoding]::UTF8)
+            $body = $sr.ReadToEnd()
+            $sr.Close()
+            return [pscustomobject]@{
+                StatusCode     = [int]$resp.StatusCode
+                Body           = $body
+                RetryAfter     = $null
+                TransportError = $null
+            }
+        } finally {
+            $resp.Close()
+        }
+    } catch [System.Net.WebException] {
+        $wex = $_.Exception
+        $errResp = $wex.Response
+        if ($null -ne $errResp) {
+            $httpResp = [System.Net.HttpWebResponse]$errResp
+            $retrySec = $null
+            $raVal = $httpResp.Headers['Retry-After']
+            $parsedRa = 0
+            if ($raVal -and [int]::TryParse($raVal.Trim(), [ref]$parsedRa)) {
+                $retrySec = $parsedRa
+            }
+            $sr = New-Object System.IO.StreamReader($httpResp.GetResponseStream(), [System.Text.Encoding]::UTF8)
+            $errBody = $sr.ReadToEnd()
+            $sr.Close()
+            $code = [int]$httpResp.StatusCode
+            $httpResp.Close()
+            return [pscustomobject]@{
+                StatusCode     = $code
+                Body           = $errBody
+                RetryAfter     = $retrySec
+                TransportError = $null
+            }
+        }
+        return [pscustomobject]@{
+            StatusCode     = 0
+            Body           = ''
+            RetryAfter     = $null
+            TransportError = $wex.Message
+        }
+    }
+}
+
+function Send-Report {
+    param(
+        [Parameter(Mandatory = $true)]$Report,
+        [Parameter(Mandatory = $false)][string]$Endpoint = $script:DefaultEndpoint,
+        [Parameter(Mandatory = $false)][string]$KeyId = $script:SigningKeyId,
+        [Parameter(Mandatory = $false)][string]$Key = $script:SigningKey,
+        [Parameter(Mandatory = $false)][string]$AllowedHost = $script:AllowedEndpointHost,
+        [Parameter(Mandatory = $false)][int]$TimeoutSec = 15,
+        [Parameter(Mandatory = $false)][AllowNull()][string]$ReportDir = $null,
+        [Parameter(Mandatory = $false)][long]$NowUnix = 0,
+        [Parameter(Mandatory = $false)][switch]$AllowLoopbackHttp,
+        [Parameter(Mandatory = $false)][AllowNull()][string]$ExistingPendingPath = $null
+    )
+
+    $parsedUri = $null
+    if (-not [Uri]::TryCreate($Endpoint, [UriKind]::Absolute, [ref]$parsedUri)) {
+        return [pscustomobject]@{ Status = 'rejected'; IssueUrl = $null; Error = 'URL endpoint không hợp lệ.'; RetryAfter = $null }
+    }
+    if ($AllowLoopbackHttp) {
+        if ($parsedUri.Scheme -notin @('http', 'https') -or $parsedUri.Host -notin @('127.0.0.1', '::1')) {
+            return [pscustomobject]@{ Status = 'rejected'; IssueUrl = $null; Error = 'Loopback test chỉ cho phép 127.0.0.1.'; RetryAfter = $null }
+        }
+    } else {
+        if ($parsedUri.Scheme -ne 'https' -or -not $parsedUri.Host.Equals($AllowedHost, [StringComparison]::OrdinalIgnoreCase)) {
+            return [pscustomobject]@{ Status = 'rejected'; IssueUrl = $null; Error = 'Endpoint phải dùng HTTPS và đúng hostname cố định.'; RetryAfter = $null }
+        }
+    }
+
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $pendingPath = $ExistingPendingPath
+    $bodyText = $null
+
+    if ($Report -is [string]) {
+        $bodyText = $Report
+    } else {
+        if (-not [string]::IsNullOrWhiteSpace($ReportDir)) {
+            $saved = Save-LocalReport -Report $Report -Dir $ReportDir
+            $bodyText = $saved.JsonText
+            if ([string]::IsNullOrWhiteSpace($pendingPath)) {
+                $pendingPath = Join-Path -Path $ReportDir -ChildPath "$($saved.BaseName).pending.json"
+                [System.IO.File]::WriteAllText($pendingPath, $bodyText, $utf8NoBom)
+            }
+        } else {
+            $bodyText = $Report | ConvertTo-Json -Depth 12
+        }
+    }
+
+    if ($Endpoint -match 'REPLACE_WITH_' -or $Key -match 'REPLACE_WITH_') {
+        return [pscustomobject]@{
+            Status     = 'offline'
+            IssueUrl   = $null
+            Error      = 'Endpoint hoặc khóa ký chưa được cấu hình (xem Task 6 trong Plan.MD).'
+            RetryAfter = $null
+        }
+    }
+
+    $bodyBytes = $utf8NoBom.GetBytes($bodyText)
+    $ts = if ($NowUnix -gt 0) { $NowUnix } else { [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
+
+    for ($attempt = 0; $attempt -lt 2; $attempt += 1) {
+        $sigHeaders = New-RequestSignature -BodyBytes $bodyBytes -KeyId $KeyId -Key $Key -Timestamp $ts
+        $httpRes = Invoke-HttpPostBytes -Url $Endpoint -BodyBytes $bodyBytes -Headers $sigHeaders -TimeoutSec $TimeoutSec
+
+        if ($httpRes.StatusCode -eq 0) {
+            return [pscustomobject]@{ Status = 'offline'; IssueUrl = $null; Error = $httpRes.TransportError; RetryAfter = $null }
+        }
+
+        $parsedBody = $null
+        if (-not [string]::IsNullOrWhiteSpace($httpRes.Body)) {
+            try { $parsedBody = $httpRes.Body | ConvertFrom-Json } catch {}
+        }
+
+        if ($httpRes.StatusCode -in @(200, 201)) {
+            $issueUrl = if ($parsedBody -and $parsedBody.issue_url) { [string]$parsedBody.issue_url } else { $null }
+            if ([string]::IsNullOrWhiteSpace($issueUrl)) {
+                return [pscustomobject]@{ Status = 'retry_later'; IssueUrl = $null; Error = 'Máy chủ không trả về issue_url hợp lệ.'; RetryAfter = $null }
+            }
+            if ($pendingPath -and (Test-Path -LiteralPath $pendingPath)) {
+                Remove-Item -LiteralPath $pendingPath -Force -ErrorAction SilentlyContinue
+            }
+            $st = if ($httpRes.StatusCode -eq 201) { 'sent' } else { 'duplicate' }
+            return [pscustomobject]@{ Status = $st; IssueUrl = $issueUrl; Error = $null; RetryAfter = $null }
+        }
+
+        if ($httpRes.StatusCode -eq 401) {
+            $reason = if ($parsedBody -and $parsedBody.reason) { [string]$parsedBody.reason } else { 'unauthorized' }
+            if ($attempt -eq 0 -and $reason -eq 'clock_skew' -and $parsedBody -and $null -ne $parsedBody.server_time) {
+                $ts = [long]$parsedBody.server_time
+                continue
+            }
+            return [pscustomobject]@{ Status = 'rejected'; IssueUrl = $null; Error = "Xác thực thất bại (401: $reason)."; RetryAfter = $null }
+        }
+
+        if ($httpRes.StatusCode -in @(400, 409, 413, 415, 422)) {
+            return [pscustomobject]@{ Status = 'rejected'; IssueUrl = $null; Error = "Báo cáo bị từ chối ($($httpRes.StatusCode)): $($httpRes.Body)"; RetryAfter = $null }
+        }
+
+        if ($httpRes.StatusCode -eq 429) {
+            return [pscustomobject]@{ Status = 'retry_later'; IssueUrl = $null; Error = 'Giới hạn tần suất (429). Vui lòng thử lại sau.'; RetryAfter = $httpRes.RetryAfter }
+        }
+
+        return [pscustomobject]@{ Status = 'retry_later'; IssueUrl = $null; Error = "Máy chủ lỗi hoặc bảo trì ($($httpRes.StatusCode))."; RetryAfter = $httpRes.RetryAfter }
+    }
+
+    return [pscustomobject]@{ Status = 'rejected'; IssueUrl = $null; Error = 'Không thể xác thực sau khi đồng bộ giờ.'; RetryAfter = $null }
+}
+
+function Open-FallbackForm {
+    param([Parameter(Mandatory = $true)]$Report)
+    $jsonText = if ($Report -is [string]) { $Report } else { $Report | ConvertTo-Json -Depth 12 }
+    try {
+        Set-Clipboard -Value $jsonText -ErrorAction Stop
+        Write-Host 'Đã chép nội dung JSON báo cáo vào clipboard.'
+    } catch {
+        Write-Host 'Không chép được tự động vào clipboard; vui lòng sao chép từ tệp JSON cục bộ.'
+    }
+    try {
+        Start-Process -FilePath $script:FallbackIssueUrl | Out-Null
+    } catch {
+        Write-Host "Vui lòng mở liên kết sau trên trình duyệt: $($script:FallbackIssueUrl)"
     }
 }
 
@@ -784,6 +1028,27 @@ function Start-CollectorInteractive {
     Write-Host 'Chinh sach du lieu: Issue GitHub la CONG KHAI. Khong thu thap'
     Write-Host 'ten nguoi dung, ten may, duong dan ca nhan, IP/MAC, serial, UUID GPU.'
     Write-Host ''
+
+    $outDir = if (-not [string]::IsNullOrWhiteSpace($env:VGA_BAT_DIR)) { Join-Path $env:VGA_BAT_DIR 'vga-reports-out' } else { Join-Path (Get-Location).Path 'vga-reports-out' }
+    if (Test-Path -LiteralPath $outDir) {
+        $pendingFiles = @(Get-ChildItem -LiteralPath $outDir -Filter '*.pending.json' -File -ErrorAction SilentlyContinue)
+        if ($pendingFiles.Count -gt 0) {
+            Write-Host "[PHAT HIEN] Co $($pendingFiles.Count) bao cao dang cho gui lai trong: $outDir"
+            $resendChoice = Read-Host 'Ban co muon thu gui lai cac bao cao nay truoc khong? (C/K, mac dinh K)'
+            if ($resendChoice -match '^(c|co|y|yes)$') {
+                foreach ($pf in $pendingFiles) {
+                    $rawPending = [System.IO.File]::ReadAllText($pf.FullName, [System.Text.Encoding]::UTF8)
+                    $resendRes = Send-Report -Report $rawPending -ExistingPendingPath $pf.FullName
+                    if ($resendRes.Status -in @('sent', 'duplicate') -and -not [string]::IsNullOrWhiteSpace($resendRes.IssueUrl)) {
+                        Write-Host "  [OK] Da gui ($($resendRes.Status)): $($resendRes.IssueUrl)"
+                    } else {
+                        Write-Host "  [CHUA GUI] $($pf.Name): $($resendRes.Status) - $($resendRes.Error)"
+                    }
+                }
+            }
+            Write-Host ''
+        }
+    }
 
     Write-Host 'Dang quet thiet bi VGA va nvidia-smi...'
     $inventory = @(Get-VgaInventory)
@@ -843,9 +1108,21 @@ function Start-CollectorInteractive {
         Write-Host "  JSON: $($saved.JsonPath)"
         Write-Host "  ZIP : $($saved.ZipPath)"
     } elseif ($action -eq '2') {
-        $saved = Save-LocalReport -Report $report -Dir $outDir
-        Write-Host "Chua cau hinh endpoint gui tu dong trong phien ban co ban nay."
-        Write-Host "Bao cao da duoc luu an toan tai: $($saved.ZipPath)"
+        $sendRes = Send-Report -Report $report -ReportDir $outDir
+        if ($sendRes.Status -in @('sent', 'duplicate') -and -not [string]::IsNullOrWhiteSpace($sendRes.IssueUrl)) {
+            $label = if ($sendRes.Status -eq 'duplicate') { 'Bao cao da ton tai (trung lap)' } else { 'Da gui bao cao thanh cong' }
+            Write-Host "${label}: $($sendRes.IssueUrl)"
+        } else {
+            Write-Host "[CHUA GUI DUOC] Trang thai: $($sendRes.Status)"
+            if ($sendRes.Error) { Write-Host "  Chi tiet: $($sendRes.Error)" }
+            Write-Host "  Bao cao va tep .pending.json van duoc giu an toan trong: $outDir"
+            if ($sendRes.Status -in @('offline', 'retry_later')) {
+                $fb = Read-Host 'Ban co muon mo Issue Form du phong tren trinh duyet (chep JSON vao clipboard)? (C/K)'
+                if ($fb -match '^(c|co|y|yes)$') {
+                    Open-FallbackForm -Report $report
+                }
+            }
+        }
     } else {
         Write-Host 'Da thoat theo yeu cau.'
     }
