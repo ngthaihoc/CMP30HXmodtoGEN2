@@ -72,21 +72,30 @@ Tập tin schema gốc tại `docs/vga-report/schema.json` hỗ trợ song song 
   - `previous_report_id`: Chuỗi UUID liên kết báo cáo trước đó để tạo chuỗi lịch sử thử nghiệm (đọc tự động từ `last_report_id.txt`).
   - `target_bdf`: BDF của GPU được người dùng chọn làm đối tượng nghiên cứu chính (tránh nhầm lẫn trên máy chạy nhiều GPU).
   - `collection_started_utc` & `collection_finished_utc`: Khung thời gian thu thập chuẩn UTC.
-  - `source_timestamps`: Thời điểm lấy dữ liệu của từng nguồn riêng biệt (`cim_pnp`, `nvidia_smi`, `nvidia_query`, `security`, `legacy_status`) để giải thích hiện tượng lệch tốc độ PCIe giữa idle và load.
+  - `source_timestamps`: Thời điểm lấy dữ liệu của từng nguồn riêng biệt (`pnp_utc`, `cim_utc`, `nvidia_smi_utc`, `security_utc`) để giải thích hiện tượng lệch tốc độ PCIe giữa các thời điểm đọc.
   - `evidence_level`: Mức độ tin cậy của bằng chứng (`reported`, `observed`, `compared`, `owner_verified`).
-  - `security`: Trạng thái `boot_mode` (`uefi`/`legacy`), `secure_boot`, `hvci_running`, `test_signing`.
-  - `completeness`: Đánh giá 7 nhóm dữ liệu (`inventory`, `topology`, `link_idle`, `link_load`, `compute`, `stability`, `comparison`) với danh sách thiếu sót và lý do chuẩn hóa (`unsupported`, `permission_denied`, `skipped`, `timeout`, `error`).
-  - `legacy_status`: Cho phép đọc an toàn log cũ của dự án (`gen2_status.txt`, `cmp30hx_batch_status.txt`) qua allowlist không chứa PII.
-  - `context.mod_type`: Loại can thiệp modding (`none_baseline`, `driver_mod`, `firmware_vbios`, `hardware_strap`, `pcie_riser_slot`, `power_mod`, `other`).
+  - `security`: Trạng thái `boot_mode` (`UEFI`/`Legacy`...), `secure_boot`, `hvci_running`, `test_signing`.
+  - `completeness`: Đánh giá 7 nhóm dữ liệu (`inventory`, `topology`, `link_idle`, `link_load`, `compute`, `stability`, `comparison`) với danh sách thiếu sót và trạng thái (`ok`, `partial`, `skipped`, `unsupported`, `error`).
+  - `legacy_status`: Cho phép đọc an toàn log cũ của dự án (`gen2_status.txt`, `cmp30hx_batch_status.txt`) qua allowlist không chứa PII (`present`, `source`, `status_code`, `error_code`, `speed_current`, `width_current`, `tls_target`, `device_id`, `mrrs_bytes`, `observed_utc`).
+  - `context.mod_type`: Loại can thiệp modding (`none`, `driver`, `efi`, `vbios`, `strap`, `software_aio`, `multi`, `unknown`).
+  - `gpus[].profile`: Hồ sơ nhận diện từng GPU (`id`, `name`, `family`, `category`, `target_pcie_gen`, `tensor_applicable`, `identity_note`).
   - `gpus[].driver`: Bổ sung `provider`, `date`, `inf_name` (chỉ giữ tên file, loại bỏ toàn bộ đường dẫn), `service`, `problem_code`, `location_path`.
-  - `gpus[].nvidia.extended`: 18 trường telemetry công suất, nhiệt độ, quạt, bộ nhớ, ECC và lý do điều tiết xung nhịp:
-    - `power.management.limit`, `enforced.power.limit`, `power.default_limit`, `power.min_limit`, `power.max_limit`
+  - `nvidia.extended` (và tùy chọn `gpus[].nvidia.extended`): 18 trường telemetry công suất, nhiệt độ, tải, bộ nhớ, ECC và lý do điều tiết xung nhịp:
+    - `power.limit`, `enforced.power.limit`, `power.default_limit`, `power.min_limit`, `power.max_limit`
     - `temperature.gpu.tlimit`, `temperature.memory`
     - `fan.speed`
-    - `utilization.memory`
+    - `utilization.gpu`, `utilization.memory`
     - `memory.used`, `memory.free`
-    - `ecc.mode.current`, `ecc.mode.pending`, `ecc.errors.corrected.volatile.total`, `ecc.errors.uncorrected.volatile.total`
-    - `clocks_event_reasons.active`, `clocks_event_reasons.sw_power_cap`, `clocks_event_reasons.hw_slowdown` (tương thích cả driver cũ dùng `clocks_throttle_reasons.*`).
+    - `ecc.mode.current`
+    - `clocks_throttle_reasons.active`, `clocks_throttle_reasons.sw_power_cap`, `clocks_throttle_reasons.hw_slowdown`, `clocks_throttle_reasons.hw_thermal_slowdown`, `clocks_throttle_reasons.hw_power_brake_slowdown` (collector tự ánh xạ fallback từ `clocks_event_reasons.*` sang tên khóa chuẩn này).
+
+### 2.2. Cấu trúc GitHub Issue Chuẩn hóa (Sau P1 Issue Enhancement)
+
+Mỗi GitHub Issue được tạo bởi `renderSummary()` (qua Worker) và bản tóm tắt cục bộ `Format-VietnameseSummary` hiển thị đầy đủ dữ liệu v1/v2 theo 4 lớp tách biệt của `modding-data-plan.md` §4:
+1. **Siêu dữ liệu & Định danh:** `report_id`, `experiment_id`, `previous_report_id` (hoặc đánh dấu báo cáo đầu tiên), cửa sổ đo `collection_started_utc` → `collection_finished_utc`, mốc thời gian theo nguồn và thông tin đầy đủ GPU mục tiêu (`family`, `category`, `target_pcie_gen`, `tensor_applicable`, `identity_note`).
+2. **Tóm tắt 4 lớp kết luận tách biệt:** (1) Nhận diện (Identity), (2) Cấu hình & Môi trường (Config & Context), (3) Trạng thái đo đa nguồn (Measurement), (4) Workload & Bằng chứng (Evidence). Giữ nguyên mâu thuẫn nguồn kèm cảnh báo, không tự suy diễn vượt quá phép đo.
+3. **Chi tiết từng phần:** Nền tảng hệ thống, Bảo mật & Boot, Ngữ cảnh thu thập (kèm lưu ý tái lập nếu còn `unknown`), Danh sách GPU mở rộng (có PCIe PnP, kiến trúc/loại, mục tiêu Gen/Tensor của từng card), Đối chiếu PCIe PnP vs `nvidia-smi`, 18 trường `nvidia-smi` cơ bản + tóm tắt nhanh & 18 trường mở rộng (`M/18` + `extended_missing`), trạng thái `legacy_status` (kể cả khi `present=false`), bảng `completeness` 7 nhóm.
+4. **Mẫu bổ sung hồ sơ phần cứng & thử nghiệm (Mục 7 & 9):** Khối `<details>` ở cuối Issue và trường tùy chọn `hardware_context` trong `.github/ISSUE_TEMPLATE/vga-report.yml` để chủ card bổ sung thông tin vật lý (PSU, Riser, PCB/VRAM, gói mod/SHA-256, kết quả sau reboot/sleep-wake/rollback).
 
 ---
 
@@ -107,7 +116,7 @@ Tập tin schema gốc tại `docs/vga-report/schema.json` hỗ trợ song song 
 
 ### Giai đoạn P1 — Schema v2 và Collector cơ bản mở rộng
 1. **Xây dựng Schema & Fixture Dual-version:**
-   - `docs/vga-report/schema.json` hỗ trợ song song v1 và v2 thông qua `oneOf` có điều kiện.
+   - `docs/vga-report/schema.json` hỗ trợ song song v1 và v2 thông qua `allOf` + `if/then` có điều kiện.
    - Xuất khẩu các helper trong `scripts/vga-report/report.cjs`: `identifyGpuProfile`, `getGpuProfileDetails`, `NVIDIA_EXTENDED_FIELDS`.
    - Bổ sung hồ sơ nhận diện cho: `P106-100` (`10DE:1C07`), `P106-090` (`10DE:1C09`), `Tesla P100 PCIe 16GB` (`10DE:15F8`), `Tesla P100 PCIe 12GB` (`10DE:15F7`), `Tesla P100 SXM2` (`10DE:15F9`), kèm cảnh báo khi tên card chứa "P100" nhưng PCI ID không thuộc kiến trúc GP100.
 2. **Nâng cấp `Collect_VGA_Report.bat` lên v1.1.0:**
@@ -142,8 +151,8 @@ Tất cả các bộ kiểm thử cục bộ và đầu cuối đều đạt 100
 
 | Bộ kiểm tra | Lệnh thực thi | Kết quả | Ghi chú |
 | :--- | :--- | :---: | :--- |
-| **Shared Validator & Worker Unit Tests** | `node --test scripts/vga-report/report.test.cjs worker/vga-reports/test/worker.test.cjs` | **54/54 PASS** | Kiểm tra validator, allowlist, PII, schema v1/v2, chữ ký HMAC, rate limit |
-| **Collector PowerShell Test Suite** | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-VGA-Collector.ps1` | **39/39 PASS** | Kiểm tra mock CIM, PnP, NVIDIA-SMI, format, security, v2 structure |
+| **Shared Validator & Worker Unit Tests** | `node --test scripts/vga-report/report.test.cjs worker/vga-reports/test/worker.test.cjs` | **55/55 PASS** | Kiểm tra validator, allowlist, PII, schema v1/v2, cấu trúc Issue 4 lớp, chữ ký HMAC, rate limit |
+| **Collector PowerShell Test Suite** | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-VGA-Collector.ps1` | **39/39 PASS** | Kiểm tra mock CIM, PnP, NVIDIA-SMI, format tóm tắt mở rộng, security, v2 structure |
 | **Real CMD Smoke Test** | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-VGA-Collector-Batch.ps1` | **4/4 PASS** | Chạy BAT thật trong cmd.exe với đường dẫn có dấu, ký tự đặc biệt |
 | **Telemetry Test** | `node --test windows-v3.0/tools/aio/tests/telemetry.test.cjs` | **1/1 PASS** | Đảm bảo không xung đột với telemetry hiện hữu |
 | **Git Diff Format Check** | `git diff --check` | **0 errors** | Đảm bảo không có lỗi trailing whitespace hoặc định dạng CRLF |
@@ -155,8 +164,9 @@ Tất cả các bộ kiểm thử cục bộ và đầu cuối đều đạt 100
 ### 5.1. Bản đồ File thay đổi
 - `Collect_VGA_Report.bat`: Script giao diện dòng lệnh chính thu thập thông tin trên Windows.
 - `docs/vga-report/schema.json`: JSON schema hợp nhất cho cả v1 và v2.
-- `scripts/vga-report/report.cjs`: Module kiểm định dữ liệu, làm sạch PII, nhận diện hồ sơ GPU và render Markdown summary.
+- `scripts/vga-report/report.cjs`: Module kiểm định dữ liệu, làm sạch PII, nhận diện hồ sơ GPU và render Markdown summary 4 lớp.
 - `scripts/vga-report/report.test.cjs`: Bộ test cho validator và renderer.
+- `.github/ISSUE_TEMPLATE/vga-report.yml`: Biểu mẫu Issue dự phòng kèm phần khai báo hồ sơ phần cứng & thử nghiệm bổ sung.
 - `worker/vga-reports/src/index.js`: Mã nguồn Cloudflare Worker intake tiếp nhận báo cáo và đẩy lên GitHub Issues.
 - `worker/vga-reports/test/worker.test.cjs`: Bộ test chuyên sâu cho Worker intake.
 - `worker/vga-reports/wrangler.toml`: Cấu hình Cloudflare Worker, KV binding và biến môi trường.

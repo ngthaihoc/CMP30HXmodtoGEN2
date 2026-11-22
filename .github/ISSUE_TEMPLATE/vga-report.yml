@@ -24,6 +24,21 @@ body:
       render: json
     validations:
       required: true
+  - type: textarea
+    id: hardware_context
+    attributes:
+      label: "Hồ sơ phần cứng & thử nghiệm bổ sung (tùy chọn — theo modding-data-plan §7 & §9)"
+      description: Cung cấp thêm thông tin vật lý mà phần mềm không tự đọc được để hỗ trợ tái lập và đối chứng. Không ghi serial, đường dẫn cá nhân hoặc thông tin riêng tư.
+      placeholder: |
+        - Card/SKU thực tế & PCB revision / mã chip VRAM (che serial nếu đính kèm ảnh):
+        - Khe trên mainboard & Riser (cắm trực tiếp / model + chiều dài riser):
+        - PSU & cách cấp nguồn phụ cho card (1 dây / 2 dây riêng, đầu 6/8-pin):
+        - Can thiệp đã thử (strap / flash VBIOS / EFI / mod driver) & phiên bản hoặc SHA-256:
+        - Mục tiêu thử nghiệm (TDP / PCIe Gen Speed / ReBAR / CUDA / Tensor / VRAM / ổn định):
+        - Giả thuyết về nguồn giới hạn & dữ liệu còn thiếu cần đo thêm:
+        - Kết quả sau thay đổi / sau reboot / sau sleep-wake / sau khôi phục (rollback):
+    validations:
+      required: false
   - type: checkboxes
     id: consent
     attributes:

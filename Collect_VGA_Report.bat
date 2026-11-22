@@ -1517,10 +1517,16 @@ function Format-VietnameseSummary {
     $sb = New-Object System.Text.StringBuilder
     [void]$sb.AppendLine('=== TÓM TẮT BÁO CÁO CHẨN ĐOÁN VGA ===')
     [void]$sb.AppendLine("Mã báo cáo   : $($Report.report_id)")
+    [void]$sb.AppendLine("Mã thử nghiệm: $($Report.experiment_id)")
     if ($Report.previous_report_id) {
         [void]$sb.AppendLine("Báo cáo trước: $($Report.previous_report_id)")
+    } elseif ($Report.schema_version -eq 2) {
+        [void]$sb.AppendLine('Báo cáo trước: null (báo cáo đầu tiên trong chuỗi thử nghiệm)')
     }
     [void]$sb.AppendLine("Thời gian UTC: $($Report.created_utc)")
+    if ($Report.collection_started_utc -or $Report.collection_finished_utc) {
+        [void]$sb.AppendLine("Cửa sổ đo UTC: $($Report.collection_started_utc) -> $($Report.collection_finished_utc)")
+    }
     [void]$sb.AppendLine("Phiên bản    : $($Report.collector_version) (schema v$($Report.schema_version))")
     if ($Report.evidence_level) {
         [void]$sb.AppendLine("Mức bằng chứng: $($Report.evidence_level)")
@@ -1537,9 +1543,13 @@ function Format-VietnameseSummary {
         $tName = if ($targetGpu.name.status -eq 'ok') { $targetGpu.name.value } else { $targetGpu.name.status }
         $tVid = if ($targetGpu.vendor_id.status -eq 'ok') { [string]$targetGpu.vendor_id.value } else { $null }
         $tDid = if ($targetGpu.device_id.status -eq 'ok') { [string]$targetGpu.device_id.value } else { $null }
-        $tProf = Get-GpuProfileName -VendorId $tVid -DeviceId $tDid
-        $tProfText = if ($tProf) { $tProf } else { 'chưa nhận diện' }
-        [void]$sb.AppendLine("GPU mục tiêu : [$tBdf] $tName — hồ sơ: $tProfText")
+        $tProfDetails = if ($targetGpu.profile) { $targetGpu.profile } else { Get-GpuProfileDetails -VendorId $tVid -DeviceId $tDid -Name $tName }
+        $tProfText = if ($tProfDetails.name) { $tProfDetails.name } else { 'chưa nhận diện' }
+        $tFam = if ($tProfDetails.family) { $tProfDetails.family } else { 'unknown' }
+        $tCat = if ($tProfDetails.category) { $tProfDetails.category } else { 'unknown' }
+        $tTargetGen = if ($tProfDetails.target_pcie_gen) { "Gen$($tProfDetails.target_pcie_gen)" } else { 'chưa đặt' }
+        $tTensor = if ($tProfDetails.tensor_applicable) { $tProfDetails.tensor_applicable } else { 'unknown' }
+        [void]$sb.AppendLine("GPU mục tiêu : [$tBdf] $tName — hồ sơ: $tProfText (family=$tFam, category=$tCat, target_pcie_gen=$tTargetGen, tensor_applicable=$tTensor)")
     } else {
         [void]$sb.AppendLine('GPU mục tiêu : chưa xác định')
     }
@@ -1559,13 +1569,20 @@ function Format-VietnameseSummary {
         $vid = if ($vidRaw) { $vidRaw } else { '?' }
         $did = if ($didRaw) { $didRaw } else { '?' }
         $drv = if ($g.driver_version.status -eq 'ok') { $g.driver_version.value } else { $g.driver_version.status }
-        $profDetails = Get-GpuProfileDetails -VendorId $vidRaw -DeviceId $didRaw -Name $name
+        $profDetails = if ($g.profile) { $g.profile } else { Get-GpuProfileDetails -VendorId $vidRaw -DeviceId $didRaw -Name $name }
         $profText = if ($profDetails.name) { $profDetails.name } else { 'chưa nhận diện' }
+        $gFam = if ($profDetails.family) { $profDetails.family } else { 'unknown' }
+        $gCat = if ($profDetails.category) { $profDetails.category } else { 'unknown' }
+        $gTargetGen = if ($profDetails.target_pcie_gen) { "Gen$($profDetails.target_pcie_gen)" } else { 'chưa đặt' }
+        $gTensor = if ($profDetails.tensor_applicable) { $profDetails.tensor_applicable } else { 'unknown' }
+        $gPcieTag = if ($g.pcie) {
+            " | PCIe(PnP): $(Format-PcieLink -GenField (Get-ObjProp $g.pcie 'current_gen') -WidthField (Get-ObjProp $g.pcie 'current_width')) / max $(Format-PcieLink -GenField (Get-ObjProp $g.pcie 'max_gen') -WidthField (Get-ObjProp $g.pcie 'max_width'))"
+        } else { '' }
         $gNormBdf = if ($g.bdf -and $g.bdf.status -eq 'ok') { Normalize-Bdf -BusId ([string]$g.bdf.value) } else { $null }
         $targetTag = if ($targetNormBdf -and $gNormBdf -eq $targetNormBdf) { ' (mục tiêu)' } else { '' }
         $infTag = if ($g.driver -and $g.driver.inf_name -and $g.driver.inf_name.status -eq 'ok') { " | INF: $($g.driver.inf_name.value)" } else { '' }
         $probTag = if ($g.driver -and $g.driver.problem_code -and $g.driver.problem_code.status -eq 'ok') { " | ProblemCode: $($g.driver.problem_code.value)" } else { '' }
-        [void]$sb.AppendLine("  [$bdf] $name ($vid`:$did) | Hồ sơ: $profText | Driver: $drv$infTag$probTag$targetTag")
+        [void]$sb.AppendLine("  [$bdf] $name ($vid`:$did) | Hồ sơ: $profText [$gFam/$gCat, Target=$gTargetGen, Tensor=$gTensor]$gPcieTag | Driver: $drv$infTag$probTag$targetTag")
         if ($profDetails.identity_note) {
             [void]$sb.AppendLine("    Lưu ý danh tính: $($profDetails.identity_note)")
         }
@@ -1588,6 +1605,11 @@ function Format-VietnameseSummary {
         $curGenField = Get-ObjProp $Report.pcie 'current_gen'
         $pcieSrc = if ($curGenField -and $curGenField.source) { $curGenField.source } else { 'unknown' }
         [void]$sb.AppendLine("Liên kết PCIe ($pcieSrc): tối đa $maxLink | hiện tại $curLink")
+        if ($nvFields) {
+            $nvMaxLink = Format-PcieLink -GenField (Get-ObjProp $nvFields 'pcie.link.gen.max') -WidthField (Get-ObjProp $nvFields 'pcie.link.width.max')
+            $nvCurLink = Format-PcieLink -GenField (Get-ObjProp $nvFields 'pcie.link.gen.gpucurrent') -WidthField (Get-ObjProp $nvFields 'pcie.link.width.current')
+            [void]$sb.AppendLine("Liên kết PCIe (nvidia-smi): tối đa $nvMaxLink | hiện tại $nvCurLink")
+        }
         foreach ($warn in @(Get-PcieSourceWarnings -Report $Report)) {
             [void]$sb.AppendLine($warn)
         }
@@ -1607,6 +1629,12 @@ function Format-VietnameseSummary {
         }
         if ($Report.nvidia.extended) {
             $ext = $Report.nvidia.extended
+            $extOkCount = 0
+            foreach ($ek in $script:NvidiaExtendedFields) {
+                $ef = Get-ObjProp $ext $ek
+                if ($ef -and $ef.status -eq 'ok') { $extOkCount += 1 }
+            }
+            [void]$sb.AppendLine("Trường NVIDIA mở rộng (power/thermal/throttle): $extOkCount/$($script:NvidiaExtendedFields.Count)")
             $enf = Get-ObjProp $ext 'enforced.power.limit'
             $def = Get-ObjProp $ext 'power.default_limit'
             $maxP = Get-ObjProp $ext 'power.max_limit'
@@ -1619,9 +1647,15 @@ function Format-VietnameseSummary {
         }
     }
 
-    if ($Report.legacy_status -and $Report.legacy_status.present) {
+    if ($Report.legacy_status) {
         $leg = $Report.legacy_status
-        [void]$sb.AppendLine("Trạng thái mở khóa cũ ($($leg.source)): $($leg.status_code) (error=$($leg.error_code), Gen$($leg.speed_current) ×$($leg.width_current), TLS=$($leg.tls_target))")
+        if ($leg.present) {
+            $devTxt = if ($leg.device_id) { $leg.device_id } else { 'null' }
+            $mrrsTxt = if ($null -ne $leg.mrrs_bytes) { $leg.mrrs_bytes } else { 'null' }
+            [void]$sb.AppendLine("Trạng thái mở khóa cũ ($($leg.source)): $($leg.status_code) (error=$($leg.error_code), device_id=$devTxt, Gen$($leg.speed_current) ×$($leg.width_current), TLS=$($leg.tls_target), mrrs=$mrrsTxt)")
+        } else {
+            [void]$sb.AppendLine('Trạng thái mở khóa cũ: không phát hiện tệp trạng thái cục bộ (present=false)')
+        }
     }
 
     if ($Report.completeness) {

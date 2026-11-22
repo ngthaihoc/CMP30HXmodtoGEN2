@@ -1364,6 +1364,33 @@ Invoke-TestCase 'p1_v2_report_validates_in_node_and_links_previous_report_id' {
         [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false)))
         $nodeOut = & node -e "const fs=require('fs'), r=require(process.argv[1]), d=JSON.parse(fs.readFileSync(process.argv[2],'utf8')); const v=r.validateReport(d), p=r.findPii(d); if(!v.ok || p.length){ console.log(JSON.stringify({v,p})); process.exit(1); }" $reportCjsPath $tmp
         Assert-Equal $LASTEXITCODE 0 "Node v2 schema validation failed: $nodeOut"
+
+        $sum1 = Format-VietnameseSummary -Report $rep1
+        Assert-True ($sum1.Contains('Mã thử nghiệm:')) 'summary includes experiment_id'
+        Assert-True ($sum1.Contains('báo cáo đầu tiên trong chuỗi thử nghiệm')) 'summary marks first report in chain'
+        Assert-True ($sum1.Contains('Cửa sổ đo UTC:')) 'summary includes collection window'
+        Assert-True ($sum1.Contains('target_pcie_gen=Gen2')) 'summary includes target_pcie_gen'
+        Assert-True ($sum1.Contains('tensor_applicable=unverified')) 'summary includes tensor_applicable'
+        Assert-True ($sum1.Contains('PCIe(PnP):')) 'summary includes per-GPU PnP PCIe'
+        Assert-True ($sum1.Contains('Liên kết PCIe (nvidia-smi):')) 'summary includes nvidia-smi PCIe link'
+        Assert-True ($sum1.Contains('Trường NVIDIA mở rộng (power/thermal/throttle):')) 'summary includes extended field count'
+        Assert-True ($sum1.Contains('present=false')) 'summary explicitly reports absent legacy status'
+
+        $gen2Txt = @"
+STATUS_CODE=GEN2_SUCCESS
+ERROR_CODE=NONE
+SPEED_CURRENT=2
+WIDTH_CURRENT=16
+TLS_TARGET=2
+DEVICE_ID=1F0B
+MRRS_BYTES=512
+OBSERVED_AT=2026-11-22T00:00:00Z
+"@
+        [IO.File]::WriteAllText((Join-Path $expDir 'gen2_status.txt'), $gen2Txt, (New-Object Text.UTF8Encoding($false)))
+        $rep3 = New-Report -Inventory $inv -Nvidia $nv2 -Context $ctx -ExperimentDir $expDir -LegacyStatusDir $expDir
+        $sum3 = Format-VietnameseSummary -Report $rep3
+        Assert-True ($sum3.Contains('device_id=1F0B')) 'summary includes legacy device_id'
+        Assert-True ($sum3.Contains('mrrs=512')) 'summary includes legacy mrrs_bytes'
     } finally {
         Remove-Item -LiteralPath $expDir -Recurse -Force -ErrorAction SilentlyContinue
     }

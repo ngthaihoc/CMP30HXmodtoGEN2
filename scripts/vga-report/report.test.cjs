@@ -628,3 +628,117 @@ test('renderSummary_v2_includes_timestamps_security_extended_power_completeness_
   assert.ok(summary.includes('GEN2_SUCCESS'));
   assert.ok(summary.includes('link_load'));
 });
+
+test('renderSummary_v2_includes_4_layer_summary_experiment_window_profile_details_and_owner_checklist', () => {
+  const cmpProfile = getGpuProfileDetails('10DE', '1F0B');
+  const report = makeValidV2Report({
+    previous_report_id: null,
+    target_bdf: '0000:02:00.0',
+    gpus: [
+      makeGpu({
+        bdf: makeField('0000:00:02.0', 'pnp'),
+        vendor_id: makeField('1002', 'pnp'),
+        device_id: makeField('1638', 'pnp'),
+        name: makeField('AMD Radeon Graphics', 'cim'),
+        pcie: {
+          max_gen: makeField(3, 'pnp', 'gen'),
+          current_gen: makeField(3, 'pnp', 'gen'),
+          max_width: makeField(16, 'pnp', 'lanes'),
+          current_width: makeField(16, 'pnp', 'lanes'),
+        },
+        profile: getGpuProfileDetails('1002', '1638', 'AMD Radeon Graphics'),
+        driver: {
+          provider: makeField('AMD', 'pnp'),
+          date: makeField('2026-09-01', 'pnp'),
+          inf_name: makeField('oem1.inf', 'pnp'),
+          service: makeField('amdkmdag', 'pnp'),
+          problem_code: makeField(0, 'pnp'),
+          location_path: makeField('PCIROOT(0)#PCI(0801)#PCI(0000)', 'pnp'),
+        },
+      }),
+      makeGpu({
+        bdf: makeField('0000:02:00.0', 'pnp'),
+        vendor_id: makeField('10DE', 'pnp'),
+        device_id: makeField('1F0B', 'pnp'),
+        name: makeField('NVIDIA CMP 40HX', 'cim'),
+        pcie: {
+          max_gen: makeField(3, 'pnp', 'gen'),
+          current_gen: makeField(2, 'pnp', 'gen'),
+          max_width: makeField(16, 'pnp', 'lanes'),
+          current_width: makeField(16, 'pnp', 'lanes'),
+        },
+        profile: cmpProfile,
+        driver: {
+          provider: makeField('NVIDIA', 'pnp'),
+          date: makeField('2026-10-19', 'pnp'),
+          inf_name: makeField('oem2.inf', 'pnp'),
+          service: makeField('nvlddmkm', 'pnp'),
+          problem_code: makeField(0, 'pnp'),
+          location_path: makeField('PCIROOT(0)#PCI(0101)#PCI(0000)', 'pnp'),
+        },
+      }),
+    ],
+    nvidia: {
+      ...makeNvidiaBlock({
+        overrides: {
+          name: makeField('NVIDIA CMP 40HX', 'nvidia-smi'),
+          'pci.bus_id': makeField('0000:02:00.0', 'nvidia-smi'),
+          'pci.device_id': makeField('0x1F0B10DE', 'nvidia-smi'),
+        },
+      }),
+      ...makeNvidiaExtendedBlock(),
+    },
+  });
+
+  const summary = renderSummary(report);
+  assert.ok(summary.includes(report.experiment_id));
+  assert.ok(summary.includes('báo cáo đầu tiên trong chuỗi thử nghiệm'));
+  assert.ok(summary.includes('2026-11-21T07:00:00Z'));
+  assert.ok(summary.includes('2026-11-21T07:00:03Z'));
+  assert.ok(summary.includes('Tóm tắt 4 lớp kết luận tách biệt'));
+  assert.ok(summary.includes('TU106'));
+  assert.ok(summary.includes('cmp'));
+  assert.ok(summary.includes('Gen2'));
+  assert.ok(summary.includes('unverified'));
+  assert.ok(summary.includes('Gen2 ×16 / Gen3 ×16'));
+  assert.ok(summary.includes('Tối đa (nvidia-smi):'));
+  assert.ok(summary.includes('Hiện tại (nvidia-smi):'));
+  assert.ok(summary.includes('16/18'));
+  assert.ok(summary.includes('temperature.memory'));
+  assert.ok(summary.includes('ecc.mode.current'));
+  assert.ok(summary.includes('Tóm tắt Công suất'));
+  assert.ok(summary.includes('Tóm tắt Xung, Nhiệt & VRAM'));
+  assert.ok(summary.includes('2189'));
+  assert.ok(summary.includes('512'));
+  assert.ok(summary.includes('modding-data-plan §7 & §9'));
+  assert.ok(summary.includes('<details>'));
+  assert.equal(summary.includes('Lưu ý tái lập phép thử'), false);
+  assert.equal(summary.includes('Cảnh báo:'), false);
+
+  const reportNoLegacyAndUnknownCtx = makeValidV2Report({
+    legacy_status: {
+      present: false,
+      source: 'none',
+      status_code: 'NONE',
+      error_code: 'NONE',
+      speed_current: null,
+      width_current: null,
+      tls_target: null,
+      device_id: null,
+      mrrs_bytes: null,
+      observed_utc: null,
+    },
+    context: {
+      mod_state: 'unknown',
+      mod_type: 'unknown',
+      riser: 'unknown',
+      slot: 'unknown',
+      stage: 'baseline',
+      notes: '',
+    },
+  });
+  const summary2 = renderSummary(reportNoLegacyAndUnknownCtx);
+  assert.ok(summary2.includes('present=false'));
+  assert.ok(summary2.includes('Lưu ý tái lập phép thử'));
+  assert.equal(summary2.includes('Cảnh báo:'), false);
+});

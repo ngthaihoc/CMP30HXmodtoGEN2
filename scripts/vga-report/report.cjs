@@ -949,6 +949,7 @@ function renderSummary(report) {
   const gpus = Array.isArray(report.gpus) ? report.gpus.slice(0, MAX_GPUS) : [];
   const nvidia = isPlainObject(report.nvidia) ? report.nvidia : {};
   const nvFields = isPlainObject(nvidia.fields) ? nvidia.fields : {};
+  const nvExt = isPlainObject(nvidia.extended) ? nvidia.extended : null;
   const explicitTargetBdf = typeof report.target_bdf === 'string' ? normalizeBdf(report.target_bdf) : null;
   const nvBusField = nvFields['pci.bus_id'];
   const nvTargetBdf = isPlainObject(nvBusField) && nvBusField.status === 'ok'
@@ -958,31 +959,85 @@ function renderSummary(report) {
   const targetGpu = resolvedTargetBdf
     ? gpus.find((gpu) => isPlainObject(gpu) && isPlainObject(gpu.bdf) && gpu.bdf.status === 'ok' && normalizeBdf(gpu.bdf.value) === resolvedTargetBdf)
     : null;
+  const targetProfileDetails = targetGpu
+    ? (isPlainObject(targetGpu.profile)
+      ? targetGpu.profile
+      : getGpuProfileDetails(
+        isPlainObject(targetGpu.vendor_id) && targetGpu.vendor_id.status === 'ok' ? targetGpu.vendor_id.value : null,
+        isPlainObject(targetGpu.device_id) && targetGpu.device_id.status === 'ok' ? targetGpu.device_id.value : null,
+        isPlainObject(targetGpu.name) && targetGpu.name.status === 'ok' ? targetGpu.name.value : null,
+      ))
+    : null;
+
+  let okCount = 0;
+  for (const key of NVIDIA_REQUIRED_FIELDS) {
+    if (isPlainObject(nvFields[key]) && nvFields[key].status === 'ok') {
+      okCount += 1;
+    }
+  }
+  let extOkCount = 0;
+  if (nvExt) {
+    for (const key of NVIDIA_EXTENDED_FIELDS) {
+      if (isPlainObject(nvExt[key]) && nvExt[key].status === 'ok') {
+        extOkCount += 1;
+      }
+    }
+  }
+
+  const pcie = isPlainObject(report.pcie) ? report.pcie : {};
+  const pcieSource = isPlainObject(pcie.current_gen) && typeof pcie.current_gen.source === 'string'
+    ? escapeMarkdown(pcie.current_gen.source)
+    : 'unknown';
+  const pnpMaxLink = formatPcieLink(pcie.max_gen, pcie.max_width);
+  const pnpCurLink = formatPcieLink(pcie.current_gen, pcie.current_width);
+  const nvMaxLink = formatPcieLink(nvFields['pcie.link.gen.max'], nvFields['pcie.link.width.max']);
+  const nvCurLink = formatPcieLink(nvFields['pcie.link.gen.gpucurrent'], nvFields['pcie.link.width.current']);
+  const pcieWarnings = getPcieSourceWarnings(report);
+  const ctx = isPlainObject(report.context) ? report.context : {};
 
   const lines = [];
   lines.push('## Tóm tắt báo cáo chẩn đoán VGA');
   lines.push('');
   lines.push(`- **Mã báo cáo:** \`${escapeMarkdown(report.report_id)}\``);
+  lines.push(`- **Mã chuỗi thử nghiệm (Experiment ID):** \`${escapeMarkdown(report.experiment_id || 'unknown')}\``);
   if (report.previous_report_id) {
     lines.push(`- **Báo cáo trước:** \`${escapeMarkdown(report.previous_report_id)}\``);
+  } else if (report.schema_version === 2) {
+    lines.push('- **Báo cáo trước:** `null` (báo cáo đầu tiên trong chuỗi thử nghiệm)');
   }
   lines.push(`- **Thời gian (UTC):** \`${escapeMarkdown(report.created_utc)}\``);
+  if (report.collection_started_utc || report.collection_finished_utc) {
+    lines.push(
+      `- **Cửa sổ thu thập (UTC):** \`${escapeMarkdown(report.collection_started_utc || 'null')}\` → \`${escapeMarkdown(report.collection_finished_utc || 'null')}\``,
+    );
+  }
   lines.push(`- **Phiên bản collector:** \`${escapeMarkdown(report.collector_version)}\``);
   lines.push(`- **Schema:** \`v${escapeMarkdown(report.schema_version)}\``);
   if (report.evidence_level) {
     lines.push(`- **Mức bằng chứng:** \`${escapeMarkdown(report.evidence_level)}\``);
   }
   if (targetGpu) {
-    const tNameRaw = isPlainObject(targetGpu.name) && targetGpu.name.status === 'ok' ? targetGpu.name.value : null;
-    const tProfile = (isPlainObject(targetGpu.profile) && targetGpu.profile.name)
-      ? targetGpu.profile.name
-      : identifyGpuProfile(
-        isPlainObject(targetGpu.vendor_id) && targetGpu.vendor_id.status === 'ok' ? targetGpu.vendor_id.value : null,
-        isPlainObject(targetGpu.device_id) && targetGpu.device_id.status === 'ok' ? targetGpu.device_id.value : null,
-        tNameRaw,
-      );
-    const tProfileText = tProfile ? escapeMarkdown(tProfile) : 'chưa nhận diện';
-    lines.push(`- **GPU mục tiêu:** \`${formatField(targetGpu.bdf)}\` ${formatField(targetGpu.name)} — hồ sơ: ${tProfileText}`);
+    const tProfileText = targetProfileDetails && targetProfileDetails.name
+      ? escapeMarkdown(targetProfileDetails.name)
+      : 'chưa nhận diện';
+    const tFamilyText = targetProfileDetails && targetProfileDetails.family
+      ? escapeMarkdown(targetProfileDetails.family)
+      : 'unknown';
+    const tCatText = targetProfileDetails && targetProfileDetails.category
+      ? escapeMarkdown(targetProfileDetails.category)
+      : 'unknown';
+    const tGenText = targetProfileDetails && targetProfileDetails.target_pcie_gen
+      ? `Gen${escapeMarkdown(targetProfileDetails.target_pcie_gen)}`
+      : 'chưa đặt';
+    const tTensorText = targetProfileDetails && targetProfileDetails.tensor_applicable
+      ? escapeMarkdown(targetProfileDetails.tensor_applicable)
+      : 'unknown';
+    lines.push(
+      `- **GPU mục tiêu:** \`${formatField(targetGpu.bdf)}\` ${formatField(targetGpu.name)} — hồ sơ: ${tProfileText} (kiến trúc: ${tFamilyText}, phân loại: ${tCatText}, mục tiêu PCIe: ${tGenText}, Tensor: ${tTensorText})`,
+    );
+    if (targetProfileDetails && targetProfileDetails.identity_note) {
+      lines.push(`- **Lưu ý danh tính GPU mục tiêu:** ${escapeMarkdown(targetProfileDetails.identity_note)}`);
+    }
   } else {
     lines.push('- **GPU mục tiêu:** chưa xác định');
   }
@@ -990,6 +1045,51 @@ function renderSummary(report) {
     const tsParts = SOURCE_TIMESTAMP_KEYS.map((k) => `${k}=\`${escapeMarkdown(report.source_timestamps[k] || 'null')}\``);
     lines.push(`- **Thời điểm thu thập theo nguồn:** ${tsParts.join(', ')}`);
   }
+  lines.push('');
+
+  lines.push('### Tóm tắt 4 lớp kết luận tách biệt (Nhận diện / Cấu hình / Phép đo / Bằng chứng)');
+  lines.push('');
+  lines.push('| Lớp phân tích | Dữ liệu quan sát được |');
+  lines.push('| --- | --- |');
+  const layer1Text = targetGpu
+    ? `${formatField(targetGpu.name)} (\`${formatField(targetGpu.vendor_id)}:${formatField(targetGpu.device_id)}\`, Subsys \`${formatField(targetGpu.subsystem_id)}\`, Rev \`${formatField(targetGpu.revision)}\`) | Hồ sơ: ${targetProfileDetails && targetProfileDetails.name ? escapeMarkdown(targetProfileDetails.name) : 'chưa nhận diện'} | Kiến trúc: ${targetProfileDetails && targetProfileDetails.family ? escapeMarkdown(targetProfileDetails.family) : 'unknown'} | Loại: ${targetProfileDetails && targetProfileDetails.category ? escapeMarkdown(targetProfileDetails.category) : 'unknown'} | Mục tiêu: ${targetProfileDetails && targetProfileDetails.target_pcie_gen ? `Gen${escapeMarkdown(targetProfileDetails.target_pcie_gen)}` : 'chưa đặt'} | Tensor: ${targetProfileDetails && targetProfileDetails.tensor_applicable ? escapeMarkdown(targetProfileDetails.tensor_applicable) : 'unknown'}`
+    : 'Chưa xác định GPU mục tiêu';
+  const secSummary = isPlainObject(report.security)
+    ? `Boot=${formatField(report.security.boot_mode)}, SecureBoot=${formatField(report.security.secure_boot)}, HVCI=${formatField(report.security.hvci_running)}, TestSigning=${formatField(report.security.test_signing)}`
+    : 'Chưa thu thập (v1)';
+  const drvSummary = targetGpu
+    ? `Driver=${formatField(targetGpu.driver_version)}, PnP=${formatField(targetGpu.pnp_status)}, Code=${isPlainObject(targetGpu.driver) ? formatField(targetGpu.driver.problem_code) : 'unsupported'}, INF=${isPlainObject(targetGpu.driver) ? formatField(targetGpu.driver.inf_name) : 'unsupported'}`
+    : 'n/a';
+  const legacySummary = isPlainObject(report.legacy_status)
+    ? (report.legacy_status.present
+      ? `${escapeMarkdown(report.legacy_status.source)}:${escapeMarkdown(report.legacy_status.status_code)}`
+      : 'không có log cục bộ')
+    : 'n/a (v1)';
+  const ctxSummary = `mod=${escapeMarkdown(ctx.mod_state || 'unknown')}/${escapeMarkdown(ctx.mod_type || 'unknown')}, riser=${escapeMarkdown(ctx.riser || 'unknown')}, slot=${escapeMarkdown(ctx.slot || 'unknown')}, stage=${escapeMarkdown(ctx.stage || 'unknown')}`;
+  const layer2Text = `${secSummary} | ${drvSummary} | Legacy: ${legacySummary} | Ngữ cảnh: ${ctxSummary}`;
+  const powerSnap = nvExt
+    ? `${formatField(nvFields['power.draw'])} / Enforced ${formatField(nvExt['enforced.power.limit'])} / Default ${formatField(nvExt['power.default_limit'])} / Max ${formatField(nvExt['power.max_limit'])}`
+    : formatField(nvFields['power.draw']);
+  const clkThermalSnap = `P-State=${formatField(nvFields['pstate'])}, SM=${formatField(nvFields['clocks.sm'])}/${formatField(nvFields['clocks.max.sm'])}, Mem=${formatField(nvFields['clocks.mem'])}, Temp=${formatField(nvFields['temperature.gpu'])}${nvExt ? `, Fan=${formatField(nvExt['fan.speed'])}, Throttle=${formatField(nvExt['clocks_throttle_reasons.active'])}` : ''}`;
+  const layer3Text = `PCIe (${pcieSource}): ${pnpCurLink} (max ${pnpMaxLink}) | nvidia-smi: ${nvCurLink} (max ${nvMaxLink}) | Cơ bản: ${okCount}/${NVIDIA_REQUIRED_FIELDS.length}${nvExt ? ` | Mở rộng: ${extOkCount}/${NVIDIA_EXTENDED_FIELDS.length}` : ''} | Power: ${powerSnap} | ${clkThermalSnap}`;
+  let layer4Text = `Mức bằng chứng: \`${escapeMarkdown(report.evidence_level || 'reported')}\` (Schema v1 không có bảng completeness 7 nhóm)`;
+  if (isPlainObject(report.completeness)) {
+    let compOkCount = 0;
+    const incompleteGroups = [];
+    for (const groupName of COMPLETENESS_GROUPS) {
+      const g = report.completeness[groupName];
+      if (isPlainObject(g) && g.status === 'ok') {
+        compOkCount += 1;
+      } else {
+        incompleteGroups.push(groupName);
+      }
+    }
+    layer4Text = `Mức bằng chứng: \`${escapeMarkdown(report.evidence_level || 'reported')}\` | Nhóm đạt ok: \`${compOkCount}/${COMPLETENESS_GROUPS.length}\`${incompleteGroups.length > 0 ? ` | Chưa đủ/chờ: ${incompleteGroups.map((g) => `\`${escapeMarkdown(g)}\``).join(', ')}` : ''}`;
+  }
+  lines.push(`| **1. Nhận diện (Identity)** | ${layer1Text} |`);
+  lines.push(`| **2. Cấu hình & Môi trường (Config)** | ${layer2Text} |`);
+  lines.push(`| **3. Trạng thái đo (Measurement)** | ${layer3Text} |`);
+  lines.push(`| **4. Workload & Bằng chứng (Evidence)** | ${layer4Text} |`);
   lines.push('');
 
   const platform = isPlainObject(report.platform) ? report.platform : {};
@@ -1023,7 +1123,6 @@ function renderSummary(report) {
     lines.push('');
   }
 
-  const ctx = isPlainObject(report.context) ? report.context : {};
   lines.push('### Ngữ cảnh thu thập');
   lines.push('');
   lines.push(`- **Trạng thái mod:** ${escapeMarkdown(ctx.mod_state || 'unknown')}`);
@@ -1034,12 +1133,18 @@ function renderSummary(report) {
   lines.push(`- **Khe cắm:** ${escapeMarkdown(ctx.slot || 'unknown')}`);
   lines.push(`- **Giai đoạn:** ${escapeMarkdown(ctx.stage || 'unknown')}`);
   lines.push(`- **Ghi chú:** ${ctx.notes ? escapeMarkdown(ctx.notes) : 'Không có'}`);
+  const ctxKeysToCheck = report.schema_version === 2
+    ? ['mod_state', 'mod_type', 'riser', 'slot', 'stage']
+    : ['mod_state', 'riser', 'slot', 'stage'];
+  if (ctxKeysToCheck.some((k) => !ctx[k] || ctx[k] === 'unknown')) {
+    lines.push('- *Lưu ý tái lập phép thử: Một số trường ngữ cảnh vật lý đang là `unknown`; cần bổ sung thông tin phần cứng/môi trường (xem mục Mẫu bổ sung hồ sơ ở cuối báo cáo) trước khi kết luận đối chứng.*');
+  }
   lines.push('');
 
   lines.push('### Danh sách GPU (PnP / CIM)');
   lines.push('');
-  lines.push('| BDF | Tên GPU | VID:DID | Hồ sơ | Subsys | Rev | PnP | Driver |');
-  lines.push('| --- | --- | --- | --- | --- | --- | --- | --- |');
+  lines.push('| BDF | Tên GPU | VID:DID | Hồ sơ | Kiến trúc / Loại | PCIe PnP (Hiện tại / Tối đa) | Mục tiêu Gen / Tensor | Subsys | Rev | PnP | Driver |');
+  lines.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |');
   const gpuNotes = [];
   for (const gpu of gpus) {
     if (!isPlainObject(gpu)) continue;
@@ -1057,8 +1162,15 @@ function renderSummary(report) {
     const isTarget = Boolean(targetGpu && gpu === targetGpu);
     const bdfCell = `${formatField(gpu.bdf)}${isTarget ? ' (mục tiêu)' : ''}`;
     const profCell = prof ? escapeMarkdown(prof) : 'chưa nhận diện';
+    const familyCatCell = `${details.family ? escapeMarkdown(details.family) : 'unknown'} / ${details.category ? escapeMarkdown(details.category) : 'unknown'}`;
+    const gpuPcieCell = isPlainObject(gpu.pcie)
+      ? `${formatPcieLink(gpu.pcie.current_gen, gpu.pcie.current_width)} / ${formatPcieLink(gpu.pcie.max_gen, gpu.pcie.max_width)}`
+      : 'n/a';
+    const targetGenCell = details.target_pcie_gen ? `Gen${escapeMarkdown(details.target_pcie_gen)}` : 'chưa đặt';
+    const tensorCell = details.tensor_applicable ? escapeMarkdown(details.tensor_applicable) : 'unknown';
+    const targetTensorCell = `${targetGenCell} / ${tensorCell}`;
     lines.push(
-      `| ${bdfCell} | ${formatField(gpu.name)} | ${vid}:${did} | ${profCell} | ${formatField(gpu.subsystem_id)} | ${formatField(gpu.revision)} | ${formatField(gpu.pnp_status)} | ${formatField(gpu.driver_version)} |`,
+      `| ${bdfCell} | ${formatField(gpu.name)} | ${vid}:${did} | ${profCell} | ${familyCatCell} | ${gpuPcieCell} | ${targetTensorCell} | ${formatField(gpu.subsystem_id)} | ${formatField(gpu.revision)} | ${formatField(gpu.pnp_status)} | ${formatField(gpu.driver_version)} |`,
     );
     if (details.identity_note) {
       gpuNotes.push(`\`${formatField(gpu.bdf)}\`: ${escapeMarkdown(details.identity_note)}`);
@@ -1075,25 +1187,17 @@ function renderSummary(report) {
   }
   lines.push('');
 
-  const pcie = isPlainObject(report.pcie) ? report.pcie : {};
-  const pcieSource = isPlainObject(pcie.current_gen) && typeof pcie.current_gen.source === 'string'
-    ? escapeMarkdown(pcie.current_gen.source)
-    : 'unknown';
   lines.push('### Liên kết PCIe (GPU mục tiêu / chính)');
   lines.push('');
-  lines.push(`- **Tối đa (${pcieSource}):** ${formatPcieLink(pcie.max_gen, pcie.max_width)}`);
-  lines.push(`- **Hiện tại (${pcieSource}):** ${formatPcieLink(pcie.current_gen, pcie.current_width)}`);
-  for (const warning of getPcieSourceWarnings(report)) {
+  lines.push(`- **Tối đa (${pcieSource}):** ${pnpMaxLink}`);
+  lines.push(`- **Hiện tại (${pcieSource}):** ${pnpCurLink}`);
+  lines.push(`- **Tối đa (nvidia-smi):** ${nvMaxLink}`);
+  lines.push(`- **Hiện tại (nvidia-smi):** ${nvCurLink}`);
+  for (const warning of pcieWarnings) {
     lines.push(`- **${escapeMarkdown(warning)}**`);
   }
   lines.push('');
 
-  let okCount = 0;
-  for (const key of NVIDIA_REQUIRED_FIELDS) {
-    if (isPlainObject(nvFields[key]) && nvFields[key].status === 'ok') {
-      okCount += 1;
-    }
-  }
   const completeText = nvidia.complete === true ? 'true' : 'false';
   lines.push('### Dữ liệu `nvidia-smi`');
   lines.push('');
@@ -1113,14 +1217,25 @@ function renderSummary(report) {
     lines.push(`| \`${escapeMarkdown(key)}\` | ${valStr} | ${statusStr} | ${srcStr} |`);
   }
 
-  if (isPlainObject(nvidia.extended)) {
+  if (nvExt) {
     lines.push('');
     lines.push('#### Công suất, nhiệt, tải & lý do giảm xung (`nvidia-smi` mở rộng)');
+    lines.push('');
+    lines.push(`- **Trường NVIDIA mở rộng (power/thermal/throttle):** \`${extOkCount}/${NVIDIA_EXTENDED_FIELDS.length}\``);
+    if (Array.isArray(nvidia.extended_missing) && nvidia.extended_missing.length > 0) {
+      lines.push(`- **Trường mở rộng thiếu/không hỗ trợ:** ${nvidia.extended_missing.map((m) => `\`${escapeMarkdown(m)}\``).join(', ')}`);
+    }
+    lines.push(
+      `- **Tóm tắt Công suất (W):** draw=${formatField(nvFields['power.draw'])} | limit=${formatField(nvExt['power.limit'])} | enforced=${formatField(nvExt['enforced.power.limit'])} | default=${formatField(nvExt['power.default_limit'])} | min=${formatField(nvExt['power.min_limit'])} | max=${formatField(nvExt['power.max_limit'])}`,
+    );
+    lines.push(
+      `- **Tóm tắt Xung, Nhiệt & VRAM:** P-State=${formatField(nvFields['pstate'])} | SM=${formatField(nvFields['clocks.sm'])}/${formatField(nvFields['clocks.max.sm'])} | MemClk=${formatField(nvFields['clocks.mem'])} | Temp=${formatField(nvFields['temperature.gpu'])} (TLimit=${formatField(nvExt['temperature.gpu.tlimit'])}, MemTemp=${formatField(nvExt['temperature.memory'])}) | Fan=${formatField(nvExt['fan.speed'])} | VRAM=${formatField(nvExt['memory.used'])}/${formatField(nvFields['memory.total'])} (Free=${formatField(nvExt['memory.free'])})`,
+    );
     lines.push('');
     lines.push('| Trường | Giá trị | Trạng thái | Nguồn |');
     lines.push('| --- | --- | --- | --- |');
     for (const key of NVIDIA_EXTENDED_FIELDS) {
-      const field = nvidia.extended[key];
+      const field = nvExt[key];
       const valStr = formatField(field);
       const statusStr = isPlainObject(field) ? escapeMarkdown(field.status) : 'unsupported';
       const srcStr = isPlainObject(field) ? escapeMarkdown(field.source) : 'none';
@@ -1128,14 +1243,20 @@ function renderSummary(report) {
     }
   }
 
-  if (isPlainObject(report.legacy_status) && report.legacy_status.present) {
+  if (isPlainObject(report.legacy_status)) {
     const leg = report.legacy_status;
     lines.push('');
     lines.push('### Trạng thái công cụ mở khóa cục bộ (allowlist)');
     lines.push('');
-    lines.push(
-      `- **Nguồn:** \`${escapeMarkdown(leg.source)}\` | **Mã trạng thái:** \`${escapeMarkdown(leg.status_code)}\` | **Lỗi:** \`${escapeMarkdown(leg.error_code)}\` | **Speed/Width/TLS:** Gen${leg.speed_current ?? '?'} ×${leg.width_current ?? '?'} (TLS Gen${leg.tls_target ?? '?'}) | **Observed:** \`${escapeMarkdown(leg.observed_utc || 'null')}\``,
-    );
+    if (leg.present) {
+      lines.push(
+        `- **Nguồn:** \`${escapeMarkdown(leg.source)}\` | **Mã trạng thái:** \`${escapeMarkdown(leg.status_code)}\` | **Lỗi:** \`${escapeMarkdown(leg.error_code)}\` | **Device ID:** \`${escapeMarkdown(leg.device_id || 'null')}\` | **Speed/Width/TLS:** Gen${leg.speed_current ?? '?'} ×${leg.width_current ?? '?'} (TLS Gen${leg.tls_target ?? '?'}) | **MRRS:** \`${leg.mrrs_bytes ?? 'null'}\` bytes | **Observed:** \`${escapeMarkdown(leg.observed_utc || 'null')}\``,
+      );
+    } else {
+      lines.push(
+        `- **Trạng thái:** Không phát hiện tệp trạng thái mở khóa cục bộ (\`present=false\`, nguồn: \`${escapeMarkdown(leg.source)}\`).`,
+      );
+    }
   }
 
   if (isPlainObject(report.completeness)) {
@@ -1155,6 +1276,25 @@ function renderSummary(report) {
       );
     }
   }
+
+  lines.push('');
+  lines.push('### Hồ sơ phần cứng & thử nghiệm cần chủ card bổ sung (modding-data-plan §7 & §9)');
+  lines.push('');
+  lines.push('<details>');
+  lines.push('<summary>Mở rộng mẫu khai báo bổ sung (PSU, Riser, PCB/VRAM, Gói mod, Giả thuyết &amp; Kết quả sau Reboot/Sleep/Rollback)</summary>');
+  lines.push('');
+  lines.push('```text');
+  lines.push('- Card/SKU thực tế & PCB revision / mã chip VRAM (từ ảnh hoặc nhãn PCB, che serial): ________');
+  lines.push('- Khe cắm trên mainboard & Riser (cắm trực tiếp / model + chiều dài riser): ________');
+  lines.push('- Nguồn PSU & cách cấp nguồn phụ cho card (1 dây/2 dây riêng, đầu 6/8-pin): ________');
+  lines.push('- Can thiệp đã thử (strap / flash VBIOS / EFI / mod driver) & phiên bản hoặc SHA-256: ________');
+  lines.push('- Mục tiêu thử nghiệm (TDP / PCIe Gen Speed / ReBAR / CUDA / Tensor / VRAM / ổn định): ________');
+  lines.push('- Giả thuyết về nguồn giới hạn & dữ liệu còn thiếu cần đo thêm: ________');
+  lines.push('- Kết quả sau thay đổi / sau reboot / sau sleep-wake / sau khôi phục (rollback): ________');
+  lines.push('- Xác nhận của chủ phần cứng (chỉ bỏ nhãn unverified sau khi đối chứng): ________');
+  lines.push('```');
+  lines.push('');
+  lines.push('</details>');
 
   let output = lines.join('\n');
   if (output.length > MAX_SUMMARY_LENGTH) {
