@@ -23,6 +23,7 @@ type BenchConfig struct {
 	SizeMB     int
 	Iterations int
 	TimeoutMs  int
+	DurationMs int
 }
 
 // BenchResult holds the allowlisted, zero-PII benchmark metrics for reporting.
@@ -138,6 +139,11 @@ func normalizeConfig(cfg BenchConfig) BenchConfig {
 		cfg.TimeoutMs = 1000
 	} else if cfg.TimeoutMs > 60000 {
 		cfg.TimeoutMs = 60000
+	}
+	if cfg.DurationMs < 0 {
+		cfg.DurationMs = 0
+	} else if cfg.DurationMs > 60000 {
+		cfg.DurationMs = 60000
 	}
 	return cfg
 }
@@ -470,6 +476,30 @@ func RunBenchmark(drv CudaDriver, cfg BenchConfig) BenchResult {
 		// 2 FLOPs per FMA element per launch.
 		flops := float64(elemCount) * 2.0 * float64(kernelLaunches)
 		res.FP32GFLOPS = round2(flops / kernelSec / 1e9)
+	}
+
+	if cfg.DurationMs > 0 {
+		sustainedEnd := start.Add(time.Duration(cfg.DurationMs) * time.Millisecond)
+		if sustainedEnd.After(deadline) {
+			sustainedEnd = deadline
+		}
+		for time.Now().Before(sustainedEnd) {
+			if err := drv.MemcpyHtoD(devBuf, hostBuf); err != nil {
+				res.Reason = fmt.Sprintf("sustained_htod_failed: %v", err)
+				res.DurationMs = time.Since(start).Milliseconds()
+				return res
+			}
+			if err := drv.LaunchSAXPY(fn, elemCount, dA, dB, dOut, alpha); err != nil {
+				res.Reason = fmt.Sprintf("sustained_kernel_failed: %v", err)
+				res.DurationMs = time.Since(start).Milliseconds()
+				return res
+			}
+			if err := drv.Synchronize(); err != nil {
+				res.Reason = fmt.Sprintf("sustained_sync_failed: %v", err)
+				res.DurationMs = time.Since(start).Milliseconds()
+				return res
+			}
+		}
 	}
 
 	if err := drv.MemcpyDtoH(outBytes, dOut); err != nil {

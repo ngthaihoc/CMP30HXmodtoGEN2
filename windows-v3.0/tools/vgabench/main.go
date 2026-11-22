@@ -12,6 +12,7 @@ func main() {
 	sizeMB := flag.Int("size-mb", 64, "Pinned host transfer buffer size in MiB (4..512)")
 	iters := flag.Int("iters", 5, "Number of timed H2D/D2H copy iterations")
 	timeoutMs := flag.Int("timeout-ms", 15000, "Watchdog timeout in milliseconds")
+	durationMs := flag.Int("duration-ms", 0, "Optional sustained load target duration in milliseconds (0..60000)")
 	flag.Parse()
 
 	res := RunBenchmark(NewRealCudaDriver(), BenchConfig{
@@ -19,6 +20,7 @@ func main() {
 		SizeMB:     *sizeMB,
 		Iterations: *iters,
 		TimeoutMs:  *timeoutMs,
+		DurationMs: *durationMs,
 	})
 
 	enc := json.NewEncoder(os.Stdout)

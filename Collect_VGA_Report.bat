@@ -22,6 +22,18 @@ if /i "%~1"=="-KeepHistory" set "VGA_KEEP_HISTORY=1"
 if /i "%~1"=="-DetailedContext" set "VGA_DETAILED_CONTEXT=1"
 if /i "%~1"=="-SelectGpu" set "VGA_SELECT_GPU=1"
 if /i "%~1"=="-RunLoadTest" set "VGA_RUN_LOAD_TEST=1"
+if /i "%~1"=="-IdleSec" if not "%~2"=="" (
+    set "VGA_IDLE_SEC=%~2"
+    shift
+)
+if /i "%~1"=="-LoadSec" if not "%~2"=="" (
+    set "VGA_LOAD_SEC=%~2"
+    shift
+)
+if /i "%~1"=="-RecoverySec" if not "%~2"=="" (
+    set "VGA_RECOVERY_SEC=%~2"
+    shift
+)
 shift
 goto parse_args
 :args_done
@@ -1591,6 +1603,476 @@ function Get-VgaBenchInfo {
     }
 }
 
+function Get-RawSystemWinEvents {
+    param(
+        [datetime]$StartTime,
+        [datetime]$EndTime
+    )
+    $providers = @('Microsoft-Windows-WHEA-Logger', 'nvlddmkm', 'Display')
+    try {
+        return @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = $providers; StartTime = $StartTime.ToLocalTime(); EndTime = $EndTime.ToLocalTime() } -ErrorAction Stop)
+    } catch [System.Exception] {
+        $msg = $_.Exception.Message
+        if ($msg -match 'No events were found') {
+            return @()
+        }
+        throw
+    }
+}
+
+function Get-StabilityEvents {
+    param(
+        [datetime]$WindowStartedUtc,
+        [datetime]$WindowFinishedUtc,
+        [AllowNull()][string]$TargetBdf = $null,
+        [string[]]$UpstreamBdfs = @()
+    )
+    $normTarget = Normalize-Bdf -BusId $TargetBdf
+    $upstreamSet = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($ub in @($UpstreamBdfs)) {
+        $nub = Normalize-Bdf -BusId $ub
+        if ($nub) { [void]$upstreamSet.Add($nub) }
+    }
+
+    $queryStatus = 'ok'
+    $queryError = $null
+    $rawEvents = @()
+    try {
+        $rawEvents = @(Get-RawSystemWinEvents -StartTime $WindowStartedUtc -EndTime $WindowFinishedUtc)
+    } catch [System.Security.SecurityException], [System.UnauthorizedAccessException] {
+        $queryStatus = 'permission_denied'
+        $queryError = Remove-Pii -Text ([string]$_.Exception.Message)
+    } catch [System.Diagnostics.Eventing.Reader.EventLogNotFoundException] {
+        $queryStatus = 'provider_unavailable'
+        $queryError = Remove-Pii -Text ([string]$_.Exception.Message)
+    } catch {
+        $msg = [string]$_.Exception.Message
+        if ($msg -match '(?i)unauthorized|access is denied') {
+            $queryStatus = 'permission_denied'
+        } elseif ($msg -match '(?i)provider|publisher|could not be found') {
+            $queryStatus = 'provider_unavailable'
+        } else {
+            $queryStatus = 'error'
+        }
+        $queryError = Remove-Pii -Text $msg
+    }
+    if ($queryError -and $queryError.Length -gt 200) { $queryError = $queryError.Substring(0, 200) }
+
+    $wheaTotal = 0; $wheaPcieMatched = 0; $wheaOther = 0; $wheaOut = 0
+    $tdrTotal = 0; $tdrCandidates = 0; $dispResets = 0; $tdrUnattrib = 0
+    $wheaList = New-Object System.Collections.ArrayList
+    $tdrList = New-Object System.Collections.ArrayList
+
+    $extractBdf = {
+        param([string]$Txt)
+        if ([string]::IsNullOrWhiteSpace($Txt)) { return $null }
+        if ($Txt -match '([0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7])') {
+            return (Normalize-Bdf -BusId $Matches[1])
+        }
+        if ($Txt -match 'Bus\s*[:=]\s*0x([0-9a-fA-F]+)\D+Device\s*[:=]\s*0x([0-9a-fA-F]+)\D+Function\s*[:=]\s*0x([0-9a-fA-F]+)') {
+            return ('0000:{0:x2}:{1:x2}.{2}' -f [Convert]::ToInt32($Matches[1], 16), [Convert]::ToInt32($Matches[2], 16), ([Convert]::ToInt32($Matches[3], 16) -band 7))
+        }
+        return $null
+    }
+
+    if ($queryStatus -eq 'ok') {
+        foreach ($ev in $rawEvents) {
+            if ($null -eq $ev) { continue }
+            $prov = [string](Get-ObjProp $ev 'ProviderName')
+            $evId = [int](Get-ObjProp $ev 'Id')
+            $lvl = [string](Get-ObjProp $ev 'LevelDisplayName')
+            if ([string]::IsNullOrWhiteSpace($lvl)) { $lvl = 'Unknown' }
+            if ($lvl.Length -gt 32) { $lvl = $lvl.Substring(0, 32) }
+            $tcRaw = Get-ObjProp $ev 'TimeCreated'
+            $tcUtc = if ($tcRaw -is [datetime]) { $tcRaw.ToUniversalTime() } else { [DateTime]::Parse([string]$tcRaw).ToUniversalTime() }
+
+            if ($tcUtc -lt $WindowStartedUtc -or $tcUtc -gt $WindowFinishedUtc) {
+                if ($prov -eq 'Microsoft-Windows-WHEA-Logger') { $wheaOut += 1 }
+                continue
+            }
+
+            $evText = (([string](Get-ObjProp $ev 'Message')) + ' ' + ([string](Get-ObjProp $ev 'Xml')))
+            $evBdf = & $extractBdf $evText
+            $evUtcStr = $tcUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
+
+            if ($prov -eq 'Microsoft-Windows-WHEA-Logger') {
+                $wheaTotal += 1
+                $isPcie = ($evId -eq 17) -or ($evText -match '(?i)PCI\s*Express|AER|PCIe')
+                $scope = 'unattributed'
+                $storedBdf = $evBdf
+                if (-not $isPcie) {
+                    $scope = 'system_non_pcie'
+                    $storedBdf = $null
+                    $wheaOther += 1
+                } elseif ($normTarget -and $evBdf -eq $normTarget) {
+                    $scope = 'target_gpu'
+                    $wheaPcieMatched += 1
+                } elseif ($evBdf -and $upstreamSet.Contains($evBdf)) {
+                    $scope = 'upstream'
+                    $wheaPcieMatched += 1
+                } else {
+                    $scope = 'unattributed'
+                    $wheaOther += 1
+                }
+                if ($wheaList.Count -lt 50) {
+                    [void]$wheaList.Add([ordered]@{
+                        source   = 'whea'
+                        event_id = $evId
+                        level    = $lvl
+                        utc      = $evUtcStr
+                        scope    = $scope
+                        bdf      = $storedBdf
+                    })
+                }
+            } elseif ($prov -in @('nvlddmkm', 'Display')) {
+                if ($normTarget -and $evBdf -and $evBdf -ne $normTarget -and -not $upstreamSet.Contains($evBdf)) {
+                    continue
+                }
+                $tdrTotal += 1
+                $isDispReset = ($prov -eq 'Display' -and $evId -eq 4101)
+                $isCand = $isDispReset -or ($prov -eq 'nvlddmkm' -and $evId -in @(13, 14, 153)) -or ($evText -match '(?i)TDR|stopped responding|reset')
+                if ($isCand) { $tdrCandidates += 1 }
+                if ($isDispReset) { $dispResets += 1 }
+                $scope = if ($normTarget -and $evBdf -eq $normTarget) { 'target_gpu' } else { $tdrUnattrib += 1; 'unattributed' }
+                if ($tdrList.Count -lt 50) {
+                    [void]$tdrList.Add([ordered]@{
+                        source   = $prov
+                        event_id = $evId
+                        level    = $lvl
+                        utc      = $evUtcStr
+                        scope    = $scope
+                        bdf      = if ($scope -eq 'target_gpu') { $normTarget } else { $null }
+                    })
+                }
+            }
+        }
+    }
+
+    return [ordered]@{
+        window_started_utc  = $WindowStartedUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        window_finished_utc = $WindowFinishedUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        query_status        = $queryStatus
+        query_error         = $queryError
+        whea                = [ordered]@{
+            query_status        = $queryStatus
+            total_in_window     = $wheaTotal
+            pcie_matched_count  = $wheaPcieMatched
+            other_whea_count    = $wheaOther
+            out_of_window_count = $wheaOut
+            events              = $wheaList.ToArray()
+        }
+        tdr                 = [ordered]@{
+            query_status        = $queryStatus
+            provider            = 'nvlddmkm'
+            total_in_window     = $tdrTotal
+            candidate_tdr_count = $tdrCandidates
+            display_reset_count = $dispResets
+            unattributed_count  = $tdrUnattrib
+            events              = $tdrList.ToArray()
+        }
+    }
+}
+
+function Get-GpuTelemetrySample {
+    param([Parameter(Mandatory = $true)][string]$TargetBdf)
+    $normTarget = Normalize-Bdf -BusId $TargetBdf
+    $qFields = @('pci.bus_id', 'pcie.link.gen.gpucurrent', 'pcie.link.width.current', 'temperature.gpu', 'power.draw', 'clocks.sm', 'clocks.mem', 'utilization.gpu', 'pstate')
+    $res = Invoke-NvidiaSmiRaw -Arguments @("--query-gpu=$($qFields -join ',')", '--format=csv,noheader,nounits')
+    if (-not $res -or $res.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($res.Output)) {
+        return $null
+    }
+    $parseD = {
+        param([string]$s)
+        $t = $s.Trim(); $v = 0.0
+        if ([double]::TryParse($t, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$v)) { return $v }
+        return $null
+    }
+    $parseI = {
+        param([string]$s)
+        $dv = & $parseD $s
+        if ($null -ne $dv) { return [int][Math]::Round($dv) }
+        return $null
+    }
+    foreach ($line in ($res.Output -split "`r?`n")) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $cols = $line -split ',\s*'
+        if ($cols.Count -lt $qFields.Count) { continue }
+        $rowBdf = Normalize-Bdf -BusId $cols[0]
+        if ($rowBdf -eq $normTarget) {
+            $ps = $cols[8].Trim()
+            if ($ps -in @('[N/A]', '[Not Supported]', 'N/A', '')) { $ps = $null }
+            return [pscustomobject]@{
+                pcie_gen       = & $parseI $cols[1]
+                pcie_width     = & $parseI $cols[2]
+                temp_c         = & $parseD $cols[3]
+                power_w        = & $parseD $cols[4]
+                clocks_sm_mhz  = & $parseI $cols[5]
+                clocks_mem_mhz = & $parseI $cols[6]
+                util_gpu_pct   = & $parseI $cols[7]
+                pstate         = $ps
+            }
+        }
+    }
+    return $null
+}
+
+function Get-LoadSafetyThresholds {
+    param($TargetGpu, $Nvidia, [double]$MaxTempC = 0, [double]$MaxPowerW = 0)
+    $cat = if ($TargetGpu -and $TargetGpu.profile -and $TargetGpu.profile.category) { [string]$TargetGpu.profile.category } else { 'unknown' }
+    $tempLimit = if ($MaxTempC -gt 0) { $MaxTempC } elseif ($cat -eq 'datacenter') { 80.0 } else { 85.0 }
+    $powerLimit = $MaxPowerW
+    if ($powerLimit -le 0 -and $Nvidia -and $Nvidia.extended) {
+        $enf = Get-ObjProp $Nvidia.extended 'enforced.power.limit'
+        if ($enf -and $enf.status -eq 'ok' -and $null -ne $enf.value) {
+            $powerLimit = [double]$enf.value * 1.15
+        }
+    }
+    if ($powerLimit -le 0) { $powerLimit = if ($cat -eq 'datacenter') { 265.0 } else { 290.0 } }
+    return [pscustomobject]@{ MaxTempC = [Math]::Round($tempLimit, 1); MaxPowerW = [Math]::Round($powerLimit, 1) }
+}
+
+function Invoke-LoadTestWorkflow {
+    param(
+        $TargetGpu,
+        $Nvidia,
+        [int]$IdleSec = 10,
+        [int]$LoadSec = 30,
+        [int]$RecoverySec = 10,
+        [int]$SampleIntervalMs = 1000,
+        [int]$SizeMB = 64,
+        [int]$Iterations = 5,
+        [int]$TimeoutMs = 45000,
+        [double]$MaxTempC = 0,
+        [double]$MaxPowerW = 0
+    )
+    $targetBdf = if ($TargetGpu -and $TargetGpu.bdf -and $TargetGpu.bdf.status -eq 'ok') { Normalize-Bdf -BusId ([string]$TargetGpu.bdf.value) } else { $null }
+    $wfStart = [DateTime]::UtcNow
+    $limits = Get-LoadSafetyThresholds -TargetGpu $TargetGpu -Nvidia $Nvidia -MaxTempC $MaxTempC -MaxPowerW $MaxPowerW
+    $samples = New-Object System.Collections.ArrayList
+    $stopReason = 'completed'
+    $benchRes = $null
+    $abortLoad = $false
+
+    $recordSample = {
+        param([string]$Phase)
+        $s = Get-GpuTelemetrySample -TargetBdf $targetBdf
+        if ($null -eq $s) {
+            return 'gpu_lost'
+        }
+        $now = [DateTime]::UtcNow
+        [void]$samples.Add([ordered]@{
+            phase          = $Phase
+            rel_ms         = [int][Math]::Max(0, ($now - $wfStart).TotalMilliseconds)
+            utc            = $now.ToString('yyyy-MM-ddTHH:mm:ssZ')
+            pcie_gen       = $s.pcie_gen
+            pcie_width     = $s.pcie_width
+            temp_c         = $s.temp_c
+            power_w        = $s.power_w
+            clocks_sm_mhz  = $s.clocks_sm_mhz
+            clocks_mem_mhz = $s.clocks_mem_mhz
+            util_gpu_pct   = $s.util_gpu_pct
+            pstate         = $s.pstate
+        })
+        if ($null -ne $s.temp_c -and [double]$s.temp_c -ge $limits.MaxTempC) { return 'thermal_limit' }
+        if ($null -ne $s.power_w -and [double]$s.power_w -ge $limits.MaxPowerW) { return 'power_limit' }
+        return $null
+    }
+
+    if (-not $targetBdf) {
+        return [pscustomobject]@{
+            BenchResult    = [pscustomobject]@{ status = 'skipped'; reason = 'missing_target_bdf' }
+            FullSamples    = @()
+            LoadTest       = $null
+        }
+    }
+
+    # Phase 1: Idle baseline
+    $idleLoops = [Math]::Max(0, [int][Math]::Ceiling(($IdleSec * 1000.0) / [Math]::Max(100, $SampleIntervalMs)))
+    for ($i = 0; $i -lt $idleLoops; $i += 1) {
+        $trip = & $recordSample 'idle'
+        if ($trip) { $stopReason = $trip; $abortLoad = $true; break }
+        if ($i -lt ($idleLoops - 1)) { Start-Sleep -Milliseconds $SampleIntervalMs }
+    }
+
+    # Phase 2: Sustained load + concurrent sampling
+    if (-not $abortLoad) {
+        $tripPre = & $recordSample 'load'
+        if ($tripPre) {
+            $stopReason = $tripPre
+            $abortLoad = $true
+        }
+    }
+
+    if (-not $abortLoad) {
+        $rootDir = if (-not [string]::IsNullOrWhiteSpace($env:VGA_BAT_DIR)) { $env:VGA_BAT_DIR } else { (Get-Location).Path }
+        $exePath = @(
+            (Join-Path $rootDir 'windows-v3.0\release\vgabench.exe'),
+            (Join-Path $rootDir 'windows-v3.0\tools\vgabench\vgabench.exe')
+        ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+
+        $invokeCmdInfo = Get-Command Invoke-VgaBenchRaw -ErrorAction SilentlyContinue
+        $hasMockRaw = $false
+        if ($invokeCmdInfo -and $invokeCmdInfo.Definition -notmatch 'Invoke-ExternalCommandWithTimeout') {
+            $hasMockRaw = $true
+        }
+
+        $loadDurationMs = [Math]::Max(0, $LoadSec * 1000)
+        $benchTimeoutMs = [Math]::Max($TimeoutMs, $loadDurationMs + 15000)
+
+        if (-not $hasMockRaw -and $exePath) {
+            # Run real vgabench asynchronously while sampling telemetry and watching thermal/power limits!
+            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = $exePath
+            $psi.Arguments = "-bdf $targetBdf -size-mb $SizeMB -iters $Iterations -timeout-ms $benchTimeoutMs -duration-ms $loadDurationMs"
+            $psi.WorkingDirectory = $rootDir
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow = $true
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $psi.StandardOutputEncoding = $utf8NoBom
+            $proc = New-Object System.Diagnostics.Process
+            $proc.StartInfo = $psi
+            try {
+                [void]$proc.Start()
+                $outTask = $proc.StandardOutput.ReadToEndAsync()
+                $loadDeadline = [DateTime]::UtcNow.AddMilliseconds($benchTimeoutMs + 5000)
+                while (-not $proc.HasExited) {
+                    if ([DateTime]::UtcNow -gt $loadDeadline) {
+                        $stopReason = 'timeout'
+                        try { & taskkill.exe /PID $proc.Id /T /F 2>$null | Out-Null } catch {}
+                        break
+                    }
+                    Start-Sleep -Milliseconds $SampleIntervalMs
+                    $trip = & $recordSample 'load'
+                    if ($trip) {
+                        $stopReason = $trip
+                        try { & taskkill.exe /PID $proc.Id /T /F 2>$null | Out-Null } catch {}
+                        break
+                    }
+                }
+                [void]$proc.WaitForExit(2000)
+                if ($stopReason -eq 'completed' -and $outTask.Wait(1000)) {
+                    $rawJson = ([string]$outTask.Result).Trim()
+                    try { $benchRes = $rawJson | ConvertFrom-Json -ErrorAction Stop } catch { $benchRes = [pscustomobject]@{ status = 'error'; reason = 'invalid_vgabench_json' } }
+                }
+            } finally {
+                $proc.Dispose()
+            }
+        } else {
+            $rawJson = Invoke-VgaBenchRaw -TargetBdf $targetBdf -SizeMB $SizeMB -Iterations $Iterations -TimeoutMs $benchTimeoutMs -DurationMs $loadDurationMs
+            if ([string]::IsNullOrWhiteSpace($rawJson)) {
+                $benchRes = [pscustomobject]@{ status = 'unsupported'; reason = 'vgabench_helper_not_found' }
+            } else {
+                try { $benchRes = $rawJson | ConvertFrom-Json -ErrorAction Stop } catch { $benchRes = [pscustomobject]@{ status = 'error'; reason = 'invalid_vgabench_json' } }
+            }
+            $loadLoops = [Math]::Max(1, [int][Math]::Ceiling($loadDurationMs / [Math]::Max(100, $SampleIntervalMs)))
+            for ($li = 0; $li -lt $loadLoops; $li += 1) {
+                if ($li -gt 0) { Start-Sleep -Milliseconds $SampleIntervalMs }
+                $trip = & $recordSample 'load'
+                if ($trip) { $stopReason = $trip; break }
+            }
+        }
+    }
+
+    # Phase 3: Recovery
+    if ($stopReason -eq 'completed' -and $RecoverySec -gt 0) {
+        $recLoops = [Math]::Max(1, [int][Math]::Ceiling(($RecoverySec * 1000.0) / [Math]::Max(100, $SampleIntervalMs)))
+        for ($ri = 0; $ri -lt $recLoops; $ri += 1) {
+            Start-Sleep -Milliseconds $SampleIntervalMs
+            $trip = & $recordSample 'recovery'
+            if ($trip) { $stopReason = $trip; break }
+        }
+    }
+
+    $wfEnd = [DateTime]::UtcNow
+    if ($null -eq $benchRes) {
+        $benchRes = [pscustomobject]@{ status = $(if ($stopReason -eq 'timeout') { 'timeout' } else { 'error' }); bdf = $targetBdf; reason = "stopped_$stopReason" }
+    }
+    if ($stopReason -eq 'completed' -and $benchRes.status -ne 'ok') {
+        $stopReason = if ($benchRes.status -eq 'timeout') { 'timeout' } else { 'gpu_error' }
+    }
+
+    $allSamplesArr = $samples.ToArray()
+    $truncated = ($allSamplesArr.Count -gt 120)
+    $includedArr = if ($truncated) { @($allSamplesArr | Select-Object -First 120) } else { $allSamplesArr }
+
+    $h2dMed = if ($null -ne (Get-ObjProp $benchRes 'h2d_bandwidth_gbps')) { [double]$benchRes.h2d_bandwidth_gbps } else { $null }
+    $h2dMin = if ($null -ne (Get-ObjProp $benchRes 'h2d_min_gbps')) { [double]$benchRes.h2d_min_gbps } else { $h2dMed }
+    $h2dMax = if ($null -ne (Get-ObjProp $benchRes 'h2d_max_gbps')) { [double]$benchRes.h2d_max_gbps } else { $h2dMed }
+    $d2hMed = if ($null -ne (Get-ObjProp $benchRes 'd2h_bandwidth_gbps')) { [double]$benchRes.d2h_bandwidth_gbps } else { $null }
+    $d2hMin = if ($null -ne (Get-ObjProp $benchRes 'd2h_min_gbps')) { [double]$benchRes.d2h_min_gbps } else { $d2hMed }
+    $d2hMax = if ($null -ne (Get-ObjProp $benchRes 'd2h_max_gbps')) { [double]$benchRes.d2h_max_gbps } else { $d2hMed }
+    $gflops = if ($null -ne (Get-ObjProp $benchRes 'fp32_gflops')) { [double]$benchRes.fp32_gflops } else { $null }
+
+    $ltStatus = if ($stopReason -eq 'completed' -and $benchRes.status -eq 'ok') { 'ok' } elseif ($allSamplesArr.Count -gt 0 -and $stopReason -in @('thermal_limit', 'power_limit')) { 'partial' } elseif ($benchRes.status -in @('unsupported', 'skipped', 'timeout')) { [string]$benchRes.status } else { 'error' }
+    $ltReason = if ($stopReason -ne 'completed') { "Dừng tải do $stopReason ($($allSamplesArr.Count) mẫu đã lưu)" } else { "Idle ${IdleSec}s -> Load ${LoadSec}s -> Recovery ${RecoverySec}s ($($allSamplesArr.Count) mẫu)" }
+    if ($ltReason.Length -gt 300) { $ltReason = $ltReason.Substring(0, 300) }
+
+    $bwMethod = if ($benchRes.benchmark_method) { [string]$benchRes.benchmark_method } elseif ($benchRes.pinned_host -eq $true) { 'nvcuda_pinned_host' } else { 'nvcuda_pageable_host' }
+
+    $loadTestObj = [ordered]@{
+        status             = $ltStatus
+        reason             = $ltReason
+        helper_name        = 'vgabench'
+        helper_version     = '1.0.0'
+        target_bdf         = $targetBdf
+        started_utc        = $wfStart.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        finished_utc       = $wfEnd.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        stop_reason        = $stopReason
+        schedule           = [ordered]@{
+            idle_sec           = $IdleSec
+            load_sec           = $LoadSec
+            recovery_sec       = $RecoverySec
+            sample_interval_ms = $SampleIntervalMs
+            warmup_included    = $true
+        }
+        actual_duration_ms = [int][Math]::Max(0, ($wfEnd - $wfStart).TotalMilliseconds)
+        thresholds         = [ordered]@{
+            max_temp_c  = $limits.MaxTempC
+            max_power_w = $limits.MaxPowerW
+            timeout_ms  = $TimeoutMs
+        }
+        pcie_bandwidth     = [ordered]@{
+            method           = $bwMethod
+            pinned_host      = [bool](Get-ObjProp $benchRes 'pinned_host')
+            transfer_size_mb = [int]$(if ($null -ne (Get-ObjProp $benchRes 'transfer_size_mb')) { $benchRes.transfer_size_mb } else { 0 })
+            iterations       = [int]$(if ($null -ne (Get-ObjProp $benchRes 'iterations')) { $benchRes.iterations } else { 0 })
+            h2d_median_gbps  = New-ReportField -Value $h2dMed -Source 'vgabench' -Unit 'GB/s'
+            h2d_min_gbps     = New-ReportField -Value $h2dMin -Source 'vgabench' -Unit 'GB/s'
+            h2d_max_gbps     = New-ReportField -Value $h2dMax -Source 'vgabench' -Unit 'GB/s'
+            d2h_median_gbps  = New-ReportField -Value $d2hMed -Source 'vgabench' -Unit 'GB/s'
+            d2h_min_gbps     = New-ReportField -Value $d2hMin -Source 'vgabench' -Unit 'GB/s'
+            d2h_max_gbps     = New-ReportField -Value $d2hMax -Source 'vgabench' -Unit 'GB/s'
+        }
+        compute_test       = [ordered]@{
+            driver_api_version  = $(if ($null -ne (Get-ObjProp $benchRes 'driver_version')) { [int]$benchRes.driver_version } else { $null })
+            compute_capability  = $(if (Get-ObjProp $benchRes 'compute_capability') { [string]$benchRes.compute_capability } else { $null })
+            fp32_kernel_name    = 'fp32_saxpy'
+            fp32_kernel_ok      = [bool](Get-ObjProp $benchRes 'fp32_kernel_ok')
+            fp32_gflops         = New-ReportField -Value $gflops -Source 'vgabench' -Unit 'GFLOPS'
+            tensor_check_status = 'skipped'
+            tensor_reason       = 'Chưa chạy bài thử Tensor chuyên biệt'
+        }
+        timeseries         = [ordered]@{
+            total_samples      = $allSamplesArr.Count
+            included_samples   = $includedArr.Count
+            truncated_to_local = $truncated
+            samples            = $includedArr
+        }
+    }
+
+    if ($benchRes -is [pscustomobject]) {
+        $benchRes | Add-Member -MemberType NoteProperty -Name 'has_timeseries' -Value ($allSamplesArr.Count -gt 0) -Force
+    }
+
+    return [pscustomobject]@{
+        BenchResult = $benchRes
+        LoadTest    = $loadTestObj
+        FullSamples = $allSamplesArr
+    }
+}
+
 function Convert-PcieSizeCodeToBytes {
     param($Code)
     if ($null -eq $Code) { return $null }
@@ -1880,7 +2362,9 @@ function New-Report {
         [AllowNull()][string]$CollectionStartedUtc = $null,
         [switch]$KeepHistory,
         [Parameter(Mandatory = $false)]$LoadBench = $null,
-        [Parameter(Mandatory = $false)]$Topology = $null
+        [Parameter(Mandatory = $false)]$Topology = $null,
+        [Parameter(Mandatory = $false)]$LoadTest = $null,
+        [Parameter(Mandatory = $false)]$Stability = $null
     )
     $startedUtc = if (-not [string]::IsNullOrWhiteSpace($CollectionStartedUtc)) { $CollectionStartedUtc } else { (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
     $invArray = @($Inventory)
@@ -2088,13 +2572,49 @@ function New-Report {
     }
     $topoOk = ($topoMissing.Count -eq 0)
 
+    $stabObj = $Stability
+    $stabMissing = New-Object 'System.Collections.Generic.List[string]'
+    $stabComplete = $false
+    $stabStatus = 'skipped'
+    $stabReason = 'Chưa ghi cửa sổ ổn định dưới tải (chế độ P2)'
+    $hasRanLoad = ($null -ne $LoadBench -and $LoadBench.status -eq 'ok') -or ($null -ne $LoadTest -and $LoadTest.status -in @('ok', 'partial'))
+    if ($null -ne $stabObj) {
+        if ($stabObj.query_status -ne 'ok') {
+            $stabStatus = if ($stabObj.query_status -in @('permission_denied', 'error', 'timeout')) { 'error' } else { 'partial' }
+            [void]$stabMissing.Add('whea_events')
+            [void]$stabMissing.Add('tdr_events')
+            $stabReason = & $truncateReason ("Không thể đọc Event Log System: query_status=$($stabObj.query_status)")
+        } else {
+            $wMatched = if ($stabObj.whea) { [int]$stabObj.whea.pcie_matched_count } else { 0 }
+            $tCand = if ($stabObj.tdr) { [int]$stabObj.tdr.candidate_tdr_count } else { 0 }
+            $tDisp = if ($stabObj.tdr) { [int]$stabObj.tdr.display_reset_count } else { 0 }
+            if ($wMatched -gt 0 -or $tCand -gt 0 -or $tDisp -gt 0) {
+                $stabStatus = 'error'
+                $stabComplete = $false
+                $stabReason = & $truncateReason ("Phát hiện sự kiện lỗi trong cửa sổ đo: WHEA_PCIe=$wMatched, TDR=$tCand, DisplayReset=$tDisp")
+            } elseif ($hasRanLoad) {
+                $stabStatus = 'ok'
+                $stabComplete = $true
+                $stabReason = 'Truy vấn thành công: không thấy sự kiện WHEA/TDR khớp trong cửa sổ đo dưới tải'
+            } else {
+                $stabStatus = 'partial'
+                $stabComplete = $false
+                [void]$stabMissing.Add('load_stability_window')
+                $stabReason = 'Truy vấn thành công (nhàn rỗi): không thấy sự kiện WHEA/TDR khớp trong cửa sổ đo (chưa thử dưới tải)'
+            }
+        }
+    } else {
+        [void]$stabMissing.Add('whea_events')
+        [void]$stabMissing.Add('tdr_events')
+    }
+
     $completeness = [ordered]@{
         inventory  = (& $newCompEntry ($invMissing.Count -eq 0) $(if ($invMissing.Count -eq 0) { 'ok' } elseif ($invArray.Count -gt 0) { 'partial' } else { 'error' }) $invMissing.ToArray() $(if ($invMissing.Count -eq 0) { '' } else { 'Một hoặc nhiều GPU lỗi đọc thuộc tính PnP' }))
         topology   = (& $newCompEntry $topoOk $(if ($topoOk) { 'ok' } else { 'partial' }) $topoMissing.ToArray() $topoReason)
         link_idle  = (& $newCompEntry $linkIdleOk $(if ($linkIdleOk) { 'ok' } else { 'partial' }) $linkIdleMissing.ToArray() $(if ($linkIdleOk) { '' } else { 'Thiếu một phần thông số link hoặc nvidia-smi cơ bản ở trạng thái nhàn rỗi' }))
         link_load  = $linkLoadEntry
         compute    = $computeEntry
-        stability  = (& $newCompEntry $false 'skipped' @('whea_events', 'tdr_events') 'Chưa ghi cửa sổ ổn định dưới tải (chế độ P2)')
+        stability  = (& $newCompEntry $stabComplete $stabStatus $stabMissing.ToArray() $stabReason)
         comparison = (& $newCompEntry $false $(if ($prevReportId) { 'partial' } else { 'skipped' }) $compMissing.ToArray() $(if ($prevReportId) { 'Đã liên kết báo cáo trước nhưng chưa có dữ liệu đối chứng dưới tải' } else { 'Chưa có báo cáo trước trong experiment này' }))
     }
 
@@ -2132,6 +2652,12 @@ function New-Report {
     }
     if ($null -ne $topoObj) {
         $resultReport['topology'] = $topoObj
+    }
+    if ($null -ne $LoadTest) {
+        $resultReport['load_test'] = $LoadTest
+    }
+    if ($null -ne $stabObj) {
+        $resultReport['stability'] = $stabObj
     }
     return $resultReport
 }
@@ -2363,6 +2889,27 @@ function Format-VietnameseSummary {
         }
     }
 
+    if ($Report.load_test) {
+        $lt = $Report.load_test
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine('--- Thử tải & băng thông PCIe (Load Benchmark) ---')
+        [void]$sb.AppendLine("Trạng thái   : $($lt.status) | stop_reason=$($lt.stop_reason) | actual=$($lt.actual_duration_ms)ms")
+        if ($lt.pcie_bandwidth) {
+            $bw = $lt.pcie_bandwidth
+            [void]$sb.AppendLine("PCIe BW      : H2D=$($bw.h2d_median_gbps.value) GB/s | D2H=$($bw.d2h_median_gbps.value) GB/s (pinned=$($bw.pinned_host))")
+        }
+        if ($lt.timeseries) {
+            [void]$sb.AppendLine("Time-series  : $($lt.timeseries.included_samples)/$($lt.timeseries.total_samples) mẫu (truncated=$($lt.timeseries.truncated_to_local))")
+        }
+    }
+
+    if ($Report.stability) {
+        $st = $Report.stability
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine('--- Giám sát độ ổn định (WHEA / TDR) ---')
+        [void]$sb.AppendLine("Truy vấn     : $($st.query_status) | WHEA(in=$($st.whea.total_in_window), PCIe=$($st.whea.pcie_matched_count), out=$($st.whea.out_of_window_count)) | TDR(in=$($st.tdr.total_in_window), cand=$($st.tdr.candidate_tdr_count), Display4101=$($st.tdr.display_reset_count))")
+    }
+
     if ($Report.completeness) {
         [void]$sb.AppendLine('')
         [void]$sb.AppendLine('--- Mức độ đầy đủ theo nhóm bằng chứng ---')
@@ -2381,7 +2928,8 @@ function Save-LocalReport {
     param(
         [Parameter(Mandatory = $true)]$Report,
         [Parameter(Mandatory = $true)][string]$Dir,
-        [switch]$KeepHistory
+        [switch]$KeepHistory,
+        $FullSamples = $null
     )
     [void][System.IO.Directory]::CreateDirectory($Dir)
     $san = ConvertTo-SanitizedReportJson -Report $Report
@@ -2404,6 +2952,12 @@ function Save-LocalReport {
 
     [System.IO.File]::WriteAllText($jsonPath, $jsonText, $utf8NoBom)
     [System.IO.File]::WriteAllText($summaryPath, $summaryText, $utf8NoBom)
+    $tsFullPath = $null
+    if ($null -ne $FullSamples -and @($FullSamples).Count -gt 0) {
+        $tsFullPath = Join-Path -Path $Dir -ChildPath "$baseName-timeseries.json"
+        $tsFullText = Remove-Pii -Text (@($FullSamples) | ConvertTo-Json -Depth 6)
+        [System.IO.File]::WriteAllText($tsFullPath, $tsFullText, $utf8NoBom)
+    }
     Save-LastReportId -BaseDir $Dir -ReportId ([string]$Report.report_id) -KeepHistory:$KeepHistory
 
     $stageDir = Join-Path -Path ([System.IO.Path]::GetTempPath()) ("vga-zip-" + [guid]::NewGuid().ToString())
@@ -2411,6 +2965,9 @@ function Save-LocalReport {
         [void][System.IO.Directory]::CreateDirectory($stageDir)
         [System.IO.File]::Copy($jsonPath, (Join-Path -Path $stageDir -ChildPath 'report.json'), $true)
         [System.IO.File]::Copy($summaryPath, (Join-Path -Path $stageDir -ChildPath 'summary.txt'), $true)
+        if ($tsFullPath -and (Test-Path -LiteralPath $tsFullPath)) {
+            [System.IO.File]::Copy($tsFullPath, (Join-Path -Path $stageDir -ChildPath 'timeseries-full.json'), $true)
+        }
         if (Test-Path -LiteralPath $zipPath) {
             Remove-Item -LiteralPath $zipPath -Force
         }
@@ -2823,14 +3380,43 @@ function Start-CollectorInteractive {
         }
     }
 
-    $loadBench = $null
-    if ($useRunLoadTest) {
-        Write-Host 'Đang chạy bài thử tải nhẹ P2 (vgabench CUDA Driver API / PCIe H2D-D2H)...'
-        $loadBench = Get-VgaBenchInfo -TargetBdf $targetBdf
+    $topoObj = $null
+    if ($resolvedSelectedGpu -and (Get-ObjProp $resolvedSelectedGpu 'instance_id')) {
+        $topoObj = Get-PcieTopologyInfo -TargetGpu $resolvedSelectedGpu
     }
 
+    $idleSecVal = 10; $loadSecVal = 30; $recSecVal = 10
+    if ($env:VGA_IDLE_SEC -match '^\d+$') { $idleSecVal = [int]$env:VGA_IDLE_SEC }
+    if ($env:VGA_LOAD_SEC -match '^\d+$') { $loadSecVal = [int]$env:VGA_LOAD_SEC }
+    if ($env:VGA_RECOVERY_SEC -match '^\d+$') { $recSecVal = [int]$env:VGA_RECOVERY_SEC }
+
+    $loadBench = $null
+    $loadTestObj = $null
+    $fullTsSamples = $null
+    if ($useRunLoadTest) {
+        $benchCmd = Get-Command Get-VgaBenchInfo -ErrorAction SilentlyContinue
+        if ($benchCmd -and $benchCmd.Definition -notmatch 'Invoke-VgaBenchRaw') {
+            Write-Host 'Đang chạy bài thử tải nhẹ P2 (vgabench)...'
+            $loadBench = Get-VgaBenchInfo -TargetBdf $targetBdf
+        } else {
+            Write-Host "Đang chạy quy trình đo tải P2 (idle ${idleSecVal}s -> load ${loadSecVal}s -> recovery ${recSecVal}s)..."
+            $wf = Invoke-LoadTestWorkflow -TargetGpu $resolvedSelectedGpu -Nvidia $nvidia -IdleSec $idleSecVal -LoadSec $loadSecVal -RecoverySec $recSecVal
+            $loadBench = $wf.BenchResult
+            $loadTestObj = $wf.LoadTest
+            $fullTsSamples = $wf.FullSamples
+        }
+    }
+
+    $upstreamBdfs = @()
+    if ($topoObj -and $topoObj.upstream_chain) {
+        $upstreamBdfs = @($topoObj.upstream_chain | Where-Object { $_.bdf -and $_.role -ne 'endpoint' } | ForEach-Object { $_.bdf })
+    }
+    $stabStartUtc = [DateTime]::Parse($collectionStartedUtc).ToUniversalTime()
+    $stabEndUtc = [DateTime]::UtcNow
+    $stabObj = Get-StabilityEvents -WindowStartedUtc $stabStartUtc -WindowFinishedUtc $stabEndUtc -TargetBdf $targetBdf -UpstreamBdfs $upstreamBdfs
+
     $outDir = if (-not [string]::IsNullOrWhiteSpace($env:VGA_BAT_DIR)) { Join-Path $env:VGA_BAT_DIR 'vga-reports-out' } else { Join-Path (Get-Location).Path 'vga-reports-out' }
-    $report = New-Report -Inventory $inventory -Nvidia $nvidia -Context $ctx -ExperimentDir $outDir -TargetBdf $targetBdf -CollectionStartedUtc $collectionStartedUtc -KeepHistory:$useKeepHistory -LoadBench $loadBench
+    $report = New-Report -Inventory $inventory -Nvidia $nvidia -Context $ctx -ExperimentDir $outDir -TargetBdf $targetBdf -CollectionStartedUtc $collectionStartedUtc -KeepHistory:$useKeepHistory -LoadBench $loadBench -Topology $topoObj -LoadTest $loadTestObj -Stability $stabObj
 
     $rawPreviewJson = $report | ConvertTo-Json -Depth 12
     [void](Redact-ReportObject -InputObject $report)
@@ -2858,7 +3444,7 @@ function Start-CollectorInteractive {
         $action = Read-Host 'Nhập lựa chọn (1/2/3)'
     }
     if ($action -eq '1') {
-        $saved = Save-LocalReport -Report $report -Dir $outDir -KeepHistory:$useKeepHistory
+        $saved = Save-LocalReport -Report $report -Dir $outDir -KeepHistory:$useKeepHistory -FullSamples $fullTsSamples
         Write-Host "Đã lưu báo cáo cục bộ tại:"
         Write-Host "  JSON: $($saved.JsonPath)"
         Write-Host "  ZIP : $($saved.ZipPath)"

@@ -1916,6 +1916,134 @@ Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)
     Assert-Equal $topoMiss.root_port.identified $false 'missing parent chain -> root_port.identified false'
 }
 
+# =========================================================================
+# Phase 2 Task 3 RED Tests: EventLog WHEA/TDR window + Load workflow & thermal stop
+# =========================================================================
+
+Invoke-TestCase 'p2_stability_events_distinguishes_empty_denied_out_of_window_other_gpu_non_pcie_and_unattributed' {
+    $winStart = [DateTime]::Parse('2026-11-22T02:00:00Z').ToUniversalTime()
+    $winEnd   = [DateTime]::Parse('2026-11-22T02:01:00Z').ToUniversalTime()
+
+    # Case A: Clean empty Event Log (NoMatchingEventsFound semantics)
+    function Get-RawSystemWinEvents { param($StartTime, $EndTime) return @() }
+    $stEmpty = Get-StabilityEvents -WindowStartedUtc $winStart -WindowFinishedUtc $winEnd -TargetBdf '0000:01:00.0'
+    Assert-Equal $stEmpty.query_status 'ok' 'empty event log is query_status=ok'
+    Assert-Equal $stEmpty.whea.total_in_window 0 '0 WHEA in window'
+    Assert-Equal $stEmpty.tdr.total_in_window 0 '0 TDR in window'
+
+    $inv = @([pscustomobject]@{
+        bdf = [pscustomobject]@{ value = '0000:01:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+        vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+        device_id = [pscustomobject]@{ value = '2189'; source = 'pnp'; unit = $null; status = 'ok' }
+        subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+        revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+        name = [pscustomobject]@{ value = 'CMP 30HX'; source = 'cim'; unit = $null; status = 'ok' }
+        pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+        driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+    })
+    $ctx = [pscustomobject]@{ mod_state = 'stock'; mod_type = 'none'; riser = 'direct'; slot = 'cpu_x16'; stage = 'baseline'; notes = '' }
+    $benchFull = [pscustomobject]@{ status = 'ok'; bdf = '0000:01:00.0'; compute_capability = '7.5'; transfer_size_mb = 64; pinned_host = $true; h2d_bandwidth_gbps = 5.9; d2h_bandwidth_gbps = 6.0; fp32_kernel_ok = $true; fp32_gflops = 60.0; has_timeseries = $true }
+    $repLoadOk = New-Report -Inventory $inv -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctx -LoadBench $benchFull -Stability $stEmpty
+    Assert-Equal $repLoadOk.completeness.stability.status 'ok' 'stability ok when load ran and 0 events matched'
+    Assert-True ($repLoadOk.completeness.stability.reason.Contains('không thấy sự kiện')) 'empty ok reason stated explicitly'
+
+    # Case B: Permission denied never claims clean window
+    function Get-RawSystemWinEvents { param($StartTime, $EndTime) throw [System.UnauthorizedAccessException]::new('Attempted to perform an unauthorized operation at C:\Users\SecretAdmin\log.evtx') }
+    $stDenied = Get-StabilityEvents -WindowStartedUtc $winStart -WindowFinishedUtc $winEnd -TargetBdf '0000:01:00.0'
+    Assert-Equal $stDenied.query_status 'permission_denied' 'permission_denied surfaced'
+    Assert-True (-not $stDenied.query_error.Contains('SecretAdmin')) 'PII redacted from query_error'
+    $repDenied = New-Report -Inventory $inv -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctx -LoadBench $benchFull -Stability $stDenied
+    Assert-True ($repDenied.completeness.stability.status -ne 'ok') 'permission_denied must not mark stability ok'
+    Assert-True (-not $repDenied.completeness.stability.reason.Contains('không thấy sự kiện')) 'permission_denied must NOT say no matching events'
+
+    # Case C/D/E: Out-of-window, WHEA non-PCIe, WHEA other GPU, WHEA target GPU, TDR unattributed + Display 4101
+    function Get-RawSystemWinEvents {
+        param($StartTime, $EndTime)
+        return @(
+            [pscustomobject]@{ ProviderName = 'Microsoft-Windows-WHEA-Logger'; Id = 17; LevelDisplayName = 'Warning'; TimeCreated = $winStart.AddMinutes(-5); Message = 'PCI Express Error Bus:0 Device:1 Function:0'; Xml = '' },
+            [pscustomobject]@{ ProviderName = 'Microsoft-Windows-WHEA-Logger'; Id = 18; LevelDisplayName = 'Error'; TimeCreated = $winStart.AddSeconds(10); Message = 'Machine Check Exception Processor Cache Error'; Xml = '' },
+            [pscustomobject]@{ ProviderName = 'Microsoft-Windows-WHEA-Logger'; Id = 17; LevelDisplayName = 'Warning'; TimeCreated = $winStart.AddSeconds(15); Message = 'PCI Express Error 0000:08:00.0 C:\Users\OwnerSecret\dump'; Xml = '' },
+            [pscustomobject]@{ ProviderName = 'Microsoft-Windows-WHEA-Logger'; Id = 17; LevelDisplayName = 'Warning'; TimeCreated = $winStart.AddSeconds(20); Message = 'PCI Express Root/Endpoint Error 0000:01:00.0 AER'; Xml = '' },
+            [pscustomobject]@{ ProviderName = 'nvlddmkm'; Id = 13; LevelDisplayName = 'Error'; TimeCreated = $winStart.AddSeconds(25); Message = 'Graphics Exception on engine'; Xml = '' },
+            [pscustomobject]@{ ProviderName = 'Display'; Id = 4101; LevelDisplayName = 'Warning'; TimeCreated = $winStart.AddSeconds(26); Message = 'Display driver nvlddmkm stopped responding'; Xml = '' }
+        )
+    }
+    $stMixed = Get-StabilityEvents -WindowStartedUtc $winStart -WindowFinishedUtc $winEnd -TargetBdf '0000:01:00.0'
+    Assert-Equal $stMixed.whea.out_of_window_count 1 'out-of-window WHEA counted separately'
+    Assert-Equal $stMixed.whea.total_in_window 3 '3 WHEA in window'
+    Assert-Equal $stMixed.whea.other_whea_count 2 'non-PCIe (ID 18) + other-GPU (0000:08:00.0) placed in other_whea_count'
+    Assert-Equal $stMixed.whea.pcie_matched_count 1 'only target GPU 0000:01:00.0 matched pcie_matched_count'
+    Assert-Equal $stMixed.tdr.candidate_tdr_count 2 'nvlddmkm 13 + Display 4101 candidates counted'
+    Assert-Equal $stMixed.tdr.display_reset_count 1 'Display 4101 counted'
+    Assert-Equal $stMixed.tdr.unattributed_count 2 'events without explicit BDF marked unattributed'
+
+    $repMixed = New-Report -Inventory $inv -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctx -LoadBench $benchFull -Stability $stMixed
+    $jsonMixed = $repMixed | ConvertTo-Json -Depth 12
+    Assert-True (-not $jsonMixed.Contains('OwnerSecret')) 'raw log PII never enters stability payload'
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("vga-stab-" + [guid]::NewGuid() + ".json")
+    try {
+        [IO.File]::WriteAllText($tmp, $jsonMixed, (New-Object Text.UTF8Encoding($false)))
+        $nodeOut = & node -e "const fs=require('fs'), r=require(process.argv[1]), d=JSON.parse(fs.readFileSync(process.argv[2],'utf8')); const v=r.validateReport(d), p=r.findPii(d); if(!v.ok || p.length){ console.log(JSON.stringify({v,p})); process.exit(1); }" $reportCjsPath $tmp
+        Assert-Equal $LASTEXITCODE 0 "Stability v2 report failed Node validation: $nodeOut"
+    } finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'p2_load_test_workflow_samples_idle_load_recovery_and_stops_on_thermal_limit' {
+    $inv = @([pscustomobject]@{
+        bdf = [pscustomobject]@{ value = '0000:01:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+        vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+        device_id = [pscustomobject]@{ value = '2189'; source = 'pnp'; unit = $null; status = 'ok' }
+        subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+        revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+        name = [pscustomobject]@{ value = 'CMP 30HX'; source = 'cim'; unit = $null; status = 'ok' }
+        pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+        driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+        profile = (Get-GpuProfileDetails -VendorId '10DE' -DeviceId '2189')
+    })
+    $script:SampleCall = 0
+    function Get-GpuTelemetrySample {
+        param([string]$TargetBdf)
+        $script:SampleCall += 1
+        $gen = if ($script:SampleCall -eq 2) { 2 } else { 1 }
+        return [pscustomobject]@{ pcie_gen = $gen; pcie_width = 16; temp_c = 42.5; power_w = 55.0; clocks_sm_mhz = 1200; clocks_mem_mhz = 7000; util_gpu_pct = 50; pstate = 'P0' }
+    }
+    function Invoke-VgaBenchRaw {
+        param([string]$TargetBdf, [int]$SizeMB, [int]$Iterations, [int]$TimeoutMs, [int]$DurationMs)
+        return '{"status":"ok","bdf":"0000:01:00.0","driver_version":13050,"compute_capability":"7.5","benchmark_method":"nvcuda_pinned_host","warmup_included":true,"transfer_size_mb":64,"iterations":5,"pinned_host":true,"h2d_bandwidth_gbps":5.9,"h2d_min_gbps":5.7,"h2d_max_gbps":6.1,"d2h_bandwidth_gbps":6.0,"d2h_min_gbps":5.8,"d2h_max_gbps":6.2,"fp32_kernel_ok":true,"fp32_gflops":60.0,"duration_ms":320}'
+    }
+
+    $wf = Invoke-LoadTestWorkflow -TargetGpu $inv[0] -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -IdleSec 1 -LoadSec 1 -RecoverySec 1 -SampleIntervalMs 150
+    Assert-Equal $wf.LoadTest.status 'ok' 'load workflow succeeds'
+    Assert-Equal $wf.LoadTest.stop_reason 'completed' 'completed stop reason'
+    Assert-True ($wf.LoadTest.timeseries.total_samples -ge 3) 'idle + load + recovery samples captured'
+    $phases = @($wf.LoadTest.timeseries.samples | ForEach-Object { $_.phase })
+    Assert-True ($phases -contains 'idle' -and $phases -contains 'load' -and $phases -contains 'recovery') 'all 3 phases present in timeseries'
+
+    # Thermal limit watchdog stops workflow cleanly and retains samples collected before trip
+    function Get-GpuTelemetrySample {
+        param([string]$TargetBdf)
+        return [pscustomobject]@{ pcie_gen = 2; pcie_width = 16; temp_c = 92.0; power_w = 55.0; clocks_sm_mhz = 1200; clocks_mem_mhz = 7000; util_gpu_pct = 90; pstate = 'P0' }
+    }
+    $wfHot = Invoke-LoadTestWorkflow -TargetGpu $inv[0] -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -IdleSec 0 -LoadSec 2 -RecoverySec 0 -SampleIntervalMs 150 -MaxTempC 85
+    Assert-Equal $wfHot.LoadTest.stop_reason 'thermal_limit' 'thermal limit stopped workflow'
+    Assert-True ($wfHot.LoadTest.timeseries.total_samples -ge 1) 'partial samples retained on thermal stop'
+
+    $ctx = [pscustomobject]@{ mod_state = 'stock'; mod_type = 'none'; riser = 'direct'; slot = 'cpu_x16'; stage = 'baseline'; notes = '' }
+    $rep = New-Report -Inventory $inv -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctx -LoadBench $wf.BenchResult -LoadTest $wf.LoadTest
+    Assert-Equal $rep.completeness.link_load.status 'ok' 'link_load becomes ok with full timeseries'
+    $json = $rep | ConvertTo-Json -Depth 12
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("vga-load-" + [guid]::NewGuid() + ".json")
+    try {
+        [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false)))
+        $nodeOut = & node -e "const fs=require('fs'), r=require(process.argv[1]), d=JSON.parse(fs.readFileSync(process.argv[2],'utf8')); const v=r.validateReport(d), p=r.findPii(d); if(!v.ok || p.length){ console.log(JSON.stringify({v,p})); process.exit(1); }" $reportCjsPath $tmp
+        Assert-Equal $LASTEXITCODE 0 "LoadTest v2 report failed Node validation: $nodeOut"
+    } finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Host "Summary: Passed=$script:Passed Failed=$script:Failed"
 if ($script:Failed -gt 0) { exit 1 }
 exit 0

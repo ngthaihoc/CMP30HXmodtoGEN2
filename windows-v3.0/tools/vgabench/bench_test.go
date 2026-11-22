@@ -294,3 +294,20 @@ func TestSystemCudaDLLPath_RestrictedToSystem32(t *testing.T) {
 		t.Fatalf("expected error for empty system dir")
 	}
 }
+
+func TestRunBenchmark_DurationSustainsLoadWithinBudget(t *testing.T) {
+	drv := newMockCudaDriver()
+	res := RunBenchmark(drv, BenchConfig{
+		BDF:        "0000:01:00.0",
+		SizeMB:     4,
+		Iterations: 2,
+		TimeoutMs:  5000,
+		DurationMs: 250,
+	})
+	if res.Status != "ok" || !res.FP32KernelOK {
+		t.Fatalf("expected ok with sustained duration, got %+v", res)
+	}
+	if res.DurationMs < 200 {
+		t.Fatalf("expected duration >= 200ms when DurationMs=250, got %d", res.DurationMs)
+	}
+}
