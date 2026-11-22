@@ -6,7 +6,10 @@ const {
   validateReport,
   findPii,
   renderSummary,
+  identifyGpuProfile,
+  getGpuProfileDetails,
   NVIDIA_REQUIRED_FIELDS,
+  NVIDIA_EXTENDED_FIELDS,
 } = require('./report.cjs');
 
 function makeField(value, source = 'test', unit = null, status = 'ok') {
@@ -286,4 +289,342 @@ test('renderSummary_handles_noncontiguous_bdf', () => {
   assert.ok(summary.includes('0000:00:02.0'));
   assert.ok(summary.includes('0000:07:00.0'));
   assert.ok(summary.includes('NVIDIA CMP 30HX'));
+});
+
+test('findPii_flags_ipv6_without_leaking_values', () => {
+  for (const address of [
+    '2001:db8:1234:5678:90ab:cdef:1234:5678',
+    '2001:db8::1', '::1', '::', 'fe80::1234%12',
+    '::ffff:192.0.2.128', '[2001:db8::1]:443',
+    'https://[2001:db8::1]/report',
+  ]) {
+    const report = makeValidReport();
+    report.context.notes = `Địa chỉ ${address}, cần xóa.`;
+    const findings = findPii(report);
+    assert.ok(findings.includes('ipv6'), `Missing IPv6 category for ${address}`);
+    assert.equal(JSON.stringify(findings).includes(address), false);
+  }
+});
+
+test('findPii_does_not_confuse_pci_identifiers_or_versions_with_ipv6', () => {
+  for (const notes of [
+    '0000:01:00.0', '00000000:07:00.0', '10DE:2189',
+    '90.06.18.80.06', '32.0.16.2101', 'abc:def:ghi',
+  ]) {
+    const report = makeValidReport();
+    report.context.notes = notes;
+    assert.deepEqual(findPii(report), [], notes);
+  }
+});
+
+test('identifyGpuProfile_matches_40hxcore_and_leaves_1f06_unknown', () => {
+  assert.equal(identifyGpuProfile('10DE', '1F0B'), 'CMP 40HX (TU106)');
+  assert.equal(identifyGpuProfile('10de', '2189'), 'CMP 30HX (TU116)');
+  assert.equal(identifyGpuProfile('10DE', '1F06'), null);
+  assert.equal(identifyGpuProfile('10DE', '1F07'), null);
+  assert.equal(identifyGpuProfile(null, '1F0B'), null);
+});
+
+test('renderSummary_marks_target_gpu_profile_and_unknown_1f06', () => {
+  const report = makeValidReport({
+    gpus: [
+      makeGpu({
+        bdf: makeField('0000:01:00.0', 'pnp'),
+        vendor_id: makeField('10DE', 'pnp'),
+        device_id: makeField('1F06', 'pnp'),
+        name: makeField('NVIDIA GeForce RTX 2060 SUPER', 'cim'),
+      }),
+      makeGpu({
+        bdf: makeField('0000:02:00.0', 'pnp'),
+        vendor_id: makeField('10DE', 'pnp'),
+        device_id: makeField('1F0B', 'pnp'),
+        name: makeField('NVIDIA CMP 40HX', 'cim'),
+      }),
+    ],
+    nvidia: makeNvidiaBlock({
+      overrides: {
+        name: makeField('NVIDIA CMP 40HX', 'nvidia-smi'),
+        'pci.bus_id': makeField('0000:02:00.0', 'nvidia-smi'),
+        'pci.device_id': makeField('0x1F0B10DE', 'nvidia-smi'),
+      },
+    }),
+  });
+
+  const summary = renderSummary(report);
+  assert.ok(summary.includes('GPU mục tiêu:'));
+  assert.ok(summary.includes('0000:02:00.0'));
+  assert.ok(summary.includes('CMP 40HX &#40;TU106&#41;') || summary.includes('CMP 40HX (TU106)'));
+  assert.ok(summary.includes('(mục tiêu)'));
+  assert.ok(summary.includes('chưa nhận diện'));
+});
+
+test('renderSummary_normalizes_gen_and_warns_only_on_source_conflict', () => {
+  const conflictReport = makeValidReport({
+    pcie: {
+      max_gen: makeField(3, 'pnp', 'gen'),
+      current_gen: makeField(1, 'pnp', 'gen'),
+      max_width: makeField(16, 'pnp', 'lanes'),
+      current_width: makeField(16, 'pnp', 'lanes'),
+    },
+  });
+  const conflictSummary = renderSummary(conflictReport);
+  assert.ok(conflictSummary.includes('Gen1 ×16'));
+  assert.ok(conflictSummary.includes('Gen3 ×16'));
+  assert.ok(conflictSummary.includes('Cảnh báo'));
+
+  const alignedReport = makeValidReport();
+  const alignedSummary = renderSummary(alignedReport);
+  assert.ok(alignedSummary.includes('Gen3 ×16'));
+  assert.equal(alignedSummary.includes('Cảnh báo:'), false);
+});
+
+test('renderSummary_shows_basic_nvidia_count_and_caveat', () => {
+  const partialReport = makeValidReport({
+    nvidia: makeNvidiaBlock({
+      overrides: {
+        compute_cap: makeUnsupportedField('nvidia-smi'),
+      },
+    }),
+  });
+  const summary = renderSummary(partialReport);
+  assert.ok(summary.includes('17/18'));
+  assert.ok(summary.includes('Trường NVIDIA cơ bản (nvidia-smi):'));
+  assert.ok(summary.includes('không phải đủ dữ liệu nghiên cứu/mod'));
+  assert.equal(validateReport(partialReport).ok, true);
+});
+
+function makeNvidiaExtendedBlock({ overrides = {} } = {}) {
+  const sampleValues = {
+    'power.limit': makeField(215, 'nvidia-smi', 'W'),
+    'enforced.power.limit': makeField(140, 'nvidia-smi', 'W'),
+    'power.default_limit': makeField(215, 'nvidia-smi', 'W'),
+    'power.min_limit': makeField(105, 'nvidia-smi', 'W'),
+    'power.max_limit': makeField(269, 'nvidia-smi', 'W'),
+    'temperature.gpu.tlimit': makeField(45, 'nvidia-smi', 'C'),
+    'temperature.memory': makeUnsupportedField('nvidia-smi', 'C'),
+    'fan.speed': makeField(30, 'nvidia-smi', '%'),
+    'utilization.gpu': makeField(12, 'nvidia-smi', '%'),
+    'utilization.memory': makeField(8, 'nvidia-smi', '%'),
+    'memory.used': makeField(512, 'nvidia-smi', 'MiB'),
+    'memory.free': makeField(7680, 'nvidia-smi', 'MiB'),
+    'ecc.mode.current': makeUnsupportedField('nvidia-smi'),
+    'clocks_throttle_reasons.active': makeField('0x0000000000000001', 'nvidia-smi'),
+    'clocks_throttle_reasons.sw_power_cap': makeField('Not Active', 'nvidia-smi'),
+    'clocks_throttle_reasons.hw_slowdown': makeField('Not Active', 'nvidia-smi'),
+    'clocks_throttle_reasons.hw_thermal_slowdown': makeField('Not Active', 'nvidia-smi'),
+    'clocks_throttle_reasons.hw_power_brake_slowdown': makeField('Not Active', 'nvidia-smi'),
+  };
+  const extended = {};
+  const extended_missing = [];
+  for (const key of NVIDIA_EXTENDED_FIELDS) {
+    extended[key] = overrides[key] || sampleValues[key];
+    if (extended[key].status !== 'ok') {
+      extended_missing.push(key);
+    }
+  }
+  return { extended, extended_missing };
+}
+
+function makeValidV2Report(overrides = {}) {
+  const ext = makeNvidiaExtendedBlock();
+  const base = makeValidReport({
+    schema_version: 2,
+    collector_version: '1.1.0',
+    previous_report_id: '22222222-3333-4444-8555-666666666666',
+    target_bdf: '0000:01:00.0',
+    collection_started_utc: '2026-11-21T07:00:00Z',
+    collection_finished_utc: '2026-11-21T07:00:03Z',
+    source_timestamps: {
+      pnp_utc: '2026-11-21T07:00:01Z',
+      cim_utc: '2026-11-21T07:00:01Z',
+      nvidia_smi_utc: '2026-11-21T07:00:02Z',
+      security_utc: '2026-11-21T07:00:02Z',
+    },
+    evidence_level: 'reported',
+    gpus: [
+      makeGpu({
+        profile: {
+          id: null,
+          name: null,
+          family: null,
+          category: 'unknown',
+          target_pcie_gen: null,
+          tensor_applicable: 'unknown',
+          identity_note: null,
+        },
+        driver: {
+          provider: makeField('NVIDIA', 'pnp'),
+          date: makeField('2026-10-19', 'pnp'),
+          inf_name: makeField('oem2.inf', 'pnp'),
+          service: makeField('nvlddmkm', 'pnp'),
+          problem_code: makeField(0, 'pnp'),
+          location_path: makeField('PCIROOT(0)#PCI(0101)#PCI(0000)', 'pnp'),
+        },
+      }),
+    ],
+    nvidia: {
+      ...makeNvidiaBlock(),
+      ...ext,
+    },
+    security: {
+      boot_mode: makeField('UEFI', 'windows_env'),
+      secure_boot: makeField(false, 'registry'),
+      hvci_running: makeField(false, 'cim'),
+      test_signing: makeField(false, 'registry'),
+    },
+    completeness: {
+      inventory: { complete: true, status: 'ok', missing: [], reason: '' },
+      topology: { complete: false, status: 'partial', missing: ['upstream_root_port', 'tls'], reason: 'P3 read-only PCIe topology helper not in P1' },
+      link_idle: { complete: true, status: 'ok', missing: [], reason: '' },
+      link_load: { complete: false, status: 'skipped', missing: ['h2d_d2h', 'load_timeseries'], reason: 'P2 load benchmark skipped in basic mode' },
+      compute: { complete: false, status: 'skipped', missing: ['cuda_runtime', 'tensor_check'], reason: 'P2 CUDA helper not invoked' },
+      stability: { complete: false, status: 'skipped', missing: ['whea_events', 'tdr_events'], reason: 'Stability window requires load mode' },
+      comparison: { complete: false, status: 'partial', missing: ['paired_diff'], reason: 'Previous report linked without P2 baseline metrics' },
+    },
+    legacy_status: {
+      present: true,
+      source: 'gen2_status',
+      status_code: 'GEN2_SUCCESS',
+      error_code: 'NONE',
+      speed_current: 2,
+      width_current: 16,
+      tls_target: 2,
+      device_id: '2189',
+      mrrs_bytes: 512,
+      observed_utc: '2026-11-21T06:50:00Z',
+    },
+    context: {
+      mod_state: 'modded',
+      mod_type: 'efi',
+      riser: 'direct',
+      slot: 'cpu_x16',
+      stage: 'after_unlock',
+      notes: 'Clean P1 v2 sample',
+    },
+  });
+  return { ...base, ...overrides };
+}
+
+test('getGpuProfileDetails_covers_p106_p100_cmp_and_p100_name_ambiguity', () => {
+  const cmp40 = getGpuProfileDetails('10DE', '1F0B');
+  assert.equal(cmp40.name, 'CMP 40HX (TU106)');
+  assert.equal(cmp40.target_pcie_gen, 2);
+  assert.equal(cmp40.tensor_applicable, 'unverified');
+
+  const cmp30 = getGpuProfileDetails('10DE', '2189');
+  assert.equal(cmp30.name, 'CMP 30HX (TU116)');
+  assert.equal(cmp30.tensor_applicable, 'no');
+
+  const p106_100 = getGpuProfileDetails('10DE', '1C07');
+  assert.equal(p106_100.name, 'P106-100 (GP106)');
+  assert.equal(p106_100.category, 'mining');
+  assert.equal(p106_100.tensor_applicable, 'no');
+  assert.equal(identifyGpuProfile('10DE', '1C07'), 'P106-100 (GP106)');
+
+  const p106_090 = getGpuProfileDetails('10DE', '1C09');
+  assert.equal(p106_090.name, 'P106-090 (GP106)');
+  assert.equal(p106_090.tensor_applicable, 'no');
+
+  const p100_16 = getGpuProfileDetails('10DE', '15F8');
+  assert.equal(p100_16.name, 'Tesla P100 PCIe 16GB (GP100)');
+  assert.equal(p100_16.target_pcie_gen, 3);
+  assert.equal(p100_16.tensor_applicable, 'no');
+
+  assert.equal(getGpuProfileDetails('10DE', '15F7').name, 'Tesla P100 PCIe 12GB (GP100)');
+  assert.equal(getGpuProfileDetails('10DE', '15F9').name, 'Tesla P100 SXM2 (GP100)');
+
+  const ambiguous = getGpuProfileDetails('10DE', '9999', 'NVIDIA P100 Modded');
+  assert.equal(ambiguous.name, null);
+  assert.equal(ambiguous.category, 'unknown');
+  assert.ok(ambiguous.identity_note && ambiguous.identity_note.includes('P100'));
+});
+
+test('validateReport_accepts_v2_full_contract_and_rejects_unallowlisted_v2_fields', () => {
+  const validV2 = makeValidV2Report();
+  const resValid = validateReport(validV2);
+  assert.equal(resValid.ok, true, `Expected valid v2 report, got: ${resValid.errors.join('; ')}`);
+  assert.deepEqual(findPii(validV2), []);
+
+  const extraSecurity = makeValidV2Report({
+    security: { ...validV2.security, extra_sec: makeField('bad') },
+  });
+  assert.equal(validateReport(extraSecurity).ok, false);
+
+  const extraTimestamps = makeValidV2Report({
+    source_timestamps: { ...validV2.source_timestamps, extra_ts: '2026-11-21T07:00:00Z' },
+  });
+  assert.equal(validateReport(extraTimestamps).ok, false);
+
+  const badEvidence = makeValidV2Report({ evidence_level: 'magical' });
+  assert.equal(validateReport(badEvidence).ok, false);
+
+  const missingCompleteness = makeValidV2Report();
+  delete missingCompleteness.completeness;
+  assert.equal(validateReport(missingCompleteness).ok, false);
+
+  const v1WithV2Field = makeValidReport({ security: validV2.security });
+  assert.equal(validateReport(v1WithV2Field).ok, false);
+});
+
+test('validateReport_rejects_driver_inf_with_path_or_unallowlisted_legacy_error_code', () => {
+  const validV2 = makeValidV2Report();
+
+  const winPathInf = makeValidV2Report({
+    gpus: [
+      {
+        ...validV2.gpus[0],
+        driver: {
+          ...validV2.gpus[0].driver,
+          inf_name: makeField('C:\\Windows\\INF\\oem2.inf', 'pnp'),
+        },
+      },
+    ],
+  });
+  assert.equal(validateReport(winPathInf).ok, false);
+
+  const slashInf = makeValidV2Report({
+    gpus: [
+      {
+        ...validV2.gpus[0],
+        driver: {
+          ...validV2.gpus[0].driver,
+          inf_name: makeField('dir/oem2.inf', 'pnp'),
+        },
+      },
+    ],
+  });
+  assert.equal(validateReport(slashInf).ok, false);
+
+  const badLegacyErr = makeValidV2Report({
+    legacy_status: {
+      ...validV2.legacy_status,
+      error_code: 'free text with spaces',
+    },
+  });
+  assert.equal(validateReport(badLegacyErr).ok, false);
+
+  const badLegacyCode = makeValidV2Report({
+    legacy_status: {
+      ...validV2.legacy_status,
+      status_code: 'ARBITRARY_TEXT',
+    },
+  });
+  assert.equal(validateReport(badLegacyCode).ok, false);
+});
+
+test('renderSummary_v2_includes_timestamps_security_extended_power_completeness_and_legacy', () => {
+  const report = makeValidV2Report();
+  const summary = renderSummary(report);
+  assert.ok(summary.includes('22222222-3333-4444-8555-666666666666'));
+  assert.ok(summary.includes('reported'));
+  assert.ok(summary.includes('pnp_utc'));
+  assert.ok(summary.includes('nvidia_smi_utc'));
+  assert.ok(summary.includes('Secure Boot'));
+  assert.ok(summary.includes('HVCI'));
+  assert.ok(summary.includes('Test Signing'));
+  assert.ok(summary.includes('oem2.inf'));
+  assert.ok(summary.includes('enforced.power.limit'));
+  assert.ok(summary.includes('140 W'));
+  assert.ok(summary.includes('GEN2_SUCCESS'));
+  assert.ok(summary.includes('link_load'));
 });

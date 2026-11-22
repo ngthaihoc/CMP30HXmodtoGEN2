@@ -4,7 +4,7 @@ Tài liệu hướng dẫn cài đặt, giới hạn gói miễn phí đã kiể
 
 ## 1. Giới hạn gói miễn phí Cloudflare (đã kiểm chứng 2026-11-21)
 
-Nguồn tham chiếu: tài liệu chính thức Cloudflare Workers & Workers KV (`developers.cloudflare.com`):
+Nguồn tham chiếu: tài liệu chính thức Cloudflare [giới hạn KV](https://developers.cloudflare.com/kv/platform/limits/), [ghi KV và tính nhất quán](https://developers.cloudflare.com/kv/api/write-key-value-pairs/), [định giá KV](https://developers.cloudflare.com/kv/platform/pricing/).
 
 | Tài nguyên | Giới hạn gói Free | Ghi chú thiết kế |
 | --- | --- | --- |
@@ -18,9 +18,15 @@ Nguồn tham chiếu: tài liệu chính thức Cloudflare Workers & Workers KV 
 
 ### Lý do chọn `DAILY_CAP = 200`
 
-- Yêu cầu không có chữ ký hoặc sai chữ ký bị `verifySignature` từ chối `401` **trước khi đọc/ghi KV** (0 lượt ghi KV).
-- Mỗi báo cáo đi qua quota và tạo issue thực hiện tối đa **3 lượt ghi KV**: 1 lần tăng bộ đếm ngày `d:<day>`, 1 lần tăng bộ đếm IP `q:<day>:<hash>`, 1 lần lưu chống trùng `r:<report_id>`.
-- Với `DAILY_CAP = 200`, tổng ghi KV tối đa khoảng **600 writes/ngày** (còn dư ~400 writes/ngày cho yêu cầu lỗi schema/PII hợp lệ chữ ký hoặc thử nghiệm), an toàn dưới trần **1.000 KV writes/ngày** của gói Free.
+- Thứ tự xử lý: route → loại nội dung/kích thước (đọc theo luồng, tối đa 2 MiB) → chữ ký → công tắc tiếp nhận → JSON/schema/PII → cấu hình → chống trùng → quota → GitHub.
+- Không có/sai chữ ký trả `401`; JSON/schema sai trả `400`; PII (gồm IPv4/IPv6) trả `422`. Các trường hợp này không đọc/ghi KV và không gọi GitHub. Khi intake tắt, yêu cầu đã ký nhận `503` trước kiểm tra nội dung và KV.
+- Gửi lại tuần tự cùng ID và cùng nội dung trả `200` cùng URL, khác nội dung trả `409`: đọc 1 khóa chống trùng, không tăng quota hay gọi GitHub, kể cả khi IP đã hết hạn mức.
+- Mỗi yêu cầu mới được quota chấp nhận ghi 2 khóa: `d:<day>` và `q:<day>:<hash>` (TTL `172800` giây). Tạo Issue và lưu chống trùng thành công ghi thêm `r:<report_id>` (không TTL). Lỗi GitHub vẫn tiêu thụ quota đã nhận.
+- Gọi `A` là số yêu cầu được quota chấp nhận, `S` là số bản ghi Issue lưu thành công: số ghi hoàn tất theo luồng bình thường là `2A + S`. Trong mô hình một isolate, không lỗi KV và bộ đếm nhất quán, `A ≤ 200`, `S ≤ A` nên tối đa 600 lượt ghi. Đây **không phải trần bảo đảm trên Cloudflare thật**; các ghi từng phần khi lỗi, thao tác quản trị và ghi đè giữa isolate cần đo riêng.
+- KV không có phép tăng nguyên tử và có tính nhất quán cuối cùng. Khóa Promise chỉ tuần tự hóa trong một isolate; `DAILY_CAP`/`IP_LIMIT` là hạn mức **gần đúng** toàn hệ thống. Chống trùng cũng không nguyên tử: hai yêu cầu đồng thời cùng ID có thể tạo hai Issue. Không tự thử lại hàng loạt để bù lỗi.
+- KV chỉ cho **1 lượt ghi/giây trên cùng khóa**, kể cả gói Paid. Mọi yêu cầu mới cùng ngày đều cập nhật `d:<day>`, nên tải đồng thời có thể gây lỗi KV trước khi hết quota ngày. Worker trả `503` với `reason: kv_error` thay vì lỗi không được bắt; lỗi KV trước khi tạo Issue không gọi GitHub. BAT giữ ZIP và `.pending.json`.
+- Thiếu/trống `IP_SALT` hoặc thiếu binding KV trả `503` với `reason: configuration_error`, không dùng muối mặc định công khai và không truy cập KV.
+- Nếu Issue đã tạo nhưng ghi `r:` thất bại, Worker trả `503`; gửi lại có thể tạo Issue trùng. Đối chiếu marker `vga-report:<report_id>` trên repo trước khi gửi lại nhiều lần. Muốn quota và chống trùng nghiêm ngặt phải thiết kế cơ chế điều phối riêng (ví dụ Durable Object); không triển khai trong v1.
 
 ### Phương án bổ sung: Cloudflare Rate Limiting binding trên `workers.dev`
 
@@ -131,4 +137,4 @@ Chạy trong thư mục `worker/vga-reports/`:
 3. Đóng/xóa các issue spam trên GitHub (hoặc chặn tài khoản nếu có qua Issue Form thủ công).
 
 ### Nâng cấp gói Cloudflare
-Nếu lưu lượng cộng đồng vượt **1.000 KV writes/ngày** (tương đương > ~330 báo cáo/ngày) hoặc cần giới hạn cao hơn, nâng cấp lên gói **Workers Paid** trong bảng điều khiển Cloudflare, sau đó nâng `DAILY_CAP` trong `wrangler.toml` và triển khai lại.
+Nếu lưu lượng cộng đồng tiến gần **1.000 KV writes/ngày**, đo số ghi thực tế (gồm lỗi và thao tác quản trị) trong Cloudflare trước khi nâng gói hoặc tăng `DAILY_CAP`. Workers Paid không loại bỏ giới hạn ghi cùng khóa hay biến KV thành bộ đếm nguyên tử; cần đánh giá lại kiến trúc khi tải tăng.

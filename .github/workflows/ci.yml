@@ -58,6 +58,9 @@ jobs:
       - name: Test VGA collector script
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Test-VGA-Collector.ps1
 
+      - name: Test VGA collector batch entrypoint
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Test-VGA-Collector-Batch.ps1
+
       - name: Build standalone Windows tools
         working-directory: windows-v3.0/tools
         run: |

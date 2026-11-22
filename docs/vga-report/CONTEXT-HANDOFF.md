@@ -1,0 +1,217 @@
+# VGA Collector & Modding Research System — Tài liệu Bàn giao Bối cảnh (Context Handoff)
+
+> **Cập nhật:** 2026-11-22  
+> **Trạng thái:** Hoàn thành **P0** (Độ tin cậy collector) và **P1** (Schema v2 & Collector cơ bản mở rộng), đã triển khai Worker v2 lên Cloudflare Sandbox và xác minh E2E thành công.  
+> **Mục đích:** Tài liệu kỹ thuật chuẩn theo nguyên lý *Context Engineering* nhằm cung cấp toàn bộ bối cảnh hệ thống, kiến trúc dữ liệu, các mốc đã hoàn thành, kết quả kiểm chứng và lộ trình triển khai các pha tiếp theo (P2+).
+
+---
+
+## 1. Tổng quan Dự án & Mục tiêu
+
+Hệ thống **VGA Diagnostic Collector & Modding Research** được xây dựng nhằm thu thập dữ liệu phần cứng chuyên sâu, khách quan và có cấu trúc từ các dòng card đồ họa chuyên dụng và card đào coin (CMP 30HX, CMP 40HX, P106-100, P106-090, Tesla P100 PCIe/SXM2, v.v.) cũng như các dòng card đối chứng (RTX, GTX).
+
+### Mục tiêu cốt lõi:
+1. **Phục vụ nghiên cứu unlock / modding:** Phân biệt rõ ràng giữa giới hạn vật lý của GPU, giới hạn khe cắm/PCIe root port/riser, thiết lập BIOS/CSM/ReBAR, phiên bản driver, firmware VBIOS, và ảnh hưởng nhiệt độ/công suất.
+2. **Thu thập chỉ đọc (Read-only) an toàn tuyệt đối:** Collector chạy ở chế độ người dùng (user-mode), không tự ý ghi registry, không ghi PCI config space hay MMIO, không ép xung/đổi power limit, không flash VBIOS và không xâm phạm cơ chế bảo mật hệ thống (HVCI/Secure Boot).
+3. **Bảo mật & Không thu thập thông tin cá nhân (Zero-PII):** Tuyệt đối không thu thập hostname, username, đường dẫn thư mục người dùng, địa chỉ MAC, IPv4 công khai, IPv6, GPU UUID hay số serial phần cứng.
+4. **Vận chuyển dữ liệu tự động & có kiểm soát:** Báo cáo được ký HMAC-SHA256 gửi qua Cloudflare Worker intake để tự động tạo GitHub Issue trên kho lưu trữ mục tiêu với cơ chế chống trùng lặp (dedup), giới hạn hạn mức (quota) và phân loại nhãn tự động.
+
+---
+
+## 2. Kiến trúc Hệ thống & Hợp đồng Dữ liệu
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           MÁY NGƯỜI DÙNG / TESTBED                          │
+│                                                                             │
+│  [Collect_VGA_Report.bat v1.1.0]                                            │
+│   ├── CIM/PnP (Win32_VideoController, Win32_PnPEntity, PnP Problem Code)   │
+│   ├── NVIDIA SMI & NVML (18 trường cơ bản + 18 trường extended)             │
+│   ├── Security & Boot (UEFI/Legacy, Secure Boot, HVCI, Test Signing)        │
+│   ├── Driver Details (Provider, Date, Inf, Problem Code)                    │
+│   ├── Legacy Status Parser (gen2_status.txt, cmp30hx_batch_status.txt)      │
+│   └── Local Output: JSON v2 + Summary Markdown + ZIP                        │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+                      Ký HMAC-SHA256 (X-Report-Signature)
+                      Payload JSON v2 (tối đa 2 MiB)
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    CLOUDFLARE WORKER INTAKE (v2 Sandbox)                    │
+│                 cmp-vga-reports.wellynguyen.workers.dev                     │
+│                                                                             │
+│   1. Route & Method Check (POST /report, GET /healthz)                      │
+│   2. Content-Type (application/json) & Stream Size Limit (2 MiB)            │
+│   3. Xác thực Chữ ký HMAC-SHA256 (lệch thời gian cho phép ±300s)            │
+│   4. Kiểm tra Công tắc Intake (INTAKE_ENABLED)                              │
+│   5. Kiểm định Schema (v1 & v2) & Quét vi phạm PII                          │
+│   6. Chống trùng lặp (Dedup qua KV REPORTS: sha256(report_id))              │
+│   7. Kiểm tra Quota (IP_LIMIT = 10/ngày, DAILY_CAP = 200/ngày qua KV)       │
+│   8. Tạo GitHub Issue qua GitHub App Installation Token (octokit/app)       │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+                         Tạo Issue REST API (Issues: Write)
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        GITHUB REPOSITORY (Issues)                           │
+│  Hiện tại: ngthaihoc/vga-report-sandbox                                     │
+│  Sản xuất: ngthaihoc/CMP30HXmodtoGEN2                                       │
+│                                                                             │
+│  - Issue #1: Báo cáo v1 (Baseline RTX 2070)                                │
+│  - Issue #2: Báo cáo v2 (Đầy đủ trường extended & security)                │
+│  - Nhãn tự động: vga-report, hardware-sample, unverified                    │
+│  - Marker ẩn chống trùng: <!-- vga-report:<report_id> -->                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2.1. Hợp đồng Dữ liệu: Schema v1 so với Schema v2
+
+Tập tin schema gốc tại `docs/vga-report/schema.json` hỗ trợ song song hai phiên bản:
+- **`schema_version: 1`:** Bản cơ bản ban đầu, kiểm tra nghiêm ngặt `additionalProperties: false`, lưu trữ thông tin cơ bản của hệ thống và 18 trường `nvidia-smi`.
+- **`schema_version: 2`:** Bản mở rộng phục vụ modding và phân tích sâu, bao gồm:
+  - `previous_report_id`: Chuỗi UUID liên kết báo cáo trước đó để tạo chuỗi lịch sử thử nghiệm (đọc tự động từ `last_report_id.txt`).
+  - `target_bdf`: BDF của GPU được người dùng chọn làm đối tượng nghiên cứu chính (tránh nhầm lẫn trên máy chạy nhiều GPU).
+  - `collection_started_utc` & `collection_finished_utc`: Khung thời gian thu thập chuẩn UTC.
+  - `source_timestamps`: Thời điểm lấy dữ liệu của từng nguồn riêng biệt (`cim_pnp`, `nvidia_smi`, `nvidia_query`, `security`, `legacy_status`) để giải thích hiện tượng lệch tốc độ PCIe giữa idle và load.
+  - `evidence_level`: Mức độ tin cậy của bằng chứng (`reported`, `observed`, `compared`, `owner_verified`).
+  - `security`: Trạng thái `boot_mode` (`uefi`/`legacy`), `secure_boot`, `hvci_running`, `test_signing`.
+  - `completeness`: Đánh giá 7 nhóm dữ liệu (`inventory`, `topology`, `link_idle`, `link_load`, `compute`, `stability`, `comparison`) với danh sách thiếu sót và lý do chuẩn hóa (`unsupported`, `permission_denied`, `skipped`, `timeout`, `error`).
+  - `legacy_status`: Cho phép đọc an toàn log cũ của dự án (`gen2_status.txt`, `cmp30hx_batch_status.txt`) qua allowlist không chứa PII.
+  - `context.mod_type`: Loại can thiệp modding (`none_baseline`, `driver_mod`, `firmware_vbios`, `hardware_strap`, `pcie_riser_slot`, `power_mod`, `other`).
+  - `gpus[].driver`: Bổ sung `provider`, `date`, `inf_name` (chỉ giữ tên file, loại bỏ toàn bộ đường dẫn), `service`, `problem_code`, `location_path`.
+  - `gpus[].nvidia.extended`: 18 trường telemetry công suất, nhiệt độ, quạt, bộ nhớ, ECC và lý do điều tiết xung nhịp:
+    - `power.management.limit`, `enforced.power.limit`, `power.default_limit`, `power.min_limit`, `power.max_limit`
+    - `temperature.gpu.tlimit`, `temperature.memory`
+    - `fan.speed`
+    - `utilization.memory`
+    - `memory.used`, `memory.free`
+    - `ecc.mode.current`, `ecc.mode.pending`, `ecc.errors.corrected.volatile.total`, `ecc.errors.uncorrected.volatile.total`
+    - `clocks_event_reasons.active`, `clocks_event_reasons.sw_power_cap`, `clocks_event_reasons.hw_slowdown` (tương thích cả driver cũ dùng `clocks_throttle_reasons.*`).
+
+---
+
+## 3. Những công việc đã hoàn thành
+
+### Giai đoạn P0 — Khắc phục độ tin cậy Collector
+1. **Đồng bộ Device Profile với 40hxcore:** Sửa bảng ánh xạ thiết bị khớp chuẩn `windows-v3.0/tools/40hxcore/const.go`:
+   - `10DE:1F0B` -> `CMP 40HX`
+   - `10DE:2189` -> `CMP 30HX`
+   - Xóa bỏ mã hardcode `1F06` (RTX 2060 SUPER, trước đây gán nhầm là CMP 40HX; nay coi là card lạ/baseline).
+2. **Chọn GPU mục tiêu rõ ràng (`Select-TargetGpu`):**
+   - Hỗ trợ tham số `-TargetBdf`, biến môi trường `$env:VGA_TARGET_BDF`, và menu tương tác hiển thị danh sách GPU khi hệ thống có từ 2 GPU trở lên.
+   - Ngăn chặn việc GPU này mượn nhầm block `nvidia-smi` của GPU khác khi thiếu dòng.
+3. **Chuẩn hóa hiển thị PCIe & Cảnh báo:**
+   - Chuẩn hóa chuỗi PCIe thành `GenX ×Y` (ví dụ `Gen3 ×16`).
+   - Thêm cảnh báo khi có sự mâu thuẫn giữa PnP (`Gen1 ×16`) và `nvidia-smi` (`Gen3 ×16`).
+   - Đổi cách dùng từ trên giao diện: từ "18/18 hoàn thành" thành "18/18 trường NVIDIA cơ bản".
+
+### Giai đoạn P1 — Schema v2 và Collector cơ bản mở rộng
+1. **Xây dựng Schema & Fixture Dual-version:**
+   - `docs/vga-report/schema.json` hỗ trợ song song v1 và v2 thông qua `oneOf` có điều kiện.
+   - Xuất khẩu các helper trong `scripts/vga-report/report.cjs`: `identifyGpuProfile`, `getGpuProfileDetails`, `NVIDIA_EXTENDED_FIELDS`.
+   - Bổ sung hồ sơ nhận diện cho: `P106-100` (`10DE:1C07`), `P106-090` (`10DE:1C09`), `Tesla P100 PCIe 16GB` (`10DE:15F8`), `Tesla P100 PCIe 12GB` (`10DE:15F7`), `Tesla P100 SXM2` (`10DE:15F9`), kèm cảnh báo khi tên card chứa "P100" nhưng PCI ID không thuộc kiến trúc GP100.
+2. **Nâng cấp `Collect_VGA_Report.bat` lên v1.1.0:**
+   - Đóng gói cách ly lỗi `try/catch` cho từng GPU trong `Get-VgaInventory`: lỗi trên một card không làm mất dữ liệu các card còn lại.
+   - Thêm hàm `Get-SecurityAndBootInfo` thu thập trạng thái bảo mật chỉ đọc.
+   - Truy vấn 18 trường `nvidia.extended` với cơ chế fallback giữa `clocks_event_reasons` và `clocks_throttle_reasons`.
+   - Parser allowlist cho `Get-LegacyUnlockStatus` đọc `gen2_status.txt` và `cmp30hx_batch_status.txt`.
+   - Liên kết tự động báo cáo trước qua `last_report_id.txt` và thêm câu hỏi chọn `mod_type`.
+   - Thêm bước kiểm tra PII preview hiển thị cho người dùng trước khi lưu hoặc gửi.
+   - Đảm bảo định dạng UTF-8 không BOM và xuống dòng CRLF chuẩn Windows.
+3. **Cập nhật Cloudflare Worker Intake:**
+   - Hỗ trợ giải mã và kiểm định cả schema v1 lẫn v2.
+   - Cập nhật `buildSafeIssueTitle` ưu tiên tên GPU khớp với `target_bdf`.
+   - Hiển thị bảng Extended Power & Thermal trong Markdown body của GitHub Issue.
+
+### Triển khai & Xác minh Thực tế trên Cloudflare Sandbox
+1. **Triển khai Cloudflare Worker:**
+   - Đã chạy `pnpm dlx wrangler deploy` trong `worker/vga-reports`.
+   - **URL triển khai:** `https://cmp-vga-reports.wellynguyen.workers.dev`
+   - **Version ID:** `928f3b16-fb26-4720-b7d2-51842d5134d1`
+   - Endpoint `/healthz` trả về `{"ok":true,"time":...}` (HTTP 200).
+2. **Kiểm thử đầu cuối trực tiếp (Live E2E Verification):**
+   - **Lần gửi 1 (Tạo mới):** Gửi báo cáo v2 thật (`report_id: 63554098-e4e0-434c-b88f-bf6b55ccec3d`) từ máy testbed RTX 2070. Worker trả về HTTP 201 `issue_created` và tạo thành công [Issue #2](https://github.com/ngthaihoc/vga-report-sandbox/issues/2).
+   - **Lần gửi 2 (Chống trùng lặp):** Gửi lại cùng payload báo cáo trên. Worker phát hiện trùng trong KV, không tiêu tốn hạn mức daily quota, trả về HTTP 200 `duplicate` kèm đúng link Issue #2.
+   - **Xác minh nội dung Issue #2:** Tiêu đề `[VGA Report] NVIDIA GeForce RTX 2070 (baseline)`, nhãn `vga-report`, `hardware-sample`, `unverified`, chứa bảng 18 trường mở rộng, thông tin bảo mật Windows và marker định danh.
+
+---
+
+## 4. Ma trận Kiểm chứng & Kết quả Thử nghiệm
+
+Tất cả các bộ kiểm thử cục bộ và đầu cuối đều đạt 100% PASS:
+
+| Bộ kiểm tra | Lệnh thực thi | Kết quả | Ghi chú |
+| :--- | :--- | :---: | :--- |
+| **Shared Validator & Worker Unit Tests** | `node --test scripts/vga-report/report.test.cjs worker/vga-reports/test/worker.test.cjs` | **54/54 PASS** | Kiểm tra validator, allowlist, PII, schema v1/v2, chữ ký HMAC, rate limit |
+| **Collector PowerShell Test Suite** | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-VGA-Collector.ps1` | **39/39 PASS** | Kiểm tra mock CIM, PnP, NVIDIA-SMI, format, security, v2 structure |
+| **Real CMD Smoke Test** | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-VGA-Collector-Batch.ps1` | **4/4 PASS** | Chạy BAT thật trong cmd.exe với đường dẫn có dấu, ký tự đặc biệt |
+| **Telemetry Test** | `node --test windows-v3.0/tools/aio/tests/telemetry.test.cjs` | **1/1 PASS** | Đảm bảo không xung đột với telemetry hiện hữu |
+| **Git Diff Format Check** | `git diff --check` | **0 errors** | Đảm bảo không có lỗi trailing whitespace hoặc định dạng CRLF |
+
+---
+
+## 5. Bản đồ File & Các điểm lưu ý kỹ thuật (Gotchas)
+
+### 5.1. Bản đồ File thay đổi
+- `Collect_VGA_Report.bat`: Script giao diện dòng lệnh chính thu thập thông tin trên Windows.
+- `docs/vga-report/schema.json`: JSON schema hợp nhất cho cả v1 và v2.
+- `scripts/vga-report/report.cjs`: Module kiểm định dữ liệu, làm sạch PII, nhận diện hồ sơ GPU và render Markdown summary.
+- `scripts/vga-report/report.test.cjs`: Bộ test cho validator và renderer.
+- `worker/vga-reports/src/index.js`: Mã nguồn Cloudflare Worker intake tiếp nhận báo cáo và đẩy lên GitHub Issues.
+- `worker/vga-reports/test/worker.test.cjs`: Bộ test chuyên sâu cho Worker intake.
+- `worker/vga-reports/wrangler.toml`: Cấu hình Cloudflare Worker, KV binding và biến môi trường.
+- `scripts/Test-VGA-Collector.ps1`: Unit test cho các hàm PowerShell bên trong collector.
+- `scripts/Test-VGA-Collector-Batch.ps1`: Integration test chạy `Collect_VGA_Report.bat` qua `cmd.exe`.
+- `docs/vga-report/modding-data-plan.md`: Kế hoạch dữ liệu modding từ P0 đến P5.
+- `docs/vga-report/runbook.md` & `docs/vga-report/policy.md`: Tài liệu vận hành và chính sách bảo mật/quyền riêng tư.
+
+### 5.2. Các điểm lưu ý kỹ thuật sống còn
+1. **Định dạng file BAT trên Windows:**
+   - `Collect_VGA_Report.bat` **bắt buộc** phải là file UTF-8 **không có BOM** và kết thúc dòng bằng **CRLF**.
+   - Nếu file bị chuyển sang LF, `cmd.exe` sẽ đọc sai vị trí byte và nhảy thẳng vào đoạn code PowerShell ở đuôi file, dẫn đến lỗi thoát exit code 255.
+2. **Xử lý mảng trong PowerShell `ConvertTo-Json`:**
+   - Trong PowerShell 5.1, biểu thức điều kiện gán mảng một phần tử (ví dụ `if ($c) { @('a') } else { @('b') }`) có thể bị ép kiểu ngầm thành một chuỗi đơn (scalar string) thay vì mảng.
+   - Khi chuyển đổi sang JSON, JSON Schema sẽ từ chối vì trường yêu cầu `type: "array"`.
+   - **Giải pháp đã áp dụng:** Sử dụng hàm helper đóng gói kiểu mảng tường minh `[string[]]@(...)` hoặc khởi tạo danh sách kiểu `System.Collections.Generic.List[string]`.
+3. **Giới hạn kích thước GitHub Issue Body:**
+   - GitHub Issue body có giới hạn tối đa 65.536 ký tự.
+   - Renderer áp dụng ngưỡng an toàn cứng: 60.000 ký tự (bao gồm marker ẩn). Dữ liệu chi tiết dạng mảng lớn hoặc chuỗi log phải được cắt gọn hoặc lưu trong file đính kèm cục bộ, không đẩy vượt ngưỡng lên GitHub.
+
+---
+
+## 6. Ranh giới An toàn & Quy tắc Bất di bất dịch
+
+Khi tiếp tục phát triển hệ thống hoặc chuyển sang các pha tiếp theo (P2+), các kỹ sư và agent hỗ trợ **bắt buộc** tuân thủ các nguyên tắc sau:
+
+1. **Chuỗi giao diện tiếng Việt có dấu:** Mọi thông báo người dùng, menu lựa chọn và tóm tắt hiển thị phải bằng tiếng Việt chuẩn.
+2. **Chế độ Chỉ đọc (Read-only Boundary):** Không bao giờ tự động ghi thanh ghi PCI/MMIO, không ghi registry, không tắt cơ chế bảo vệ hệ thống (HVCI/Secure Boot), và không can thiệp vào driver khi chưa có sự xác nhận của người dùng.
+3. **Không xử lý Bí mật (No Secret Handling):** Tuyệt đối không yêu cầu người dùng dán private key `.pem`, GitHub tokens, hoặc `IP_SALT` vào hội thoại chat. Chỉ làm việc với các định danh không bí mật (App ID, Installation ID, Worker URL, Public Key ID).
+4. **Không tự ý Release / Push:** Không tự ý push mã nguồn lên nhánh chính của remote hoặc tạo GitHub Release khi chưa có sự phê duyệt và nghiệm thu phần cứng thực tế từ chủ dự án.
+
+---
+
+## 7. Lộ trình Triển khai Tiếp theo: Pha P2 (Đo Dưới Tải & So sánh Diff)
+
+Sau khi P0 và P1 đã hoàn thành và xác minh ổn định, giai đoạn tiếp theo cần triển khai là **P2 — Đo Idle/Load và So sánh Đối chứng**:
+
+### 7.1. Các mục tiêu cụ thể trong P2
+1. **Module đo tải nhẹ và an toàn (Controlled Load Benchmark):**
+   - Đo trạng thái nhàn rỗi (Idle) trong 10 giây (lấy mẫu xung nhịp, công suất, nhiệt độ, PCIe link speed).
+   - Chạy tải kiểm tra có kiểm soát (Load) tối đa 30 giây (copy bộ nhớ Host-to-Device / Device-to-Host, kernel tính toán cơ bản).
+   - Đo thời gian phục hồi (Recovery) trong 10 giây.
+   - **Cơ chế Watchdog:** Tự động ngắt tải ngay lập tức nếu nhiệt độ vượt ngưỡng an toàn hoặc GPU gặp sự cố TDR.
+2. **Đo Băng thông PCIe thực tế (H2D / D2H Bandwidth):**
+   - Đo tốc độ truyền dữ liệu qua bộ nhớ pinned (GB/s) theo cả 2 chiều H2D và D2H để phát hiện nghẽn ở khe cắm, riser hoặc cấu hình PCIe Gen.
+3. **Kiểm tra Tính đúng đắn của Tính toán (Compute & Tensor Correctness):**
+   - Kiểm tra khả năng thực thi kernel CUDA FP32 cơ bản.
+   - Đối với dòng card hỗ trợ (hoặc cần kiểm chứng Tensor như CMP 40HX): chạy kernel matrix multiplication tương ứng để xác định khả năng tính toán thực tế thay vì chỉ nhìn vào thông số quảng cáo.
+4. **Bộ phân tích So sánh Trước/Sau (Diff Analyzer):**
+   - So sánh giữa 2 báo cáo (dựa vào `previous_report_id` hoặc chọn 2 báo cáo local) để chỉ ra thay đổi về xung nhịp, PCIe speed, nhiệt độ và công suất trước và sau khi áp dụng mod.
+
+### 7.2. Các quyết định cần chủ dự án phê duyệt trước khi lập trình P2
+- **Tên và vị trí đặt công cụ helper CUDA:** Dự kiến đặt mã nguồn helper dưới `windows-v3.0/tools/` (ví dụ `windows-v3.0/tools/vga-benchmark/` hoặc tích hợp vào `40hxcore`).
+- **Hình thức phân phối binary helper:** Chỉ đóng gói sẵn file thực thi kèm hash kiểm tra SHA-256 hay cho phép tải về từ GitHub Release đã ký?
+- **Ngưỡng nhiệt độ và công suất an toàn:** Thiết lập ngưỡng dừng khẩn cấp cho từng dòng card (ví dụ: ngắt benchmark nếu GPU temp > 85°C hoặc VRAM temp > 105°C).
+
+---
+*Tài liệu được khởi tạo và chuẩn hóa bởi hệ thống Antigravity Context Engineering.*

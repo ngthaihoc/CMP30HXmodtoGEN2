@@ -18,7 +18,7 @@ Công cụ tuyệt đối không thu thập và có bộ lọc PII ở cả hai 
 
 - Tên người dùng Windows, tên máy (`hostname`), biến môi trường cá nhân.
 - Đường dẫn thư mục cá nhân (`C:\Users\...`, `/home/...`, đường dẫn mạng UNC).
-- Địa chỉ IP, địa chỉ MAC, danh sách tiến trình đang chạy.
+- Địa chỉ IP (IPv4 và IPv6), địa chỉ MAC, danh sách tiến trình đang chạy.
 - Số serial bo mạch chủ/GPU hoặc UUID phần cứng GPU (`GPU-...`).
 - Không băm hay gửi bất kỳ định danh cá nhân/phần cứng nêu trên trong JSON báo cáo.
 
@@ -31,18 +31,19 @@ Công cụ tuyệt đối không thu thập và có bộ lọc PII ở cả hai 
 ## 4. Địa chỉ IP, hạ tầng Cloudflare và nhật ký (Logs)
 
 - Khi gửi qua HTTPS tới `*.workers.dev`, hạ tầng mạng của Cloudflare nhìn thấy địa chỉ IP kết nối theo cơ chế mạng chuẩn.
-- **Trong mã nguồn Worker:** Worker **không ghi log** nội dung báo cáo và **không ghi log** địa chỉ IP gốc. Địa chỉ IP chỉ được băm theo ngày bằng khóa muối bí mật (`HMAC-SHA256(IP_SALT, "<ngày-UTC>:<ip>")`) để kiểm soát hạn mức (quota) trong Cloudflare KV với TTL tự động hết hạn sau **2 ngày (172.800 giây)**.
+- **Trong mã nguồn Worker:** Worker **không ghi log** nội dung báo cáo và **không ghi log** địa chỉ IP gốc. Địa chỉ IP kết nối chỉ được băm theo ngày bằng khóa muối bí mật (`HMAC-SHA256(IP_SALT, "<ngày-UTC>:<ip>")`) để kiểm soát hạn mức trong Cloudflare KV với TTL tự hết hạn sau **2 ngày (172.800 giây)**. Thiếu/trống muối hoặc thiếu binding KV thì từ chối `503` trước khi truy cập KV, không dùng muối mặc định công khai.
 - **Thời hạn giữ log của Cloudflare:** Theo tài liệu chính thức của Cloudflare Workers Logs / Observability (kiểm chứng ngày 2026-11-21), gói miễn phí lưu nhật ký sự kiện Worker tối đa **3 ngày** (tối đa 200.000 log events/ngày) theo cấu hình cũ và **7 ngày** (hạn mức nạp 0,5 GB/ngày) theo cơ chế Observability mới áp dụng từ 01/12/2026, **khi bật Workers Logs**. Dự án khuyến nghị giữ Workers Observability/Logs ở trạng thái tắt trong vận hành bình thường, chỉ bật tạm thời khi chẩn đoán lỗi.
 
 ## 5. Giới hạn hệ thống và bảo vệ chống lạm dụng
 
 - Kích thước payload JSON tối đa: **2 MiB**.
 - Số GPU tối đa mỗi báo cáo: **16**; chuỗi tối đa **500** ký tự; nội dung Issue tối đa **60.000** ký tự (kèm marker).
-- Giới hạn mặc định trên Worker: **10 yêu cầu/IP/ngày** (`IP_LIMIT`) và **200 báo cáo/ngày** toàn hệ thống (`DAILY_CAP`).
-- Khi phát hiện spam hoặc lạm dụng khóa ký trong BAT, chủ dự án sẽ thu hồi `key_id` cũ (xem [runbook.md](runbook.md)), khiến bản BAT cũ bị từ chối `401` cho tới khi người dùng tải bản mới. Nếu một báo cáo hợp lệ bị chặn nhầm do giới hạn IP/ngày, người dùng có thể gửi qua biểu mẫu GitHub Issue dự phòng thủ công hoặc mở issue trao đổi để được hỗ trợ.
+- Hạn mức mặc định: **10 yêu cầu mới hợp lệ/IP/ngày** (`IP_LIMIT`), **200 yêu cầu mới hợp lệ/ngày** (`DAILY_CAP`); tính trước khi gọi GitHub nên lỗi GitHub vẫn tiêu thụ quota. Chữ ký sai, JSON/schema sai và PII không tiêu thụ quota. Báo cáo trùng đã lưu được trả cùng URL mà không tăng quota.
+- Các hạn mức và chống trùng trên KV là **gần đúng** giữa nhiều isolate, không phải bảo đảm nguyên tử toàn hệ thống. Hai yêu cầu đồng thời cùng ID hoặc gửi lại sau lỗi lưu chống trùng có thể tạo Issue trùng. Giới hạn ghi cùng khóa của KV có thể khiến Worker trả `503`; BAT giữ ZIP và `.pending.json`. Xem [runbook](runbook.md) để biết giới hạn và cách xử lý.
+- Khi phát hiện spam hoặc lạm dụng khóa ký công khai trong BAT, chủ dự án thu hồi `key_id` cũ (xem [runbook](runbook.md)); bản BAT cũ nhận `401` tới khi cập nhật. Khóa này không xác thực danh tính người gửi và không ngăn được người chủ động tạo yêu cầu hợp lệ. Khi bị chặn nhầm, người dùng có thể gửi qua Issue Form thủ công.
 
 ## 6. Quy trình yêu cầu xóa báo cáo
 
-- Worker không lưu trữ bản sao báo cáo ngoài khóa chống trùng `r:<report_id>` (chỉ chứa mã băm SHA-256 của body và URL issue).
+- Worker không lưu bản sao nội dung báo cáo; khóa chống trùng `r:<report_id>` chứa mã băm SHA-256 của body, URL/số Issue và thời gian tạo. Khóa này không có TTL; dữ liệu quota hết hạn sau 2 ngày.
 - Nếu bạn muốn xóa báo cáo đã đăng, hãy mở yêu cầu (hoặc bình luận trực tiếp trên issue) nêu rõ **số Issue** hoặc **`report_id`** để chủ repository đóng/xóa Issue tương ứng.
 - **Lưu ý trung thực:** GitHub Issue là công khai; sau khi xuất bản, chủ dự án không thể bảo đảm xóa được mọi bản sao do bộ máy tìm kiếm, fork hoặc bên thứ ba đã lưu trữ trước thời điểm xóa.

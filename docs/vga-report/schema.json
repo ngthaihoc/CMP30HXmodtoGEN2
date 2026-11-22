@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "vga-report/1",
-  "title": "CMP VGA Diagnostic Report v1",
-  "description": "Allowlisted diagnostic report schema for Collect_VGA_Report.bat and the vga-reports Cloudflare Worker.",
+  "$id": "vga-report/2",
+  "title": "CMP VGA Diagnostic Report v1 & v2",
+  "description": "Allowlisted diagnostic report schema for Collect_VGA_Report.bat and the vga-reports Cloudflare Worker (supports v1 and v2 during transition).",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -21,7 +21,7 @@
   "properties": {
     "schema_version": {
       "type": "integer",
-      "const": 1
+      "enum": [1, 2]
     },
     "collector_version": {
       "type": "string",
@@ -43,6 +43,30 @@
     "consent": {
       "type": "boolean",
       "const": true
+    },
+    "previous_report_id": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "target_bdf": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "collection_started_utc": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "collection_finished_utc": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "source_timestamps": {
+      "$ref": "#/$defs/source_timestamps"
+    },
+    "evidence_level": {
+      "type": "string",
+      "enum": ["reported", "observed", "compared", "owner_verified"]
     },
     "gpus": {
       "type": "array",
@@ -68,19 +92,20 @@
         "os_build"
       ],
       "properties": {
-        "cpu": {
-          "$ref": "#/$defs/field"
-        },
-        "mainboard_model": {
-          "$ref": "#/$defs/field"
-        },
-        "bios_version": {
-          "$ref": "#/$defs/field"
-        },
-        "os_build": {
-          "$ref": "#/$defs/field"
-        }
+        "cpu": { "$ref": "#/$defs/field" },
+        "mainboard_model": { "$ref": "#/$defs/field" },
+        "bios_version": { "$ref": "#/$defs/field" },
+        "os_build": { "$ref": "#/$defs/field" }
       }
+    },
+    "security": {
+      "$ref": "#/$defs/security"
+    },
+    "completeness": {
+      "$ref": "#/$defs/completeness"
+    },
+    "legacy_status": {
+      "$ref": "#/$defs/legacy_status"
     },
     "context": {
       "type": "object",
@@ -96,6 +121,10 @@
         "mod_state": {
           "type": "string",
           "enum": ["stock", "modded", "unknown"]
+        },
+        "mod_type": {
+          "type": "string",
+          "enum": ["none", "driver", "efi", "vbios", "strap", "software_aio", "multi", "unknown"]
         },
         "riser": {
           "type": "string",
@@ -116,16 +145,51 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "schema_version": { "const": 1 } }
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            { "required": ["previous_report_id"] },
+            { "required": ["target_bdf"] },
+            { "required": ["collection_started_utc"] },
+            { "required": ["collection_finished_utc"] },
+            { "required": ["source_timestamps"] },
+            { "required": ["evidence_level"] },
+            { "required": ["security"] },
+            { "required": ["completeness"] },
+            { "required": ["legacy_status"] }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "schema_version": { "const": 2 } }
+      },
+      "then": {
+        "required": [
+          "previous_report_id",
+          "target_bdf",
+          "collection_started_utc",
+          "collection_finished_utc",
+          "source_timestamps",
+          "evidence_level",
+          "security",
+          "completeness",
+          "legacy_status"
+        ]
+      }
+    }
+  ],
   "$defs": {
     "field": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "value",
-        "source",
-        "unit",
-        "status"
-      ],
+      "required": ["value", "source", "unit", "status"],
       "properties": {
         "value": {
           "type": ["string", "number", "boolean", "null"],
@@ -146,51 +210,152 @@
         }
       }
     },
-    "pcie": {
+    "source_timestamps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pnp_utc", "cim_utc", "nvidia_smi_utc", "security_utc"],
+      "properties": {
+        "pnp_utc": {
+          "type": ["string", "null"],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "cim_utc": {
+          "type": ["string", "null"],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "nvidia_smi_utc": {
+          "type": ["string", "null"],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "security_utc": {
+          "type": ["string", "null"],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        }
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boot_mode", "secure_boot", "hvci_running", "test_signing"],
+      "properties": {
+        "boot_mode": { "$ref": "#/$defs/field" },
+        "secure_boot": { "$ref": "#/$defs/field" },
+        "hvci_running": { "$ref": "#/$defs/field" },
+        "test_signing": { "$ref": "#/$defs/field" }
+      }
+    },
+    "completeness_group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete", "status", "missing", "reason"],
+      "properties": {
+        "complete": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["ok", "partial", "skipped", "unsupported", "error"] },
+        "missing": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "minLength": 1, "maxLength": 100 }
+        },
+        "reason": { "type": "string", "maxLength": 200 }
+      }
+    },
+    "completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inventory", "topology", "link_idle", "link_load", "compute", "stability", "comparison"],
+      "properties": {
+        "inventory": { "$ref": "#/$defs/completeness_group" },
+        "topology": { "$ref": "#/$defs/completeness_group" },
+        "link_idle": { "$ref": "#/$defs/completeness_group" },
+        "link_load": { "$ref": "#/$defs/completeness_group" },
+        "compute": { "$ref": "#/$defs/completeness_group" },
+        "stability": { "$ref": "#/$defs/completeness_group" },
+        "comparison": { "$ref": "#/$defs/completeness_group" }
+      }
+    },
+    "legacy_status": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "max_gen",
-        "current_gen",
-        "max_width",
-        "current_width"
+        "present",
+        "source",
+        "status_code",
+        "error_code",
+        "speed_current",
+        "width_current",
+        "tls_target",
+        "device_id",
+        "mrrs_bytes",
+        "observed_utc"
       ],
       "properties": {
-        "max_gen": {
-          "$ref": "#/$defs/field"
+        "present": { "type": "boolean" },
+        "source": { "type": "string", "enum": ["gen2_status", "batch_status", "none"] },
+        "status_code": {
+          "type": "string",
+          "enum": ["GEN2_SUCCESS", "GEN2_SKIPPED", "GEN1_STUCK", "GEN2_HARDWARE_LIMIT", "DRV_FAIL", "NO_GPU", "UNKNOWN", "NONE"]
         },
-        "current_gen": {
-          "$ref": "#/$defs/field"
-        },
-        "max_width": {
-          "$ref": "#/$defs/field"
-        },
-        "current_width": {
-          "$ref": "#/$defs/field"
+        "error_code": { "type": "string", "pattern": "^[A-Z0-9_]{1,64}$" },
+        "speed_current": { "type": ["integer", "null"], "minimum": 0 },
+        "width_current": { "type": ["integer", "null"], "minimum": 0 },
+        "tls_target": { "type": ["integer", "null"], "minimum": 0 },
+        "device_id": { "type": ["string", "null"], "pattern": "^[0-9A-Fa-f]{4}$" },
+        "mrrs_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "observed_utc": {
+          "type": ["string", "null"],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
         }
+      }
+    },
+    "pcie": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_gen", "current_gen", "max_width", "current_width"],
+      "properties": {
+        "max_gen": { "$ref": "#/$defs/field" },
+        "current_gen": { "$ref": "#/$defs/field" },
+        "max_width": { "$ref": "#/$defs/field" },
+        "current_width": { "$ref": "#/$defs/field" }
+      }
+    },
+    "gpu_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "family", "category", "target_pcie_gen", "tensor_applicable", "identity_note"],
+      "properties": {
+        "id": { "type": ["string", "null"], "maxLength": 32 },
+        "name": { "type": ["string", "null"], "maxLength": 100 },
+        "family": { "type": ["string", "null"], "maxLength": 32 },
+        "category": { "type": "string", "enum": ["cmp", "mining", "datacenter", "consumer", "unknown"] },
+        "target_pcie_gen": { "type": ["integer", "null"], "minimum": 1, "maximum": 6 },
+        "tensor_applicable": { "type": "string", "enum": ["yes", "no", "unverified", "unknown"] },
+        "identity_note": { "type": ["string", "null"], "maxLength": 300 }
+      }
+    },
+    "gpu_driver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "date", "inf_name", "service", "problem_code", "location_path"],
+      "properties": {
+        "provider": { "$ref": "#/$defs/field" },
+        "date": { "$ref": "#/$defs/field" },
+        "inf_name": { "$ref": "#/$defs/field" },
+        "service": { "$ref": "#/$defs/field" },
+        "problem_code": { "$ref": "#/$defs/field" },
+        "location_path": { "$ref": "#/$defs/field" }
       }
     },
     "nvidia": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "complete",
-        "missing",
-        "fields"
-      ],
+      "required": ["complete", "missing", "fields"],
       "properties": {
-        "complete": {
-          "type": "boolean"
-        },
+        "complete": { "type": "boolean" },
         "missing": {
           "type": "array",
           "maxItems": 18,
           "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 100
-          }
+          "items": { "type": "string", "minLength": 1, "maxLength": 100 }
         },
         "fields": {
           "type": "object",
@@ -235,6 +400,56 @@
             "clocks.max.sm": { "$ref": "#/$defs/field" },
             "pstate": { "$ref": "#/$defs/field" }
           }
+        },
+        "extended_missing": {
+          "type": "array",
+          "maxItems": 18,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 100 }
+        },
+        "extended": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "power.limit",
+            "enforced.power.limit",
+            "power.default_limit",
+            "power.min_limit",
+            "power.max_limit",
+            "temperature.gpu.tlimit",
+            "temperature.memory",
+            "fan.speed",
+            "utilization.gpu",
+            "utilization.memory",
+            "memory.used",
+            "memory.free",
+            "ecc.mode.current",
+            "clocks_throttle_reasons.active",
+            "clocks_throttle_reasons.sw_power_cap",
+            "clocks_throttle_reasons.hw_slowdown",
+            "clocks_throttle_reasons.hw_thermal_slowdown",
+            "clocks_throttle_reasons.hw_power_brake_slowdown"
+          ],
+          "properties": {
+            "power.limit": { "$ref": "#/$defs/field" },
+            "enforced.power.limit": { "$ref": "#/$defs/field" },
+            "power.default_limit": { "$ref": "#/$defs/field" },
+            "power.min_limit": { "$ref": "#/$defs/field" },
+            "power.max_limit": { "$ref": "#/$defs/field" },
+            "temperature.gpu.tlimit": { "$ref": "#/$defs/field" },
+            "temperature.memory": { "$ref": "#/$defs/field" },
+            "fan.speed": { "$ref": "#/$defs/field" },
+            "utilization.gpu": { "$ref": "#/$defs/field" },
+            "utilization.memory": { "$ref": "#/$defs/field" },
+            "memory.used": { "$ref": "#/$defs/field" },
+            "memory.free": { "$ref": "#/$defs/field" },
+            "ecc.mode.current": { "$ref": "#/$defs/field" },
+            "clocks_throttle_reasons.active": { "$ref": "#/$defs/field" },
+            "clocks_throttle_reasons.sw_power_cap": { "$ref": "#/$defs/field" },
+            "clocks_throttle_reasons.hw_slowdown": { "$ref": "#/$defs/field" },
+            "clocks_throttle_reasons.hw_thermal_slowdown": { "$ref": "#/$defs/field" },
+            "clocks_throttle_reasons.hw_power_brake_slowdown": { "$ref": "#/$defs/field" }
+          }
         }
       }
     },
@@ -261,7 +476,9 @@
         "pnp_status": { "$ref": "#/$defs/field" },
         "driver_version": { "$ref": "#/$defs/field" },
         "pcie": { "$ref": "#/$defs/pcie" },
-        "nvidia": { "$ref": "#/$defs/nvidia" }
+        "nvidia": { "$ref": "#/$defs/nvidia" },
+        "profile": { "$ref": "#/$defs/gpu_profile" },
+        "driver": { "$ref": "#/$defs/gpu_driver" }
       }
     }
   }

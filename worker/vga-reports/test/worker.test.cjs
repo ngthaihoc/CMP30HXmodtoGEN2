@@ -601,25 +601,393 @@ test('deterministic_signature_test_vector', async () => {
   assert.equal(res.ok, true);
 });
 
-test('concurrent_50_requests_never_exceed_daily_cap', async () => {
+test('invalid_payloads_do_not_touch_kv_or_github', async () => {
+  const { handleRequest } = await import(workerModuleUrl);
+  for (const [body, expected] of [
+    ['{', 400],
+    [JSON.stringify({ bad: true }), 400],
+    [JSON.stringify(makeValidReport({
+      context: { mod_state: 'stock', riser: 'direct', slot: 'cpu_x16', stage: 'baseline', notes: 'MAC 00:11:22:33:44:55' },
+    })), 422],
+    [JSON.stringify(makeValidReport({
+      context: { mod_state: 'stock', riser: 'direct', slot: 'cpu_x16', stage: 'baseline', notes: 'IPv6 2001:db8::1' },
+    })), 422],
+  ]) {
+    const env = await makeEnv();
+    const { fetchFn, calls } = makeMockGithubFetch();
+    const res = await handleRequest(makeSignedRequest(body), env, { now: () => FIXED_NOW, fetch: fetchFn });
+    assert.equal(res.status, expected);
+    assert.equal(env.REPORTS.reads, 0);
+    assert.equal(env.REPORTS.writes, 0);
+    assert.equal(calls.length, 0);
+  }
+});
+
+test('disabled_intake_precedes_json_validation_after_signature', async () => {
+  const { handleRequest } = await import(workerModuleUrl);
+  const env = await makeEnv({ INTAKE_ENABLED: 'false' });
+  const { fetchFn, calls } = makeMockGithubFetch();
+  const res = await handleRequest(makeSignedRequest('{'), env, { now: () => FIXED_NOW, fetch: fetchFn });
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).reason, 'disabled');
+  const unsigned = await handleRequest(makeSignedRequest('{', { keyId: null }), env, { now: () => FIXED_NOW, fetch: fetchFn });
+  assert.equal(unsigned.status, 401);
+  assert.equal(env.REPORTS.reads, 0);
+  assert.equal(env.REPORTS.writes, 0);
+  assert.equal(calls.length, 0);
+});
+
+test('missing_or_blank_ip_salt_fails_closed_without_kv', async () => {
+  const { handleRequest } = await import(workerModuleUrl);
+  for (const IP_SALT of [undefined, '', '   ']) {
+    const env = await makeEnv({ IP_SALT });
+    const { fetchFn, calls } = makeMockGithubFetch();
+    const res = await handleRequest(makeSignedRequest(JSON.stringify(makeValidReport())), env, { now: () => FIXED_NOW, fetch: fetchFn });
+    assert.equal(res.status, 503);
+    assert.equal((await res.json()).reason, 'configuration_error');
+    assert.equal(env.REPORTS.reads, 0);
+    assert.equal(env.REPORTS.writes, 0);
+    assert.equal(calls.length, 0);
+  }
+});
+
+test('duplicate_and_conflict_bypass_exhausted_quota_without_writes', async () => {
+  const { handleRequest } = await import(workerModuleUrl);
+  const env = await makeEnv({ IP_LIMIT: '1', DAILY_CAP: '1' });
+  const { fetchFn, calls } = makeMockGithubFetch();
+  const report = makeValidReport();
+  const body = JSON.stringify(report);
+  const first = await handleRequest(makeSignedRequest(body), env, { now: () => FIXED_NOW, fetch: fetchFn });
+  assert.equal(first.status, 201);
+  const firstData = await first.json();
+  const writes = env.REPORTS.writes;
+  const duplicate = await handleRequest(makeSignedRequest(body), env, { now: () => FIXED_NOW, fetch: fetchFn });
+  assert.equal(duplicate.status, 200);
+  assert.equal((await duplicate.json()).issue_url, firstData.issue_url);
+  const changed = JSON.stringify({ ...report, collector_version: '1.0.1' });
+  const conflict = await handleRequest(makeSignedRequest(changed), env, { now: () => FIXED_NOW, fetch: fetchFn });
+  assert.equal(conflict.status, 409);
+  assert.equal(env.REPORTS.writes, writes);
+  assert.equal(calls.length, 2);
+});
+
+test('streamed_oversize_body_is_cancelled_without_buffering_the_rest', async () => {
+  const { handleRequest } = await import(workerModuleUrl);
+  for (const declaredLength of [null, '1']) {
+    const env = await makeEnv();
+    const { fetchFn, calls } = makeMockGithubFetch();
+    let pulls = 0;
+    let cancelled = false;
+    const body = new ReadableStream({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array(65536));
+        if (pulls === 40) controller.close();
+      },
+      cancel() { cancelled = true; },
+    }, { highWaterMark: 0 });
+    const headers = { 'Content-Type': 'application/json' };
+    if (declaredLength !== null) headers['Content-Length'] = declaredLength;
+    const request = new Request('https://vga-reports.example.workers.dev/v1/reports', {
+      method: 'POST', headers, body, duplex: 'half',
+    });
+    const res = await handleRequest(request, env, { now: () => FIXED_NOW, fetch: fetchFn });
+    assert.equal(res.status, 413);
+    assert.equal(cancelled, true);
+    assert.equal(pulls, 33, 'stop immediately after the first chunk beyond 2 MiB');
+    assert.equal(env.REPORTS.reads, 0);
+    assert.equal(env.REPORTS.writes, 0);
+    assert.equal(calls.length, 0);
+  }
+});
+
+test('kv_read_and_write_failures_return_controlled_503', async () => {
+  const { handleRequest } = await import(workerModuleUrl);
+  for (const stage of ['dedup_read', 'quota_read', 'quota_write', 'dedup_write']) {
+    const kv = new MockKv();
+    const get = kv.get.bind(kv);
+    const put = kv.put.bind(kv);
+    kv.get = async (key, type) => {
+      if ((stage === 'dedup_read' && key.startsWith('r:')) || (stage === 'quota_read' && key.startsWith('d:'))) throw new Error('KV unavailable');
+      return get(key, type);
+    };
+    kv.put = async (key, value, options) => {
+      if ((stage === 'quota_write' && key.startsWith('d:')) || (stage === 'dedup_write' && key.startsWith('r:'))) throw new Error('KV unavailable');
+      return put(key, value, options);
+    };
+    const env = await makeEnv({ REPORTS: kv });
+    const { fetchFn, calls } = makeMockGithubFetch();
+    const res = await handleRequest(makeSignedRequest(JSON.stringify(makeValidReport())), env, { now: () => FIXED_NOW, fetch: fetchFn });
+    assert.equal(res.status, 503, stage);
+    assert.equal((await res.json()).reason, 'kv_error', stage);
+    assert.equal(calls.length, stage === 'dedup_write' ? 2 : 0, stage);
+  }
+});
+
+test('same_key_kv_write_rate_failure_does_not_create_another_issue', async () => {
+  const { handleRequest } = await import(workerModuleUrl);
+  const kv = new MockKv();
+  const put = kv.put.bind(kv);
+  kv.put = async (key, value, options) => {
+    if (key.startsWith('d:') && kv.store.has(key)) throw new Error('429: same key write rate exceeded');
+    return put(key, value, options);
+  };
+  const env = await makeEnv({ REPORTS: kv });
+  const { fetchFn, calls } = makeMockGithubFetch();
+  for (let i = 0; i < 2; i += 1) {
+    const report = makeValidReport({ report_id: `11111111-2222-4333-8444-55555555700${i}` });
+    const res = await handleRequest(makeSignedRequest(JSON.stringify(report)), env, { now: () => FIXED_NOW, fetch: fetchFn });
+    assert.equal(res.status, i === 0 ? 201 : 503);
+    if (i === 1) assert.equal((await res.json()).reason, 'kv_error');
+  }
+  assert.equal(calls.length, 2);
+});
+
+test('issue_body_limit_includes_the_dedup_marker', async () => {
+  const { createIssue } = await import(workerModuleUrl);
+  const env = await makeEnv();
+  const { fetchFn, calls } = makeMockGithubFetch();
+  const report = makeValidReport();
+  const largeGpu = Object.fromEntries(Object.keys(report.gpus[0]).map((key) => [key, makeField('&'.repeat(500))]));
+  const largeReport = { ...report, gpus: Array.from({ length: 16 }, () => largeGpu) };
+  await createIssue(env, 'test-token', largeReport, fetchFn);
+  const { body } = JSON.parse(calls[0].init.body);
+  assert.equal(body.length, 60000);
+  assert.ok(body.endsWith(`<!-- vga-report:${report.report_id} -->`));
+});
+
+test('concurrent_50_mixed_requests_obey_quota_in_one_isolate', async () => {
   const { handleRequest } = await import(workerModuleUrl);
   const env = await makeEnv({ IP_LIMIT: '100', DAILY_CAP: '12' });
-  const { fetchFn } = makeMockGithubFetch();
-
+  const { fetchFn, calls } = makeMockGithubFetch();
   const requests = Array.from({ length: 50 }, (_, idx) => {
-    const suffix = String(idx + 1).padStart(2, '0');
-    const valid = idx % 5 !== 0; // Mix valid and invalid-schema requests
-    const payload = valid
-      ? makeValidReport({ report_id: `11111111-2222-4333-8444-5555555560${suffix}` })
-      : { bad: true };
-    const body = JSON.stringify(payload);
-    const req = valid
-      ? makeSignedRequest(body, { ip: `198.51.100.${idx + 1}` })
-      : makeSignedRequest(body, { ip: `198.51.100.${idx + 1}`, keyId: idx % 2 === 0 ? null : 'k1' });
-    return handleRequest(req, env, { now: () => FIXED_NOW, fetch: fetchFn });
+    const report = makeValidReport({ report_id: `11111111-2222-4333-8444-5555555560${String(idx + 1).padStart(2, '0')}` });
+    const category = idx % 10;
+    let body;
+    if (category === 0) body = '{';
+    else if (category === 1) body = JSON.stringify({ bad: true });
+    else if (category === 2) body = JSON.stringify({ ...report, context: { ...report.context, notes: 'MAC 00:11:22:33:44:55' } });
+    else body = JSON.stringify(report);
+    const request = makeSignedRequest(body, { ip: `198.51.100.${idx + 1}`, keyId: category === 3 ? null : 'k1' });
+    return handleRequest(request, env, { now: () => FIXED_NOW, fetch: fetchFn });
   });
-
   const responses = await Promise.all(requests);
-  const createdCount = responses.filter((r) => r.status === 201).length;
-  assert.ok(createdCount <= 12, `Created ${createdCount} issues, exceeded DAILY_CAP=12`);
+  const count = (status) => responses.filter((res) => res.status === status).length;
+  assert.equal(count(400), 10);
+  assert.equal(count(422), 5);
+  assert.equal(count(401), 5);
+  assert.equal(count(201), 12);
+  assert.equal(count(429), 18);
+  assert.equal(env.REPORTS.writes, 36);
+  assert.equal(env.REPORTS.store.get('d:2026-11-21').value, '12');
+  assert.equal(calls.filter((call) => call.url.endsWith('/issues')).length, 12);
+});
+
+test('chunked_utf8_body_at_exact_limit_is_accepted_and_body_errors_are_controlled', async () => {
+  const { handleRequest } = await import(workerModuleUrl);
+  const env = await makeEnv();
+  const { fetchFn, calls } = makeMockGithubFetch();
+  const report = makeValidReport();
+  const json = JSON.stringify({ ...report, context: { ...report.context, notes: 'Báo cáo có dấu' } });
+  const payload = ' '.repeat(2 * 1024 * 1024 - Buffer.byteLength(json)) + json;
+  const bytes = new TextEncoder().encode(payload);
+  let offset = 0;
+  const body = new ReadableStream({
+    pull(controller) {
+      if (offset === bytes.length) { controller.close(); return; }
+      controller.enqueue(bytes.subarray(offset, offset + 1019));
+      offset = Math.min(bytes.length, offset + 1019);
+    },
+  });
+  const request = new Request('https://vga-reports.example.workers.dev/v1/reports', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...signBody(payload, 'k1', TEST_KEY_K1, FIXED_NOW) },
+    body,
+    duplex: 'half',
+  });
+  const res = await handleRequest(request, env, { now: () => FIXED_NOW, fetch: fetchFn });
+  assert.equal(res.status, 201);
+  assert.equal(calls.length, 2);
+  const brokenRequest = new Request(request.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: new ReadableStream({ start(controller) { controller.error(new Error('transport closed')); } }),
+    duplex: 'half',
+  });
+  const broken = await handleRequest(brokenRequest, env, { now: () => FIXED_NOW, fetch: fetchFn });
+  assert.equal(broken.status, 400);
+  assert.equal((await broken.json()).error, 'invalid_body');
+  assert.equal(calls.length, 2);
+});
+
+test('declared_oversize_body_is_rejected_before_reading', async () => {
+  const { handleRequest } = await import(workerModuleUrl);
+  const env = await makeEnv();
+  const { fetchFn, calls } = makeMockGithubFetch();
+  let reads = 0;
+  const request = new Request('https://vga-reports.example.workers.dev/v1/reports', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': String(2 * 1024 * 1024 + 1) },
+    body: new ReadableStream({ pull(controller) { reads += 1; controller.close(); } }, { highWaterMark: 0 }),
+    duplex: 'half',
+  });
+  const res = await handleRequest(request, env, { now: () => FIXED_NOW, fetch: fetchFn });
+  assert.equal(res.status, 413);
+  assert.equal(reads, 0);
+  assert.equal(env.REPORTS.reads, 0);
+  assert.equal(env.REPORTS.writes, 0);
+  assert.equal(calls.length, 0);
+});
+
+test('tiny_chunks_preserve_exact_utf8_signature_bytes', async () => {
+  const { handleRequest } = await import(workerModuleUrl);
+  const env = await makeEnv();
+  const { fetchFn, calls } = makeMockGithubFetch();
+  const report = makeValidReport();
+  const payload = JSON.stringify({ ...report, context: { ...report.context, notes: 'Báo cáo tiếng Việt' } });
+  const bytes = new TextEncoder().encode(payload);
+  let offset = 0;
+  let chunkSize = 1;
+  const request = new Request('https://vga-reports.example.workers.dev/v1/reports', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...signBody(payload, 'k1', TEST_KEY_K1, FIXED_NOW) },
+    body: new ReadableStream({
+      pull(controller) {
+        if (offset === bytes.length) { controller.close(); return; }
+        const end = Math.min(bytes.length, offset + chunkSize);
+        controller.enqueue(bytes.subarray(offset, end));
+        offset = end;
+        chunkSize = chunkSize % 7 + 1;
+      },
+    }, { highWaterMark: 0 }),
+    duplex: 'half',
+  });
+  const res = await handleRequest(request, env, { now: () => FIXED_NOW, fetch: fetchFn });
+  assert.equal(res.status, 201);
+  assert.equal(calls.length, 2);
+});
+
+test('oversize_body_still_returns_413_when_stream_cancellation_rejects', async () => {
+  const { handleRequest } = await import(workerModuleUrl);
+  const env = await makeEnv();
+  const { fetchFn, calls } = makeMockGithubFetch();
+  let cancelled = false;
+  const request = new Request('https://vga-reports.example.workers.dev/v1/reports', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: new ReadableStream({
+      pull(controller) { controller.enqueue(new Uint8Array(2 * 1024 * 1024 + 1)); },
+      cancel() { cancelled = true; throw new Error('transport already closed'); },
+    }, { highWaterMark: 0 }),
+    duplex: 'half',
+  });
+  const res = await handleRequest(request, env, { now: () => FIXED_NOW, fetch: fetchFn });
+  assert.equal(res.status, 413);
+  assert.equal(cancelled, true);
+  assert.equal(env.REPORTS.reads, 0);
+  assert.equal(env.REPORTS.writes, 0);
+  assert.equal(calls.length, 0);
+});
+
+test('post_v2_report_creates_issue_201_with_target_gpu_title', async () => {
+  const { handleRequest } = await import(workerModuleUrl);
+  const { NVIDIA_EXTENDED_FIELDS } = require('../../../scripts/vga-report/report.cjs');
+  const env = await makeEnv();
+  const { fetchFn, calls } = makeMockGithubFetch();
+  const v1Base = makeValidReport();
+  const extended = Object.fromEntries(
+    NVIDIA_EXTENDED_FIELDS.map((k) => [
+      k,
+      k === 'enforced.power.limit' ? makeField(125, 'nvidia-smi', 'W') : { value: null, source: 'nvidia-smi', unit: null, status: 'unsupported' },
+    ]),
+  );
+  const extended_missing = NVIDIA_EXTENDED_FIELDS.filter((k) => k !== 'enforced.power.limit');
+  const v2Report = {
+    ...v1Base,
+    schema_version: 2,
+    collector_version: '1.1.0',
+    previous_report_id: null,
+    target_bdf: '0000:02:00.0',
+    collection_started_utc: '2026-11-21T07:00:00Z',
+    collection_finished_utc: '2026-11-21T07:00:03Z',
+    source_timestamps: {
+      pnp_utc: '2026-11-21T07:00:01Z',
+      cim_utc: '2026-11-21T07:00:01Z',
+      nvidia_smi_utc: '2026-11-21T07:00:02Z',
+      security_utc: '2026-11-21T07:00:02Z',
+    },
+    evidence_level: 'reported',
+    gpus: [
+      {
+        bdf: makeField('0000:00:02.0', 'pnp'),
+        vendor_id: makeField('1002', 'pnp'),
+        device_id: makeField('1638', 'pnp'),
+        subsystem_id: makeField('88091043', 'pnp'),
+        revision: makeField('C9', 'pnp'),
+        name: makeField('AMD Radeon Graphics', 'cim'),
+        pnp_status: makeField('OK', 'pnp'),
+        driver_version: makeField('31.0.21921.1000', 'cim'),
+      },
+      {
+        bdf: makeField('0000:02:00.0', 'pnp'),
+        vendor_id: makeField('10DE', 'pnp'),
+        device_id: makeField('1F0B', 'pnp'),
+        subsystem_id: makeField('000010DE', 'pnp'),
+        revision: makeField('A1', 'pnp'),
+        name: makeField('NVIDIA CMP 40HX', 'cim'),
+        pnp_status: makeField('OK', 'pnp'),
+        driver_version: makeField('32.0.15.6094', 'cim'),
+      },
+    ],
+    nvidia: {
+      ...v1Base.nvidia,
+      fields: {
+        ...v1Base.nvidia.fields,
+        name: makeField('NVIDIA CMP 40HX', 'nvidia-smi'),
+        'pci.bus_id': makeField('0000:02:00.0', 'nvidia-smi'),
+      },
+      extended,
+      extended_missing,
+    },
+    security: {
+      boot_mode: makeField('UEFI', 'windows_env'),
+      secure_boot: makeField(false, 'registry'),
+      hvci_running: makeField(false, 'cim'),
+      test_signing: makeField(false, 'registry'),
+    },
+    completeness: {
+      inventory: { complete: true, status: 'ok', missing: [], reason: '' },
+      topology: { complete: false, status: 'skipped', missing: ['upstream'], reason: 'P3' },
+      link_idle: { complete: true, status: 'ok', missing: [], reason: '' },
+      link_load: { complete: false, status: 'skipped', missing: ['load'], reason: 'P2' },
+      compute: { complete: false, status: 'skipped', missing: ['cuda'], reason: 'P2' },
+      stability: { complete: false, status: 'skipped', missing: ['whea'], reason: 'P2' },
+      comparison: { complete: false, status: 'skipped', missing: ['prev'], reason: 'first run' },
+    },
+    legacy_status: {
+      present: false,
+      source: 'none',
+      status_code: 'NONE',
+      error_code: 'NONE',
+      speed_current: null,
+      width_current: null,
+      tls_target: null,
+      device_id: null,
+      mrrs_bytes: null,
+      observed_utc: null,
+    },
+    context: {
+      ...v1Base.context,
+      mod_type: 'none',
+    },
+  };
+
+  const res = await handleRequest(makeSignedRequest(JSON.stringify(v2Report)), env, { now: () => FIXED_NOW, fetch: fetchFn });
+  assert.equal(res.status, 201);
+  assert.equal(calls.length, 2);
+  const issuePayload = JSON.parse(calls[1].init.body);
+  assert.ok(issuePayload.title.includes('NVIDIA CMP 40HX'), `Expected target GPU title, got: ${issuePayload.title}`);
+  assert.equal(issuePayload.title.includes('AMD Radeon Graphics'), false);
+  assert.ok(issuePayload.body.includes(`<!-- vga-report:${v2Report.report_id} -->`));
+  assert.ok(issuePayload.body.includes('enforced.power.limit'));
 });

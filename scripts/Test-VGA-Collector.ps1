@@ -781,6 +781,594 @@ Invoke-TestCase 'second_401_returns_rejected_no_loop' {
     }
 }
 
+Invoke-TestCase 'remove_pii_strips_ipv6_without_changing_pci_bdf' {
+    foreach ($ip in @('2001:db8:85a3:0:0:8a2e:370:7334', '2001:db8::1', '::', '::1', '::ffff:192.0.2.1', 'fe80::1%12', 'fe80::1%eth0')) {
+        Assert-Equal (Remove-Pii -Text "adresse [$ip]") 'adresse [[IPV6]]' "IPv6 stripped: $ip"
+    }
+    Assert-Equal (Remove-Pii -Text 'PCI 0000:01:00.0 and 00000000:01:00.0') 'PCI 0000:01:00.0 and 00000000:01:00.0' 'PCI BDF unchanged'
+    Assert-Equal (Remove-Pii -Text 'URL https://[2001:db8::1]/ and 2001:db8::2.') 'URL https://[[IPV6]]/ and [IPV6].' 'bracket URL and sentence punctuation redacted'
+}
+
+# =========================================================================
+# P0 Reliability Tests (8 cases)
+# =========================================================================
+
+Invoke-TestCase 'profile_ids_match_40hxcore' {
+    Assert-Equal (Get-GpuProfileName -VendorId '10DE' -DeviceId '1F0B') 'CMP 40HX (TU106)' '1F0B maps to CMP 40HX'
+    Assert-Equal (Get-GpuProfileName -VendorId '10de' -DeviceId '2189') 'CMP 30HX (TU116)' '2189 case-insensitive maps to CMP 30HX'
+    Assert-True ($null -eq (Get-GpuProfileName -VendorId '10DE' -DeviceId '1F06')) '1F06 must not map to CMP 40HX'
+    Assert-True ($null -eq (Get-GpuProfileName -VendorId '10DE' -DeviceId '1F07')) '1F07 unknown profile returns null'
+}
+
+Invoke-TestCase 'cmp40hx_behind_rtx_is_target' {
+    function Find-NvidiaSmiExecutable { return 'mock-nvidia-smi.exe' }
+    function Invoke-NvidiaSmiRaw {
+        param([string[]]$Arguments)
+        if ($Arguments -contains '--help-query-gpu') {
+            return [pscustomobject]@{ ExitCode = 0; Output = ($expectedNvidia18 -join "`n") }
+        }
+        $row1 = 'NVIDIA GeForce RTX 2070, 560.94, 90.06.18.80.06, 00000000:01:00.0, 0x1F0710DE, 0x86701043, 8192, 7.5, 3, 3, 16, 16, 35.0, 40.0, 300, 405, 2175, P8'
+        $row2 = 'NVIDIA CMP 40HX, 560.94, 90.06.59.00.01, 00000000:02:00.0, 0x1F0B10DE, 0x000010DE, 8192, 7.5, 2, 2, 16, 16, 41.0, 28.0, 300, 405, 1710, P8'
+        return [pscustomobject]@{ ExitCode = 0; Output = "$row1`n$row2" }
+    }
+    $inv = @(
+        [pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:01:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '1F07'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '86701043'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA GeForce RTX 2070'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+            pcie = [ordered]@{
+                max_gen = [pscustomobject]@{ value = 3; source = 'pnp'; unit = 'gen'; status = 'ok' }
+                current_gen = [pscustomobject]@{ value = 3; source = 'pnp'; unit = 'gen'; status = 'ok' }
+                max_width = [pscustomobject]@{ value = 16; source = 'pnp'; unit = 'lanes'; status = 'ok' }
+                current_width = [pscustomobject]@{ value = 16; source = 'pnp'; unit = 'lanes'; status = 'ok' }
+            }
+        },
+        [pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:02:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '1F0B'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA CMP 40HX'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+            pcie = [ordered]@{
+                max_gen = [pscustomobject]@{ value = 2; source = 'pnp'; unit = 'gen'; status = 'ok' }
+                current_gen = [pscustomobject]@{ value = 2; source = 'pnp'; unit = 'gen'; status = 'ok' }
+                max_width = [pscustomobject]@{ value = 16; source = 'pnp'; unit = 'lanes'; status = 'ok' }
+                current_width = [pscustomobject]@{ value = 16; source = 'pnp'; unit = 'lanes'; status = 'ok' }
+            }
+        }
+    )
+    $nv = Get-NvidiaInfo -Inventory $inv
+    Assert-Equal $nv.fields['pci.bus_id'].value '0000:02:00.0' 'CMP 40HX behind RTX selected as target'
+    $ctx = [pscustomobject]@{ mod_state = 'stock'; riser = 'direct'; slot = 'cpu_x16'; stage = 'baseline'; notes = '' }
+    $rep = New-Report -Inventory $inv -Nvidia $nv -Context $ctx
+    Assert-Equal $rep.pcie.max_gen.value 2 'top-level pcie comes from target CMP 40HX'
+}
+
+Invoke-TestCase 'device_1f06_not_treated_as_cmp' {
+    function Find-NvidiaSmiExecutable { return 'mock-nvidia-smi.exe' }
+    function Invoke-NvidiaSmiRaw {
+        param([string[]]$Arguments)
+        if ($Arguments -contains '--help-query-gpu') {
+            return [pscustomobject]@{ ExitCode = 0; Output = ($expectedNvidia18 -join "`n") }
+        }
+        $row1 = 'NVIDIA GeForce RTX 2070, 560.94, 90.06.18.80.06, 00000000:01:00.0, 0x1F0710DE, 0x86701043, 8192, 7.5, 3, 3, 16, 16, 35.0, 40.0, 300, 405, 2175, P8'
+        $row2 = 'NVIDIA GeForce RTX 2060 SUPER, 560.94, 90.06.44.00.01, 00000000:02:00.0, 0x1F0610DE, 0x000010DE, 8192, 7.5, 3, 3, 16, 16, 39.0, 35.0, 300, 405, 1650, P8'
+        return [pscustomobject]@{ ExitCode = 0; Output = "$row1`n$row2" }
+    }
+    $inv = @(
+        [pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:01:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '1F07'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '86701043'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA GeForce RTX 2070'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+        },
+        [pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:02:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '1F06'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA GeForce RTX 2060 SUPER'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+        }
+    )
+    $nv = Get-NvidiaInfo -Inventory $inv
+    Assert-Equal $nv.fields['pci.bus_id'].value '0000:01:00.0' '1F06 must not take priority over first 10DE'
+}
+
+Invoke-TestCase 'explicit_target_bdf_overrides_auto' {
+    function Find-NvidiaSmiExecutable { return 'mock-nvidia-smi.exe' }
+    function Invoke-NvidiaSmiRaw {
+        param([string[]]$Arguments)
+        if ($Arguments -contains '--help-query-gpu') {
+            return [pscustomobject]@{ ExitCode = 0; Output = ($expectedNvidia18 -join "`n") }
+        }
+        $row1 = 'NVIDIA GeForce RTX 2070, 560.94, 90.06.18.80.06, 00000000:01:00.0, 0x1F0710DE, 0x86701043, 8192, 7.5, 3, 3, 16, 16, 35.0, 40.0, 300, 405, 2175, P8'
+        $row2 = 'NVIDIA CMP 30HX, 560.94, 90.16.46.00.01, 00000000:08:00.0, 0x218910DE, 0x000010DE, 6144, 7.5, 2, 2, 16, 16, 44.0, 26.0, 300, 405, 1785, P8'
+        return [pscustomobject]@{ ExitCode = 0; Output = "$row1`n$row2" }
+    }
+    $inv = @(
+        [pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:01:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '1F07'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '86701043'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA GeForce RTX 2070'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+            pcie = [ordered]@{
+                max_gen = [pscustomobject]@{ value = 3; source = 'pnp'; unit = 'gen'; status = 'ok' }
+                current_gen = [pscustomobject]@{ value = 3; source = 'pnp'; unit = 'gen'; status = 'ok' }
+                max_width = [pscustomobject]@{ value = 16; source = 'pnp'; unit = 'lanes'; status = 'ok' }
+                current_width = [pscustomobject]@{ value = 16; source = 'pnp'; unit = 'lanes'; status = 'ok' }
+            }
+        },
+        [pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:08:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '2189'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA CMP 30HX'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+            pcie = [ordered]@{
+                max_gen = [pscustomobject]@{ value = 2; source = 'pnp'; unit = 'gen'; status = 'ok' }
+                current_gen = [pscustomobject]@{ value = 2; source = 'pnp'; unit = 'gen'; status = 'ok' }
+                max_width = [pscustomobject]@{ value = 16; source = 'pnp'; unit = 'lanes'; status = 'ok' }
+                current_width = [pscustomobject]@{ value = 16; source = 'pnp'; unit = 'lanes'; status = 'ok' }
+            }
+        }
+    )
+    $nv = Get-NvidiaInfo -Inventory $inv -TargetBdf '0000:01:00.0'
+    Assert-Equal $nv.fields['pci.bus_id'].value '0000:01:00.0' 'explicit TargetBdf picks RTX over CMP'
+    $ctx = [pscustomobject]@{ mod_state = 'stock'; riser = 'direct'; slot = 'cpu_x16'; stage = 'baseline'; notes = '' }
+    $rep = New-Report -Inventory $inv -Nvidia $nv -Context $ctx -TargetBdf '0000:01:00.0'
+    Assert-Equal $rep.pcie.max_gen.value 3 'top-level pcie matches explicit TargetBdf'
+}
+
+Invoke-TestCase 'unknown_target_bdf_falls_back_to_auto' {
+    function Find-NvidiaSmiExecutable { return 'mock-nvidia-smi.exe' }
+    function Invoke-NvidiaSmiRaw {
+        param([string[]]$Arguments)
+        if ($Arguments -contains '--help-query-gpu') {
+            return [pscustomobject]@{ ExitCode = 0; Output = ($expectedNvidia18 -join "`n") }
+        }
+        $row1 = 'NVIDIA GeForce RTX 2070, 560.94, 90.06.18.80.06, 00000000:01:00.0, 0x1F0710DE, 0x86701043, 8192, 7.5, 3, 3, 16, 16, 35.0, 40.0, 300, 405, 2175, P8'
+        $row2 = 'NVIDIA CMP 30HX, 560.94, 90.16.46.00.01, 00000000:08:00.0, 0x218910DE, 0x000010DE, 6144, 7.5, 2, 2, 16, 16, 44.0, 26.0, 300, 405, 1785, P8'
+        return [pscustomobject]@{ ExitCode = 0; Output = "$row1`n$row2" }
+    }
+    $inv = @(
+        [pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:01:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '1F07'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '86701043'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA GeForce RTX 2070'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+        },
+        [pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:08:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '2189'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA CMP 30HX'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+        }
+    )
+    $nv = Get-NvidiaInfo -Inventory $inv -TargetBdf '0000:09:00.0'
+    Assert-Equal $nv.fields['pci.bus_id'].value '0000:08:00.0' 'unknown TargetBdf falls back to CMP auto-selection'
+}
+
+Invoke-TestCase 'target_without_nvidia_row_does_not_borrow_other_gpu' {
+    function Find-NvidiaSmiExecutable { return 'mock-nvidia-smi.exe' }
+    function Invoke-NvidiaSmiRaw {
+        param([string[]]$Arguments)
+        if ($Arguments -contains '--help-query-gpu') {
+            return [pscustomobject]@{ ExitCode = 0; Output = ($expectedNvidia18 -join "`n") }
+        }
+        # Only RTX has an nvidia-smi row; CMP at 0000:02:00.0 is missing from nvidia-smi
+        $row1 = 'NVIDIA GeForce RTX 2070, 560.94, 90.06.18.80.06, 00000000:01:00.0, 0x1F0710DE, 0x86701043, 8192, 7.5, 3, 3, 16, 16, 35.0, 40.0, 300, 405, 2175, P8'
+        return [pscustomobject]@{ ExitCode = 0; Output = $row1 }
+    }
+    $inv = @(
+        [pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:01:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '1F07'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '86701043'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA GeForce RTX 2070'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+        },
+        [pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:02:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '1F0B'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA CMP 40HX'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'Error'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = $null; source = 'cim'; unit = $null; status = 'unsupported' }
+        }
+    )
+    $nv = Get-NvidiaInfo -Inventory $inv
+    Assert-Equal $nv.complete $false 'target without nvidia row is not complete'
+    Assert-Equal $nv.fields['name'].status 'unsupported' 'missing target nvidia block marked unsupported'
+    Assert-True ($nv.fields['pci.bus_id'].value -ne '0000:01:00.0') 'must not borrow RTX bus_id'
+    $ctx = [pscustomobject]@{ mod_state = 'stock'; riser = 'direct'; slot = 'cpu_x16'; stage = 'baseline'; notes = '' }
+    $rep = New-Report -Inventory $inv -Nvidia $nv -Context $ctx
+    $json = $rep | ConvertTo-Json -Depth 12
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("vga-p0-validate-" + [guid]::NewGuid() + ".json")
+    try {
+        [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false)))
+        $nodeOut = & node -e "const fs=require('fs'), r=require(process.argv[1]), d=JSON.parse(fs.readFileSync(process.argv[2],'utf8')); const v=r.validateReport(d), p=r.findPii(d); if(!v.ok || p.length){ console.log(JSON.stringify({v,p})); process.exit(1); }" $reportCjsPath $tmp
+        Assert-Equal $LASTEXITCODE 0 "Node schema validation failed: $nodeOut"
+    } finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'summary_warns_gen_conflict_and_basic_wording' {
+    function Find-NvidiaSmiExecutable { return 'mock-nvidia-smi.exe' }
+    function Invoke-NvidiaSmiRaw {
+        param([string[]]$Arguments)
+        if ($Arguments -contains '--help-query-gpu') {
+            return [pscustomobject]@{ ExitCode = 0; Output = ($expectedNvidia18 -join "`n") }
+        }
+        return [pscustomobject]@{
+            ExitCode = 0
+            Output = 'NVIDIA GeForce RTX 2070, 621.01, 90.06.18.80.06, 00000000:01:00.0, 0x1F0710DE, 0x86701043, 8192, 7.5, 3, 3, 16, 16, 35.7, 40.04, 300, 405, 2175, P8'
+        }
+    }
+    $invConflict = @([pscustomobject]@{
+        bdf = [pscustomobject]@{ value = '0000:01:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+        vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+        device_id = [pscustomobject]@{ value = '1F07'; source = 'pnp'; unit = $null; status = 'ok' }
+        subsystem_id = [pscustomobject]@{ value = '86701043'; source = 'pnp'; unit = $null; status = 'ok' }
+        revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+        name = [pscustomobject]@{ value = 'NVIDIA GeForce RTX 2070'; source = 'cim'; unit = $null; status = 'ok' }
+        pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+        driver_version = [pscustomobject]@{ value = '32.0.16.2101'; source = 'cim'; unit = $null; status = 'ok' }
+        pcie = [ordered]@{
+            max_gen = [pscustomobject]@{ value = 3; source = 'pnp'; unit = 'gen'; status = 'ok' }
+            current_gen = [pscustomobject]@{ value = 1; source = 'pnp'; unit = 'gen'; status = 'ok' }
+            max_width = [pscustomobject]@{ value = 16; source = 'pnp'; unit = 'lanes'; status = 'ok' }
+            current_width = [pscustomobject]@{ value = 16; source = 'pnp'; unit = 'lanes'; status = 'ok' }
+        }
+    })
+    $nv = Get-NvidiaInfo -Inventory $invConflict
+    $ctx = [pscustomobject]@{ mod_state = 'stock'; riser = 'direct'; slot = 'cpu_x16'; stage = 'baseline'; notes = '' }
+    $repConflict = New-Report -Inventory $invConflict -Nvidia $nv -Context $ctx
+    $sumConflict = Format-VietnameseSummary -Report $repConflict
+    Assert-True ($sumConflict.Contains('Gen1 ×16')) 'normalized Gen1 ×16 in summary'
+    Assert-True ($sumConflict.Contains('Gen3 ×16')) 'normalized Gen3 ×16 in summary'
+    Assert-True ($sumConflict.Contains('Cảnh báo: PnP')) 'conflict warning rendered'
+    Assert-True ($sumConflict.Contains('NVIDIA cơ bản')) 'basic wording rendered'
+    Assert-True ($sumConflict.Contains('18/18')) '18/18 count rendered'
+
+    $invSame = @([pscustomobject]@{
+        bdf = [pscustomobject]@{ value = '0000:01:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+        vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+        device_id = [pscustomobject]@{ value = '1F07'; source = 'pnp'; unit = $null; status = 'ok' }
+        subsystem_id = [pscustomobject]@{ value = '86701043'; source = 'pnp'; unit = $null; status = 'ok' }
+        revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+        name = [pscustomobject]@{ value = 'NVIDIA GeForce RTX 2070'; source = 'cim'; unit = $null; status = 'ok' }
+        pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+        driver_version = [pscustomobject]@{ value = '32.0.16.2101'; source = 'cim'; unit = $null; status = 'ok' }
+        pcie = [ordered]@{
+            max_gen = [pscustomobject]@{ value = 3; source = 'pnp'; unit = 'gen'; status = 'ok' }
+            current_gen = [pscustomobject]@{ value = 3; source = 'pnp'; unit = 'gen'; status = 'ok' }
+            max_width = [pscustomobject]@{ value = 16; source = 'pnp'; unit = 'lanes'; status = 'ok' }
+            current_width = [pscustomobject]@{ value = 16; source = 'pnp'; unit = 'lanes'; status = 'ok' }
+        }
+    })
+    $repSame = New-Report -Inventory $invSame -Nvidia $nv -Context $ctx
+    $sumSame = Format-VietnameseSummary -Report $repSame
+    Assert-True (-not $sumSame.Contains('Cảnh báo: PnP')) 'no conflict warning when PnP matches nvidia-smi'
+}
+
+Invoke-TestCase 'summary_driver_missing_fields_shows_count' {
+    function Find-NvidiaSmiExecutable { return 'mock-nvidia-smi.exe' }
+    function Invoke-NvidiaSmiRaw {
+        param([string[]]$Arguments)
+        if ($Arguments -contains '--help-query-gpu') {
+            return [pscustomobject]@{ ExitCode = 0; Output = ($expectedNvidia18 -join "`n") }
+        }
+        return [pscustomobject]@{
+            ExitCode = 0
+            Output = 'NVIDIA CMP 30HX, 560.94, 90.16.46.00.01, 00000000:07:00.0, 0x218910DE, 0x000010DE, 6144, [N/A], 2, 2, 16, 16, 42.0, 25.5, 300, 405, 1785, P8'
+        }
+    }
+    $inv = @([pscustomobject]@{
+        bdf = [pscustomobject]@{ value = '0000:07:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+        vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+        device_id = [pscustomobject]@{ value = '2189'; source = 'pnp'; unit = $null; status = 'ok' }
+        subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+        revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+        name = [pscustomobject]@{ value = 'NVIDIA CMP 30HX'; source = 'cim'; unit = $null; status = 'ok' }
+        pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+        driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+    })
+    $nv = Get-NvidiaInfo -Inventory $inv
+    $ctx = [pscustomobject]@{ mod_state = 'stock'; riser = 'direct'; slot = 'cpu_x16'; stage = 'baseline'; notes = '' }
+    $rep = New-Report -Inventory $inv -Nvidia $nv -Context $ctx
+    $sum = Format-VietnameseSummary -Report $rep
+    Assert-True ($sum.Contains('17/18')) 'summary shows 17/18 when 1 field is N/A'
+}
+
+# =========================================================================
+# P1 Schema v2 & Basic Collector Tests (6 cases)
+# =========================================================================
+
+Invoke-TestCase 'p1_profiles_cover_p106_p100_and_flag_ambiguous_p100_name' {
+    $p106 = Get-GpuProfileDetails -VendorId '10DE' -DeviceId '1C07' -Name 'NVIDIA P106-100'
+    Assert-Equal $p106.name 'P106-100 (GP106)' '1C07 profile name'
+    Assert-Equal $p106.category 'mining' '1C07 category'
+    Assert-Equal $p106.tensor_applicable 'no' 'Pascal tensor not applicable'
+
+    $p106090 = Get-GpuProfileDetails -VendorId '10DE' -DeviceId '1C09' -Name 'P106-090'
+    Assert-Equal $p106090.name 'P106-090 (GP106)' '1C09 profile name'
+
+    $p100 = Get-GpuProfileDetails -VendorId '10DE' -DeviceId '15F8' -Name 'Tesla P100-PCIE-16GB'
+    Assert-Equal $p100.name 'Tesla P100 PCIe 16GB (GP100)' '15F8 profile name'
+    Assert-Equal $p100.target_pcie_gen 3 'P100 target Gen3'
+    Assert-Equal $p100.tensor_applicable 'no' 'P100 Pascal tensor not applicable'
+
+    $p100sxm2 = Get-GpuProfileDetails -VendorId '10DE' -DeviceId '15F9' -Name 'Tesla P100-SXM2-16GB'
+    Assert-Equal $p100sxm2.name 'Tesla P100 SXM2 (GP100)' '15F9 profile name'
+
+    $ambig = Get-GpuProfileDetails -VendorId '10DE' -DeviceId '9999' -Name 'NVIDIA P100 Custom'
+    Assert-True ($null -eq $ambig.name) 'unknown ID must not assume Tesla P100'
+    Assert-True ($ambig.identity_note -match 'P100') 'ambiguous P100 name flagged'
+}
+
+Invoke-TestCase 'p1_faulty_gpu_property_does_not_drop_healthy_gpu' {
+    function Get-RawCimDisplayDevices {
+        return @(
+            [pscustomobject]@{ Name = 'Healthy CMP 40HX'; PNPDeviceID = 'PCI\VEN_10DE&DEV_1F0B&SUBSYS_000010DE&REV_A1\4&2222&0&0009'; DriverVersion = '32.0.15.6094'; Status = 'OK'; ConfigManagerErrorCode = 0 }
+        )
+    }
+    function Get-RawPnpDisplayDevices {
+        return @(
+            [pscustomobject]@{ InstanceId = 'PCI\VEN_1002&DEV_1638&SUBSYS_88091043&REV_C9\4&1111&0&0041'; FriendlyName = 'Faulty GPU'; Status = 'Error' },
+            [pscustomobject]@{ InstanceId = 'PCI\VEN_10DE&DEV_1F0B&SUBSYS_000010DE&REV_A1\4&2222&0&0009'; FriendlyName = 'NVIDIA CMP 40HX'; Status = 'OK' }
+        )
+    }
+    function Get-RawPnpDeviceProperties {
+        param([string]$InstanceId)
+        if ($InstanceId -like '*VEN_1002*') {
+            throw 'Simulated PnP device property failure'
+        }
+        return @(
+            [pscustomobject]@{ KeyName = 'DEVPKEY_Device_BusNumber'; Data = 2 },
+            [pscustomobject]@{ KeyName = 'DEVPKEY_Device_Address'; Data = 0 },
+            [pscustomobject]@{ KeyName = 'DEVPKEY_Device_DriverProvider'; Data = 'NVIDIA' },
+            [pscustomobject]@{ KeyName = 'DEVPKEY_Device_DriverInfPath'; Data = 'C:\Windows\INF\oem99.inf' },
+            [pscustomobject]@{ KeyName = 'DEVPKEY_Device_Service'; Data = 'nvlddmkm' },
+            [pscustomobject]@{ KeyName = 'DEVPKEY_Device_ProblemCode'; Data = 0 },
+            [pscustomobject]@{ KeyName = 'DEVPKEY_Device_LocationPaths'; Data = @('PCIROOT(0)#PCI(0101)#PCI(0000)') },
+            [pscustomobject]@{ KeyName = 'DEVPKEY_PciDevice_MaxLinkSpeed'; Data = 2 },
+            [pscustomobject]@{ KeyName = 'DEVPKEY_PciDevice_CurrentLinkSpeed'; Data = 2 },
+            [pscustomobject]@{ KeyName = 'DEVPKEY_PciDevice_MaxLinkWidth'; Data = 16 },
+            [pscustomobject]@{ KeyName = 'DEVPKEY_PciDevice_CurrentLinkWidth'; Data = 16 }
+        )
+    }
+
+    $inv = @(Get-VgaInventory)
+    Assert-Equal $inv.Count 2 'both GPUs retained even when one fails PnP property read'
+    $faulty = $inv | Where-Object { $_.vendor_id.value -eq '1002' } | Select-Object -First 1
+    $healthy = $inv | Where-Object { $_.vendor_id.value -eq '10DE' } | Select-Object -First 1
+    Assert-Equal $faulty.bdf.status 'error' 'faulty GPU records error status'
+    Assert-Equal $healthy.bdf.value '0000:02:00.0' 'healthy GPU still parsed'
+    Assert-Equal $healthy.driver.inf_name.value 'oem99.inf' 'INF stripped to filename only'
+    Assert-Equal $healthy.driver.provider.value 'NVIDIA' 'driver provider populated'
+    Assert-Equal $healthy.driver.problem_code.value 0 'problem_code populated'
+    Assert-Equal $healthy.profile.name 'CMP 40HX (TU106)' 'profile attached to GPU'
+}
+
+Invoke-TestCase 'p1_security_and_boot_fields_handle_supported_and_unsupported' {
+    function Get-RawSecurityState {
+        return [pscustomobject]@{
+            BootMode        = 'Legacy'
+            SecureBootState = $null
+            HvciEnabled     = $null
+            HvciStatus      = 'permission_denied'
+            TestSigning     = $false
+        }
+    }
+    $secLegacy = Get-SecurityAndBootInfo
+    Assert-Equal $secLegacy.boot_mode.value 'Legacy' 'Legacy boot mode'
+    Assert-Equal $secLegacy.secure_boot.status 'unsupported' 'Secure Boot unsupported on Legacy BIOS'
+    Assert-True ($null -eq $secLegacy.secure_boot.value) 'Secure Boot null on unsupported'
+    Assert-Equal $secLegacy.hvci_running.status 'permission_denied' 'HVCI permission_denied preserved'
+    Assert-Equal $secLegacy.test_signing.value $false 'TestSigning false'
+
+    function Get-RawSecurityState {
+        return [pscustomobject]@{
+            BootMode        = 'UEFI'
+            SecureBootState = 1
+            HvciEnabled     = $true
+            HvciStatus      = 'ok'
+            TestSigning     = $true
+        }
+    }
+    $secUefi = Get-SecurityAndBootInfo
+    Assert-Equal $secUefi.boot_mode.value 'UEFI' 'UEFI boot mode'
+    Assert-Equal $secUefi.secure_boot.value $true 'Secure Boot enabled'
+    Assert-Equal $secUefi.hvci_running.value $true 'HVCI running'
+    Assert-Equal $secUefi.test_signing.value $true 'TestSigning true'
+}
+
+Invoke-TestCase 'p1_nvidia_extended_power_and_throttle_parsed_without_breaking_basic_18' {
+    function Find-NvidiaSmiExecutable { return 'mock-nvidia-smi.exe' }
+    function Invoke-NvidiaSmiRaw {
+        param([string[]]$Arguments)
+        if ($Arguments -contains '--help-query-gpu') {
+            $allHelp = $expectedNvidia18 + @(
+                'power.limit','enforced.power.limit','power.default_limit','power.min_limit','power.max_limit',
+                'temperature.gpu.tlimit','temperature.memory','fan.speed','utilization.gpu','utilization.memory',
+                'memory.used','memory.free','ecc.mode.current','clocks_event_reasons.active',
+                'clocks_event_reasons.sw_power_cap','clocks_event_reasons.hw_slowdown',
+                'clocks_event_reasons.hw_thermal_slowdown','clocks_event_reasons.hw_power_brake_slowdown'
+            )
+            return [pscustomobject]@{ ExitCode = 0; Output = ($allHelp -join "`n") }
+        }
+        $q = ($Arguments | Where-Object { $_ -like '--query-gpu=*' }) -replace '^--query-gpu=', ''
+        if ($q -match 'enforced\.power\.limit') {
+            return [pscustomobject]@{
+                ExitCode = 0
+                Output = '00000000:07:00.0, 125.00, 120.00, 125.00, 100.00, 130.00, 44, [N/A], 35, 10, 5, 256, 5888, [N/A], 0x0000000000000004, Active, Not Active, Not Active, Not Active'
+            }
+        }
+        return [pscustomobject]@{
+            ExitCode = 0
+            Output = 'NVIDIA CMP 30HX, 560.94, 90.16.46.00.01, 00000000:07:00.0, 0x218910DE, 0x000010DE, 6144, 7.5, 2, 2, 16, 16, 42.0, 25.5, 300, 405, 1785, P8'
+        }
+    }
+    $inv = @([pscustomobject]@{
+        bdf = [pscustomobject]@{ value = '0000:07:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+        vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+        device_id = [pscustomobject]@{ value = '2189'; source = 'pnp'; unit = $null; status = 'ok' }
+        subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+        revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+        name = [pscustomobject]@{ value = 'NVIDIA CMP 30HX'; source = 'cim'; unit = $null; status = 'ok' }
+        pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+        driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+    })
+
+    $nv = Get-NvidiaInfo -Inventory $inv
+    Assert-Equal $nv.complete $true 'basic 18 fields stay complete=true even with extended unsupported fields'
+    Assert-Equal $nv.extended['enforced.power.limit'].value 120 'enforced.power.limit parsed'
+    Assert-Equal $nv.extended['power.max_limit'].value 130 'power.max_limit parsed'
+    Assert-Equal $nv.extended['clocks_throttle_reasons.sw_power_cap'].value 'Active' 'throttle reason mapped from clocks_event_reasons'
+    Assert-True ($nv.extended_missing -contains 'ecc.mode.current') 'unsupported extended field listed in extended_missing'
+}
+
+Invoke-TestCase 'p1_legacy_status_allowlist_ignores_free_text_and_pii' {
+    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-legacy-" + [guid]::NewGuid())
+    try {
+        [void][IO.Directory]::CreateDirectory($tmpDir)
+        $statusContent = @"
+STATUS_CODE=GEN1_STUCK
+SPEED_CURRENT=1
+WIDTH_CURRENT=16
+TLS_TARGET=2
+ERROR_CODE=WINRING0_BLOCKED
+DEVICE_ID=2189
+MRRS_BYTES=512
+OBSERVED_AT=2026-11-21T15:00:00Z
+EXTRA_BAD=should_be_ignored
+==== 40HX Gen2 Ket qua 2026-11-21 15:00:00 ====
+Free text log at C:\Users\SecretOwner\Desktop\installer.log ip 192.168.1.99 mac 00:11:22:33:44:55
+"@
+        [IO.File]::WriteAllText((Join-Path $tmpDir 'gen2_status.txt'), $statusContent, (New-Object Text.UTF8Encoding($false)))
+        $leg = Get-LegacyUnlockStatus -StatusDir $tmpDir
+        Assert-Equal $leg.present $true 'legacy status detected'
+        Assert-Equal $leg.source 'gen2_status' 'source recorded'
+        Assert-Equal $leg.status_code 'GEN1_STUCK' 'status_code parsed'
+        Assert-Equal $leg.error_code 'WINRING0_BLOCKED' 'error_code parsed'
+        Assert-Equal $leg.speed_current 1 'speed_current parsed'
+        Assert-Equal $leg.device_id '2189' 'device_id parsed'
+        $legJson = $leg | ConvertTo-Json -Depth 5
+        Assert-True (-not $legJson.Contains('SecretOwner')) 'user path never included'
+        Assert-True (-not $legJson.Contains('192.168.1.99')) 'IPv4 never included'
+        Assert-True (-not $legJson.Contains('EXTRA_BAD')) 'unknown keys ignored'
+    } finally {
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'p1_v2_report_validates_in_node_and_links_previous_report_id' {
+    function Find-NvidiaSmiExecutable { return 'mock-nvidia-smi.exe' }
+    function Invoke-NvidiaSmiRaw {
+        param([string[]]$Arguments)
+        if ($Arguments -contains '--help-query-gpu') {
+            return [pscustomobject]@{ ExitCode = 0; Output = ($expectedNvidia18 -join "`n") }
+        }
+        return [pscustomobject]@{
+            ExitCode = 0
+            Output = 'NVIDIA CMP 40HX, 560.94, 90.06.59.00.01, 00000000:02:00.0, 0x1F0B10DE, 0x000010DE, 8192, 7.5, 2, 2, 16, 16, 41.0, 28.0, 300, 405, 1710, P8'
+        }
+    }
+    function Get-RawSecurityState {
+        return [pscustomobject]@{
+            BootMode        = 'UEFI'
+            SecureBootState = 0
+            HvciEnabled     = $false
+            HvciStatus      = 'ok'
+            TestSigning     = $false
+        }
+    }
+    $expDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-exp-" + [guid]::NewGuid())
+    try {
+        [void][IO.Directory]::CreateDirectory($expDir)
+        $inv = @([pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:02:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '1F0B'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA CMP 40HX'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+            profile = (Get-GpuProfileDetails -VendorId '10DE' -DeviceId '1F0B' -Name 'NVIDIA CMP 40HX')
+            driver = [ordered]@{
+                provider      = [pscustomobject]@{ value = 'NVIDIA'; source = 'pnp'; unit = $null; status = 'ok' }
+                date          = [pscustomobject]@{ value = '2026-10-19'; source = 'pnp'; unit = $null; status = 'ok' }
+                inf_name      = [pscustomobject]@{ value = 'oem2.inf'; source = 'pnp'; unit = $null; status = 'ok' }
+                service       = [pscustomobject]@{ value = 'nvlddmkm'; source = 'pnp'; unit = $null; status = 'ok' }
+                problem_code  = [pscustomobject]@{ value = 0; source = 'pnp'; unit = $null; status = 'ok' }
+                location_path = [pscustomobject]@{ value = 'PCIROOT(0)#PCI(0101)#PCI(0000)'; source = 'pnp'; unit = $null; status = 'ok' }
+            }
+            pcie = [ordered]@{
+                max_gen = [pscustomobject]@{ value = 2; source = 'pnp'; unit = 'gen'; status = 'ok' }
+                current_gen = [pscustomobject]@{ value = 2; source = 'pnp'; unit = 'gen'; status = 'ok' }
+                max_width = [pscustomobject]@{ value = 16; source = 'pnp'; unit = 'lanes'; status = 'ok' }
+                current_width = [pscustomobject]@{ value = 16; source = 'pnp'; unit = 'lanes'; status = 'ok' }
+            }
+        })
+        $ctx = [pscustomobject]@{ mod_state = 'modded'; mod_type = 'efi'; riser = 'direct'; slot = 'cpu_x16'; stage = 'after_unlock'; notes = '' }
+        $nv1 = Get-NvidiaInfo -Inventory $inv
+        $rep1 = New-Report -Inventory $inv -Nvidia $nv1 -Context $ctx -ExperimentDir $expDir -LegacyStatusDir $expDir
+        Assert-Equal $rep1.schema_version 2 'v2 schema emitted'
+        Assert-True ($null -eq $rep1.previous_report_id) 'first report has null previous_report_id'
+        [void](Save-LocalReport -Report $rep1 -Dir $expDir)
+
+        $nv2 = Get-NvidiaInfo -Inventory $inv
+        $rep2 = New-Report -Inventory $inv -Nvidia $nv2 -Context $ctx -ExperimentDir $expDir -LegacyStatusDir $expDir
+        Assert-Equal $rep2.experiment_id $rep1.experiment_id 'same experiment_id across runs'
+        Assert-Equal $rep2.previous_report_id $rep1.report_id 'second report links previous_report_id'
+
+        $json = $rep2 | ConvertTo-Json -Depth 12
+        $tmp = Join-Path $expDir 'validate-v2.json'
+        [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false)))
+        $nodeOut = & node -e "const fs=require('fs'), r=require(process.argv[1]), d=JSON.parse(fs.readFileSync(process.argv[2],'utf8')); const v=r.validateReport(d), p=r.findPii(d); if(!v.ok || p.length){ console.log(JSON.stringify({v,p})); process.exit(1); }" $reportCjsPath $tmp
+        Assert-Equal $LASTEXITCODE 0 "Node v2 schema validation failed: $nodeOut"
+    } finally {
+        Remove-Item -LiteralPath $expDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Host "Summary: Passed=$script:Passed Failed=$script:Failed"
 if ($script:Failed -gt 0) { exit 1 }
 exit 0

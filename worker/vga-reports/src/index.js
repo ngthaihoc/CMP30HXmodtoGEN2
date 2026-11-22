@@ -4,7 +4,9 @@ const {
   validateReport,
   findPii,
   renderSummary,
+  normalizeBdf,
   MAX_PAYLOAD_BYTES,
+  MAX_SUMMARY_LENGTH,
 } = reportLib;
 
 const ENCODER = new TextEncoder();
@@ -39,6 +41,35 @@ function jsonResponse(body, status, extraHeaders = {}) {
       ...extraHeaders,
     },
   });
+}
+
+async function readBoundedBody(request) {
+  if (!request.body) return new Uint8Array();
+  const reader = request.body.getReader();
+  let bytes = new Uint8Array();
+  let byteLength = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const nextLength = byteLength + value.byteLength;
+      if (nextLength > MAX_PAYLOAD_BYTES) {
+        try { await reader.cancel(); } catch {}
+        return null;
+      }
+      if (nextLength > bytes.byteLength) {
+        const capacity = Math.min(MAX_PAYLOAD_BYTES, Math.max(nextLength, bytes.byteLength * 2, 1024));
+        const grown = new Uint8Array(capacity);
+        grown.set(bytes.subarray(0, byteLength));
+        bytes = grown;
+      }
+      bytes.set(value, byteLength);
+      byteLength = nextLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return bytes.subarray(0, byteLength);
 }
 
 function base64ToBytes(b64) {
@@ -166,12 +197,14 @@ export async function checkQuota(env, ip, now) {
   if (!env.REPORTS) {
     throw new Error('Missing REPORTS KV binding');
   }
-
+  if (typeof env.IP_SALT !== 'string' || !env.IP_SALT.trim()) {
+    throw new Error('Missing IP_SALT');
+  }
   const nowSec = Math.floor(typeof now === 'number' ? now : Date.now() / 1000);
   const day = new Date(nowSec * 1000).toISOString().slice(0, 10);
   const dailyCap = Math.max(0, Number.parseInt(String(env.DAILY_CAP || '200'), 10) || 200);
   const ipLimit = Math.max(0, Number.parseInt(String(env.IP_LIMIT || '10'), 10) || 10);
-  const ipHash = await hmacSha256Hex(String(env.IP_SALT || 'cmp-vga-default-salt'), `${day}:${ip || 'unknown'}`);
+  const ipHash = await hmacSha256Hex(env.IP_SALT, `${day}:${ip || 'unknown'}`);
   const ipKey = `q:${day}:${ipHash}`;
   const dailyKey = `d:${day}`;
 
@@ -261,8 +294,17 @@ export async function getInstallationToken(env, fetchFn, now) {
 
 function buildSafeIssueTitle(report) {
   const gpus = Array.isArray(report.gpus) ? report.gpus : [];
-  const primaryName = gpus[0] && gpus[0].name && gpus[0].name.status === 'ok'
-    ? String(gpus[0].name.value)
+  const nvFields = report.nvidia && report.nvidia.fields ? report.nvidia.fields : {};
+  const explicitBdf = typeof report.target_bdf === 'string' ? normalizeBdf(report.target_bdf) : null;
+  const nvBusField = nvFields['pci.bus_id'];
+  const nvBdf = nvBusField && nvBusField.status === 'ok' ? normalizeBdf(nvBusField.value) : null;
+  const wantedBdf = explicitBdf || nvBdf;
+  const matchedGpu = wantedBdf
+    ? gpus.find((g) => g && g.bdf && g.bdf.status === 'ok' && normalizeBdf(g.bdf.value) === wantedBdf)
+    : null;
+  const chosenGpu = matchedGpu || gpus[0];
+  const primaryName = chosenGpu && chosenGpu.name && chosenGpu.name.status === 'ok'
+    ? String(chosenGpu.name.value)
     : 'Unknown GPU';
   const cleanName = primaryName.replace(/[\r\n@<>\[\]()`${}]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
   const stage = report.context && report.context.stage ? String(report.context.stage) : 'unknown';
@@ -278,10 +320,7 @@ export async function createIssue(env, token, report, fetchFn) {
   const title = buildSafeIssueTitle(report);
   const summary = renderSummary(report);
   const marker = `\n\n<!-- vga-report:${report.report_id} -->`;
-  const maxBody = 65000;
-  const body = (summary.length + marker.length > maxBody
-    ? summary.slice(0, maxBody - marker.length)
-    : summary) + marker;
+  const body = summary.slice(0, MAX_SUMMARY_LENGTH - marker.length) + marker;
 
   const res = await fetchFn(`https://api.github.com/repos/${repo}/issues`, {
     method: 'POST',
@@ -333,8 +372,13 @@ export async function handleRequest(request, env, deps = {}) {
     return jsonResponse({ error: 'payload_too_large' }, 413);
   }
 
-  const rawBytes = new Uint8Array(await request.arrayBuffer());
-  if (rawBytes.byteLength > MAX_PAYLOAD_BYTES) {
+  let rawBytes;
+  try {
+    rawBytes = await readBoundedBody(request);
+  } catch {
+    return jsonResponse({ error: 'invalid_body' }, 400);
+  }
+  if (rawBytes === null) {
     return jsonResponse({ error: 'payload_too_large' }, 413);
   }
 
@@ -350,17 +394,8 @@ export async function handleRequest(request, env, deps = {}) {
     );
   }
 
-  const ip = request.headers.get('CF-Connecting-IP') || '0.0.0.0';
-  const quota = await checkQuota(env, ip, nowSec);
-  if (!quota.allowed) {
-    if (quota.reason === 'disabled') {
-      return jsonResponse({ error: 'service_unavailable', reason: 'disabled' }, 503);
-    }
-    return jsonResponse(
-      { error: 'rate_limited', reason: quota.reason },
-      429,
-      { 'Retry-After': String(secondsUntilNextUtcMidnight(nowSec)) },
-    );
+  if (String(env.INTAKE_ENABLED || 'true').toLowerCase() === 'false') {
+    return jsonResponse({ error: 'service_unavailable', reason: 'disabled' }, 503);
   }
 
   let report;
@@ -380,9 +415,18 @@ export async function handleRequest(request, env, deps = {}) {
     return jsonResponse({ error: 'pii_detected', categories: pii }, 422);
   }
 
+  if (!env.REPORTS || typeof env.IP_SALT !== 'string' || !env.IP_SALT.trim()) {
+    return jsonResponse({ error: 'service_unavailable', reason: 'configuration_error' }, 503);
+  }
+
   const bodyHash = await sha256Hex(rawBytes);
   const dedupKey = `r:${report.report_id}`;
-  const existing = await env.REPORTS.get(dedupKey, 'json');
+  let existing;
+  try {
+    existing = await env.REPORTS.get(dedupKey, 'json');
+  } catch {
+    return jsonResponse({ error: 'service_unavailable', reason: 'kv_error' }, 503);
+  }
   if (existing) {
     if (existing.sha256_body === bodyHash) {
       return jsonResponse(
@@ -403,9 +447,29 @@ export async function handleRequest(request, env, deps = {}) {
     );
   }
 
+  const ip = request.headers.get('CF-Connecting-IP') || '0.0.0.0';
+  let quota;
+  try {
+    quota = await checkQuota(env, ip, nowSec);
+  } catch {
+    return jsonResponse({ error: 'service_unavailable', reason: 'kv_error' }, 503);
+  }
+  if (!quota.allowed) {
+    return jsonResponse(
+      { error: 'rate_limited', reason: quota.reason },
+      429,
+      { 'Retry-After': String(secondsUntilNextUtcMidnight(nowSec)) },
+    );
+  }
+
+  let issue;
   try {
     const token = await getInstallationToken(env, fetchFn, nowSec);
-    const issue = await createIssue(env, token, report, fetchFn);
+    issue = await createIssue(env, token, report, fetchFn);
+  } catch {
+    return jsonResponse({ error: 'service_unavailable', reason: 'github_error' }, 503);
+  }
+  try {
     await env.REPORTS.put(
       dedupKey,
       JSON.stringify({
@@ -415,17 +479,17 @@ export async function handleRequest(request, env, deps = {}) {
         created_at: nowSec,
       }),
     );
-    return jsonResponse(
-      {
-        report_id: report.report_id,
-        status: 'issue_created',
-        issue_url: issue.url,
-      },
-      201,
-    );
   } catch {
-    return jsonResponse({ error: 'service_unavailable', reason: 'github_error' }, 503);
+    return jsonResponse({ error: 'service_unavailable', reason: 'kv_error' }, 503);
   }
+  return jsonResponse(
+    {
+      report_id: report.report_id,
+      status: 'issue_created',
+      issue_url: issue.url,
+    },
+    201,
+  );
 }
 
 export default {
