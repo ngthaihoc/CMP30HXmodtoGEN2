@@ -991,3 +991,14 @@ test('post_v2_report_creates_issue_201_with_target_gpu_title', async () => {
   assert.ok(issuePayload.body.includes(`<!-- vga-report:${v2Report.report_id} -->`));
   assert.ok(issuePayload.body.includes('enforced.power.limit'));
 });
+
+test('capabilities_advertises_v2_extensions_and_worker_handles_phase2_3_payload', async () => {
+  const { handleRequest } = await import(workerModuleUrl);
+  const env = await makeEnv();
+  const hRes = await handleRequest(new Request('https://vga.example/v1/capabilities'), env, { now: () => FIXED_NOW });
+  assert.equal(hRes.status, 200);
+  const hBody = await hRes.json();
+  assert.equal(hBody.ok, true);
+  assert.deepEqual(hBody.schema_versions, [1, 2]);
+  assert.deepEqual(hBody.v2_extensions, ['topology', 'load_test', 'stability', 'comparison']);
+});

@@ -265,6 +265,26 @@ const ROOT_KEYS_V2 = [
   'completeness',
   'legacy_status',
 ];
+const ROOT_ALLOWED_KEYS_V2 = new Set([
+  ...ROOT_KEYS_V2,
+  'topology',
+  'load_test',
+  'stability',
+  'comparison',
+]);
+
+const TOPOLOGY_ROLES = new Set(['endpoint', 'bridge_or_switch', 'root_port', 'root_complex', 'unknown']);
+const TOPOLOGY_DEV_TYPES = new Set(['endpoint', 'root_port', 'upstream_switch', 'downstream_switch', 'bridge', 'root_complex', 'unknown']);
+const TOPOLOGY_NODE_STATUSES = new Set(['ok', 'partial', 'unsupported', 'permission_denied', 'error', 'skipped']);
+const SLOT_TYPES = new Set(['cpu_root', 'chipset_or_switch', 'unknown']);
+const REBAR_CAP_STATUSES = new Set(['unknown', 'enabled', 'disabled', 'unsupported']);
+const LOAD_TEST_STATUSES = new Set(['ok', 'partial', 'skipped', 'unsupported', 'timeout', 'error']);
+const STOP_REASONS = new Set(['completed', 'timeout', 'thermal_limit', 'power_limit', 'gpu_lost', 'gpu_error', 'user_cancelled', 'not_run', 'error']);
+const TENSOR_CHECK_STATUSES = new Set(['ok', 'skipped', 'unsupported', 'error']);
+const SAMPLE_PHASES = new Set(['idle', 'load', 'recovery']);
+const STABILITY_QUERY_STATUSES = new Set(['ok', 'partial', 'permission_denied', 'provider_unavailable', 'timeout', 'error', 'skipped']);
+const EVENT_SCOPES = new Set(['target_gpu', 'upstream', 'system_non_pcie', 'unattributed']);
+const COMPARISON_STATUSES = new Set(['ok', 'partial', 'mismatched', 'missing_previous', 'invalid_previous', 'skipped']);
 
 const FIELD_KEYS = ['value', 'source', 'unit', 'status'];
 const PCIE_KEYS = ['max_gen', 'current_gen', 'max_width', 'current_width'];
@@ -630,6 +650,298 @@ function validateNvidia(nvidia, path, errors, isV2 = false) {
   }
 }
 
+function checkNullableStr(val, path, maxLen, errors) {
+  if (val !== null && (typeof val !== 'string' || val.length > maxLen)) {
+    errors.push(`${path}: must be null or string (<= ${maxLen} chars)`);
+  }
+}
+
+function checkReqStr(val, path, maxLen, errors, minLen = 0) {
+  if (typeof val !== 'string' || val.length < minLen || val.length > maxLen) {
+    errors.push(`${path}: must be string (${minLen}..${maxLen} chars)`);
+  }
+}
+
+function checkNullableNonNegNum(val, path, errors, isInt = false) {
+  if (val === null) return;
+  if (typeof val !== 'number' || !Number.isFinite(val) || val < 0 || (isInt && !Number.isInteger(val))) {
+    errors.push(`${path}: must be null or non-negative ${isInt ? 'integer' : 'number'}`);
+  }
+}
+
+function validateTopology(topo, path, errors) {
+  if (!isPlainObject(topo)) { errors.push(`${path}: expected object`); return; }
+  const req = ['target_bdf', 'collected_utc', 'upstream_chain', 'root_port', 'aspm', 'pcie_caps', 'rebar'];
+  checkKeys(topo, path, req, new Set(req), errors);
+  if (topo.target_bdf !== null && (typeof topo.target_bdf !== 'string' || topo.target_bdf.length < 1 || topo.target_bdf.length > 32)) {
+    errors.push(`${path}.target_bdf: must be null or string (1..32 chars)`);
+  }
+  if (!isValidIsoUtc(topo.collected_utc)) errors.push(`${path}.collected_utc: invalid ISO-8601 UTC`);
+  if (!Array.isArray(topo.upstream_chain) || topo.upstream_chain.length > 16) {
+    errors.push(`${path}.upstream_chain: must be array of at most 16 nodes`);
+  } else {
+    const nodeKeys = ['role', 'bdf', 'vendor_id', 'device_id', 'subsystem_id', 'revision', 'name', 'device_type', 'source', 'status', 'max_gen', 'current_gen', 'max_width', 'current_width'];
+    const nodeSet = new Set(nodeKeys);
+    topo.upstream_chain.forEach((n, i) => {
+      const np = `${path}.upstream_chain[${i}]`;
+      if (!isPlainObject(n)) { errors.push(`${np}: expected object`); return; }
+      checkKeys(n, np, nodeKeys, nodeSet, errors);
+      if (!TOPOLOGY_ROLES.has(n.role)) errors.push(`${np}.role: invalid value`);
+      if (n.bdf !== null && (typeof n.bdf !== 'string' || n.bdf.length < 1 || n.bdf.length > 32)) errors.push(`${np}.bdf: invalid`);
+      checkNullableStr(n.vendor_id, `${np}.vendor_id`, 16, errors);
+      checkNullableStr(n.device_id, `${np}.device_id`, 16, errors);
+      checkNullableStr(n.subsystem_id, `${np}.subsystem_id`, 16, errors);
+      checkNullableStr(n.revision, `${np}.revision`, 16, errors);
+      checkNullableStr(n.name, `${np}.name`, 200, errors);
+      if (!TOPOLOGY_DEV_TYPES.has(n.device_type)) errors.push(`${np}.device_type: invalid value`);
+      checkReqStr(n.source, `${np}.source`, 100, errors, 1);
+      if (!TOPOLOGY_NODE_STATUSES.has(n.status)) errors.push(`${np}.status: invalid value`);
+      for (const fk of ['max_gen', 'current_gen', 'max_width', 'current_width']) {
+        if (Object.prototype.hasOwnProperty.call(n, fk)) validateField(n[fk], `${np}.${fk}`, errors);
+      }
+    });
+  }
+  if (isPlainObject(topo.root_port)) {
+    const rpKeys = ['identified', 'bdf', 'vendor_id', 'device_id', 'name', 'slot_type', 'source', 'reason'];
+    checkKeys(topo.root_port, `${path}.root_port`, rpKeys, new Set(rpKeys), errors);
+    if (typeof topo.root_port.identified !== 'boolean') errors.push(`${path}.root_port.identified: must be boolean`);
+    checkNullableStr(topo.root_port.bdf, `${path}.root_port.bdf`, 32, errors);
+    checkNullableStr(topo.root_port.vendor_id, `${path}.root_port.vendor_id`, 16, errors);
+    checkNullableStr(topo.root_port.device_id, `${path}.root_port.device_id`, 16, errors);
+    checkNullableStr(topo.root_port.name, `${path}.root_port.name`, 200, errors);
+    if (!SLOT_TYPES.has(topo.root_port.slot_type)) errors.push(`${path}.root_port.slot_type: invalid`);
+    checkReqStr(topo.root_port.source, `${path}.root_port.source`, 100, errors, 1);
+    checkReqStr(topo.root_port.reason, `${path}.root_port.reason`, 200, errors, 0);
+  } else if (Object.prototype.hasOwnProperty.call(topo, 'root_port')) {
+    errors.push(`${path}.root_port: expected object`);
+  }
+  if (isPlainObject(topo.aspm)) {
+    const aKeys = ['policy_scheme_guid', 'policy_ac', 'policy_dc', 'endpoint_link_control', 'upstream_link_control', 'policy_note'];
+    checkKeys(topo.aspm, `${path}.aspm`, aKeys, new Set(aKeys), errors);
+    checkNullableStr(topo.aspm.policy_scheme_guid, `${path}.aspm.policy_scheme_guid`, 64, errors);
+    for (const fk of ['policy_ac', 'policy_dc', 'endpoint_link_control', 'upstream_link_control']) {
+      if (Object.prototype.hasOwnProperty.call(topo.aspm, fk)) validateField(topo.aspm[fk], `${path}.aspm.${fk}`, errors);
+    }
+    checkReqStr(topo.aspm.policy_note, `${path}.aspm.policy_note`, 300, errors, 0);
+  } else if (Object.prototype.hasOwnProperty.call(topo, 'aspm')) {
+    errors.push(`${path}.aspm: expected object`);
+  }
+  if (isPlainObject(topo.pcie_caps)) {
+    const cKeys = ['mps_supported_bytes', 'mps_current_bytes', 'mrrs_current_bytes', 'aer_capable', 'replay_counter', 'replay_rollover_counter', 'link_gen_host_max', 'tls_target'];
+    checkKeys(topo.pcie_caps, `${path}.pcie_caps`, cKeys, new Set(cKeys), errors);
+    for (const fk of cKeys) {
+      if (Object.prototype.hasOwnProperty.call(topo.pcie_caps, fk)) validateField(topo.pcie_caps[fk], `${path}.pcie_caps.${fk}`, errors);
+    }
+  } else if (Object.prototype.hasOwnProperty.call(topo, 'pcie_caps')) {
+    errors.push(`${path}.pcie_caps: expected object`);
+  }
+  if (isPlainObject(topo.rebar)) {
+    const rKeys = ['bar1_total_mib', 'bar1_used_mib', 'bar1_free_mib', 'allocated_memory_bars', 'rebar_capability_status', 'rebar_status_reason'];
+    checkKeys(topo.rebar, `${path}.rebar`, rKeys, new Set(rKeys), errors);
+    for (const fk of ['bar1_total_mib', 'bar1_used_mib', 'bar1_free_mib']) {
+      if (Object.prototype.hasOwnProperty.call(topo.rebar, fk)) validateField(topo.rebar[fk], `${path}.rebar.${fk}`, errors);
+    }
+    if (!Array.isArray(topo.rebar.allocated_memory_bars) || topo.rebar.allocated_memory_bars.length > 16) {
+      errors.push(`${path}.rebar.allocated_memory_bars: must be array <= 16`);
+    } else {
+      const bKeys = ['index', 'size_mib', 'above_4g', 'source'];
+      const bSet = new Set(bKeys);
+      topo.rebar.allocated_memory_bars.forEach((b, i) => {
+        const bp = `${path}.rebar.allocated_memory_bars[${i}]`;
+        if (!isPlainObject(b)) { errors.push(`${bp}: expected object`); return; }
+        checkKeys(b, bp, bKeys, bSet, errors);
+        if (!Number.isInteger(b.index) || b.index < 0) errors.push(`${bp}.index: invalid`);
+        if (typeof b.size_mib !== 'number' || !Number.isFinite(b.size_mib) || b.size_mib < 0) errors.push(`${bp}.size_mib: invalid`);
+        if (typeof b.above_4g !== 'boolean') errors.push(`${bp}.above_4g: must be boolean`);
+        checkReqStr(b.source, `${bp}.source`, 100, errors, 1);
+      });
+    }
+    if (!REBAR_CAP_STATUSES.has(topo.rebar.rebar_capability_status)) errors.push(`${path}.rebar.rebar_capability_status: invalid`);
+    checkReqStr(topo.rebar.rebar_status_reason, `${path}.rebar.rebar_status_reason`, 300, errors, 0);
+  } else if (Object.prototype.hasOwnProperty.call(topo, 'rebar')) {
+    errors.push(`${path}.rebar: expected object`);
+  }
+}
+
+function validateLoadTest(lt, path, errors) {
+  if (!isPlainObject(lt)) { errors.push(`${path}: expected object`); return; }
+  const req = ['status', 'reason', 'helper_name', 'helper_version', 'target_bdf', 'started_utc', 'finished_utc', 'stop_reason', 'schedule', 'actual_duration_ms', 'thresholds', 'pcie_bandwidth', 'compute_test', 'timeseries'];
+  checkKeys(lt, path, req, new Set(req), errors);
+  if (!LOAD_TEST_STATUSES.has(lt.status)) errors.push(`${path}.status: invalid`);
+  checkReqStr(lt.reason, `${path}.reason`, 300, errors, 0);
+  checkReqStr(lt.helper_name, `${path}.helper_name`, 50, errors, 0);
+  checkReqStr(lt.helper_version, `${path}.helper_version`, 50, errors, 0);
+  checkNullableStr(lt.target_bdf, `${path}.target_bdf`, 32, errors);
+  if (lt.started_utc !== null && !isValidIsoUtc(lt.started_utc)) errors.push(`${path}.started_utc: invalid`);
+  if (lt.finished_utc !== null && !isValidIsoUtc(lt.finished_utc)) errors.push(`${path}.finished_utc: invalid`);
+  if (!STOP_REASONS.has(lt.stop_reason)) errors.push(`${path}.stop_reason: invalid`);
+  if (!Number.isInteger(lt.actual_duration_ms) || lt.actual_duration_ms < 0) errors.push(`${path}.actual_duration_ms: invalid`);
+
+  if (isPlainObject(lt.schedule)) {
+    const sKeys = ['idle_sec', 'load_sec', 'recovery_sec', 'sample_interval_ms', 'warmup_included'];
+    checkKeys(lt.schedule, `${path}.schedule`, sKeys, new Set(sKeys), errors);
+    for (const ik of ['idle_sec', 'load_sec', 'recovery_sec', 'sample_interval_ms']) {
+      if (!Number.isInteger(lt.schedule[ik]) || lt.schedule[ik] < 0) errors.push(`${path}.schedule.${ik}: invalid`);
+    }
+    if (typeof lt.schedule.warmup_included !== 'boolean') errors.push(`${path}.schedule.warmup_included: must be boolean`);
+  } else if (Object.prototype.hasOwnProperty.call(lt, 'schedule')) {
+    errors.push(`${path}.schedule: expected object`);
+  }
+
+  if (isPlainObject(lt.thresholds)) {
+    const tKeys = ['max_temp_c', 'max_power_w', 'timeout_ms'];
+    checkKeys(lt.thresholds, `${path}.thresholds`, tKeys, new Set(tKeys), errors);
+    checkNullableNonNegNum(lt.thresholds.max_temp_c, `${path}.thresholds.max_temp_c`, errors);
+    checkNullableNonNegNum(lt.thresholds.max_power_w, `${path}.thresholds.max_power_w`, errors);
+    checkNullableNonNegNum(lt.thresholds.timeout_ms, `${path}.thresholds.timeout_ms`, errors, true);
+  } else if (Object.prototype.hasOwnProperty.call(lt, 'thresholds')) {
+    errors.push(`${path}.thresholds: expected object`);
+  }
+
+  if (isPlainObject(lt.pcie_bandwidth)) {
+    const bKeys = ['method', 'pinned_host', 'transfer_size_mb', 'iterations', 'h2d_median_gbps', 'h2d_min_gbps', 'h2d_max_gbps', 'd2h_median_gbps', 'd2h_min_gbps', 'd2h_max_gbps'];
+    checkKeys(lt.pcie_bandwidth, `${path}.pcie_bandwidth`, bKeys, new Set(bKeys), errors);
+    checkReqStr(lt.pcie_bandwidth.method, `${path}.pcie_bandwidth.method`, 64, errors, 0);
+    if (typeof lt.pcie_bandwidth.pinned_host !== 'boolean') errors.push(`${path}.pcie_bandwidth.pinned_host: must be boolean`);
+    if (!Number.isInteger(lt.pcie_bandwidth.transfer_size_mb) || lt.pcie_bandwidth.transfer_size_mb < 0) errors.push(`${path}.pcie_bandwidth.transfer_size_mb: invalid`);
+    if (!Number.isInteger(lt.pcie_bandwidth.iterations) || lt.pcie_bandwidth.iterations < 0) errors.push(`${path}.pcie_bandwidth.iterations: invalid`);
+    for (const fk of ['h2d_median_gbps', 'h2d_min_gbps', 'h2d_max_gbps', 'd2h_median_gbps', 'd2h_min_gbps', 'd2h_max_gbps']) {
+      if (Object.prototype.hasOwnProperty.call(lt.pcie_bandwidth, fk)) validateField(lt.pcie_bandwidth[fk], `${path}.pcie_bandwidth.${fk}`, errors);
+    }
+  } else if (Object.prototype.hasOwnProperty.call(lt, 'pcie_bandwidth')) {
+    errors.push(`${path}.pcie_bandwidth: expected object`);
+  }
+
+  if (isPlainObject(lt.compute_test)) {
+    const cKeys = ['driver_api_version', 'compute_capability', 'fp32_kernel_name', 'fp32_kernel_ok', 'fp32_gflops', 'tensor_check_status', 'tensor_reason'];
+    checkKeys(lt.compute_test, `${path}.compute_test`, cKeys, new Set(cKeys), errors);
+    checkNullableNonNegNum(lt.compute_test.driver_api_version, `${path}.compute_test.driver_api_version`, errors, true);
+    checkNullableStr(lt.compute_test.compute_capability, `${path}.compute_test.compute_capability`, 16, errors);
+    checkReqStr(lt.compute_test.fp32_kernel_name, `${path}.compute_test.fp32_kernel_name`, 64, errors, 0);
+    if (typeof lt.compute_test.fp32_kernel_ok !== 'boolean') errors.push(`${path}.compute_test.fp32_kernel_ok: must be boolean`);
+    if (Object.prototype.hasOwnProperty.call(lt.compute_test, 'fp32_gflops')) validateField(lt.compute_test.fp32_gflops, `${path}.compute_test.fp32_gflops`, errors);
+    if (!TENSOR_CHECK_STATUSES.has(lt.compute_test.tensor_check_status)) errors.push(`${path}.compute_test.tensor_check_status: invalid`);
+    checkReqStr(lt.compute_test.tensor_reason, `${path}.compute_test.tensor_reason`, 200, errors, 0);
+  } else if (Object.prototype.hasOwnProperty.call(lt, 'compute_test')) {
+    errors.push(`${path}.compute_test: expected object`);
+  }
+
+  if (isPlainObject(lt.timeseries)) {
+    const tsKeys = ['total_samples', 'included_samples', 'truncated_to_local', 'samples'];
+    checkKeys(lt.timeseries, `${path}.timeseries`, tsKeys, new Set(tsKeys), errors);
+    if (!Number.isInteger(lt.timeseries.total_samples) || lt.timeseries.total_samples < 0) errors.push(`${path}.timeseries.total_samples: invalid`);
+    if (!Number.isInteger(lt.timeseries.included_samples) || lt.timeseries.included_samples < 0) errors.push(`${path}.timeseries.included_samples: invalid`);
+    if (typeof lt.timeseries.truncated_to_local !== 'boolean') errors.push(`${path}.timeseries.truncated_to_local: must be boolean`);
+    if (!Array.isArray(lt.timeseries.samples) || lt.timeseries.samples.length > 120) {
+      errors.push(`${path}.timeseries.samples: must be array of at most 120 samples`);
+    } else {
+      const spKeys = ['phase', 'rel_ms', 'utc', 'pcie_gen', 'pcie_width', 'temp_c', 'power_w', 'clocks_sm_mhz', 'clocks_mem_mhz', 'util_gpu_pct', 'pstate'];
+      const spSet = new Set(spKeys);
+      lt.timeseries.samples.forEach((s, i) => {
+        const sp = `${path}.timeseries.samples[${i}]`;
+        if (!isPlainObject(s)) { errors.push(`${sp}: expected object`); return; }
+        checkKeys(s, sp, spKeys, spSet, errors);
+        if (!SAMPLE_PHASES.has(s.phase)) errors.push(`${sp}.phase: invalid`);
+        if (!Number.isInteger(s.rel_ms) || s.rel_ms < 0) errors.push(`${sp}.rel_ms: invalid`);
+        if (!isValidIsoUtc(s.utc)) errors.push(`${sp}.utc: invalid`);
+        for (const ik of ['pcie_gen', 'pcie_width', 'clocks_sm_mhz', 'clocks_mem_mhz', 'util_gpu_pct']) {
+          checkNullableNonNegNum(s[ik], `${sp}.${ik}`, errors, true);
+        }
+        checkNullableNonNegNum(s.temp_c, `${sp}.temp_c`, errors);
+        checkNullableNonNegNum(s.power_w, `${sp}.power_w`, errors);
+        checkNullableStr(s.pstate, `${sp}.pstate`, 16, errors);
+      });
+    }
+  } else if (Object.prototype.hasOwnProperty.call(lt, 'timeseries')) {
+    errors.push(`${path}.timeseries: expected object`);
+  }
+}
+
+function validateStabilityEvent(ev, path, errors) {
+  if (!isPlainObject(ev)) { errors.push(`${path}: expected object`); return; }
+  const keys = ['source', 'event_id', 'level', 'utc', 'scope', 'bdf'];
+  checkKeys(ev, path, keys, new Set(keys), errors);
+  checkReqStr(ev.source, `${path}.source`, 64, errors, 1);
+  if (!Number.isInteger(ev.event_id) || ev.event_id < 0) errors.push(`${path}.event_id: invalid`);
+  checkReqStr(ev.level, `${path}.level`, 32, errors, 0);
+  if (!isValidIsoUtc(ev.utc)) errors.push(`${path}.utc: invalid`);
+  if (!EVENT_SCOPES.has(ev.scope)) errors.push(`${path}.scope: invalid`);
+  checkNullableStr(ev.bdf, `${path}.bdf`, 32, errors);
+}
+
+function validateStability(st, path, errors) {
+  if (!isPlainObject(st)) { errors.push(`${path}: expected object`); return; }
+  const req = ['window_started_utc', 'window_finished_utc', 'query_status', 'query_error', 'whea', 'tdr'];
+  checkKeys(st, path, req, new Set(req), errors);
+  if (st.window_started_utc !== null && !isValidIsoUtc(st.window_started_utc)) errors.push(`${path}.window_started_utc: invalid`);
+  if (st.window_finished_utc !== null && !isValidIsoUtc(st.window_finished_utc)) errors.push(`${path}.window_finished_utc: invalid`);
+  if (!STABILITY_QUERY_STATUSES.has(st.query_status)) errors.push(`${path}.query_status: invalid`);
+  checkNullableStr(st.query_error, `${path}.query_error`, 200, errors);
+
+  if (isPlainObject(st.whea)) {
+    const wKeys = ['query_status', 'total_in_window', 'pcie_matched_count', 'other_whea_count', 'out_of_window_count', 'events'];
+    checkKeys(st.whea, `${path}.whea`, wKeys, new Set(wKeys), errors);
+    if (!STABILITY_QUERY_STATUSES.has(st.whea.query_status)) errors.push(`${path}.whea.query_status: invalid`);
+    for (const ck of ['total_in_window', 'pcie_matched_count', 'other_whea_count', 'out_of_window_count']) {
+      if (!Number.isInteger(st.whea[ck]) || st.whea[ck] < 0) errors.push(`${path}.whea.${ck}: invalid`);
+    }
+    if (!Array.isArray(st.whea.events) || st.whea.events.length > 50) errors.push(`${path}.whea.events: array <= 50`);
+    else st.whea.events.forEach((ev, i) => validateStabilityEvent(ev, `${path}.whea.events[${i}]`, errors));
+  } else if (Object.prototype.hasOwnProperty.call(st, 'whea')) {
+    errors.push(`${path}.whea: expected object`);
+  }
+
+  if (isPlainObject(st.tdr)) {
+    const tKeys = ['query_status', 'provider', 'total_in_window', 'candidate_tdr_count', 'display_reset_count', 'unattributed_count', 'events'];
+    checkKeys(st.tdr, `${path}.tdr`, tKeys, new Set(tKeys), errors);
+    if (!STABILITY_QUERY_STATUSES.has(st.tdr.query_status)) errors.push(`${path}.tdr.query_status: invalid`);
+    checkReqStr(st.tdr.provider, `${path}.tdr.provider`, 64, errors, 0);
+    for (const ck of ['total_in_window', 'candidate_tdr_count', 'display_reset_count', 'unattributed_count']) {
+      if (!Number.isInteger(st.tdr[ck]) || st.tdr[ck] < 0) errors.push(`${path}.tdr.${ck}: invalid`);
+    }
+    if (!Array.isArray(st.tdr.events) || st.tdr.events.length > 50) errors.push(`${path}.tdr.events: array <= 50`);
+    else st.tdr.events.forEach((ev, i) => validateStabilityEvent(ev, `${path}.tdr.events[${i}]`, errors));
+  } else if (Object.prototype.hasOwnProperty.call(st, 'tdr')) {
+    errors.push(`${path}.tdr: expected object`);
+  }
+}
+
+function validateComparison(cmp, path, errors) {
+  if (!isPlainObject(cmp)) { errors.push(`${path}: expected object`); return; }
+  const req = ['status', 'previous_report_id', 'previous_experiment_id', 'experiment_matched', 'gpu_identity_matched', 'stage_transition', 'stage_order_valid', 'intentional_changes', 'confounders', 'deltas', 'reason'];
+  checkKeys(cmp, path, req, new Set(req), errors);
+  if (!COMPARISON_STATUSES.has(cmp.status)) errors.push(`${path}.status: invalid`);
+  if (cmp.previous_report_id !== null && (typeof cmp.previous_report_id !== 'string' || !UUID_RE.test(cmp.previous_report_id))) errors.push(`${path}.previous_report_id: invalid UUID`);
+  if (cmp.previous_experiment_id !== null && (typeof cmp.previous_experiment_id !== 'string' || !UUID_RE.test(cmp.previous_experiment_id))) errors.push(`${path}.previous_experiment_id: invalid UUID`);
+  for (const bk of ['experiment_matched', 'gpu_identity_matched', 'stage_order_valid']) {
+    if (typeof cmp[bk] !== 'boolean') errors.push(`${path}.${bk}: must be boolean`);
+  }
+  checkNullableStr(cmp.stage_transition, `${path}.stage_transition`, 100, errors);
+  for (const ak of ['intentional_changes', 'confounders']) {
+    if (!Array.isArray(cmp[ak]) || cmp[ak].length > 20) errors.push(`${path}.${ak}: array <= 20`);
+    else cmp[ak].forEach((s, i) => checkReqStr(s, `${path}.${ak}[${i}]`, 200, errors, 0));
+  }
+  if (!Array.isArray(cmp.deltas) || cmp.deltas.length > 20) {
+    errors.push(`${path}.deltas: array <= 20`);
+  } else {
+    const dKeys = ['metric', 'unit', 'before', 'after', 'delta', 'compatible', 'note'];
+    const dSet = new Set(dKeys);
+    cmp.deltas.forEach((d, i) => {
+      const dp = `${path}.deltas[${i}]`;
+      if (!isPlainObject(d)) { errors.push(`${dp}: expected object`); return; }
+      checkKeys(d, dp, dKeys, dSet, errors);
+      checkReqStr(d.metric, `${dp}.metric`, 64, errors, 1);
+      checkNullableStr(d.unit, `${dp}.unit`, 32, errors);
+      for (const nk of ['before', 'after', 'delta']) {
+        if (d[nk] !== null && (typeof d[nk] !== 'number' || !Number.isFinite(d[nk]))) errors.push(`${dp}.${nk}: invalid number`);
+      }
+      if (typeof d.compatible !== 'boolean') errors.push(`${dp}.compatible: must be boolean`);
+      checkReqStr(d.note, `${dp}.note`, 200, errors, 0);
+    });
+  }
+  checkReqStr(cmp.reason, `${path}.reason`, 300, errors, 0);
+}
+
 function validateReport(report) {
   const errors = [];
   if (!isPlainObject(report)) {
@@ -651,7 +963,8 @@ function validateReport(report) {
   }
   const isV2 = report.schema_version === 2;
   const expectedRootKeys = isV2 ? ROOT_KEYS_V2 : ROOT_KEYS;
-  checkKeys(report, 'root', expectedRootKeys, new Set(expectedRootKeys), errors);
+  const allowedRootKeys = isV2 ? ROOT_ALLOWED_KEYS_V2 : new Set(ROOT_KEYS);
+  checkKeys(report, 'root', expectedRootKeys, allowedRootKeys, errors);
 
   if (typeof report.collector_version !== 'string' || report.collector_version.length < 1 || report.collector_version.length > 50) {
     errors.push('root.collector_version: must be a non-empty string (<= 50 chars)');
@@ -696,6 +1009,18 @@ function validateReport(report) {
     }
     if (Object.prototype.hasOwnProperty.call(report, 'legacy_status')) {
       validateLegacyStatus(report.legacy_status, 'root.legacy_status', errors);
+    }
+    if (Object.prototype.hasOwnProperty.call(report, 'topology')) {
+      validateTopology(report.topology, 'root.topology', errors);
+    }
+    if (Object.prototype.hasOwnProperty.call(report, 'load_test')) {
+      validateLoadTest(report.load_test, 'root.load_test', errors);
+    }
+    if (Object.prototype.hasOwnProperty.call(report, 'stability')) {
+      validateStability(report.stability, 'root.stability', errors);
+    }
+    if (Object.prototype.hasOwnProperty.call(report, 'comparison')) {
+      validateComparison(report.comparison, 'root.comparison', errors);
     }
   }
 
@@ -1256,6 +1581,100 @@ function renderSummary(report) {
       lines.push(
         `- **Trạng thái:** Không phát hiện tệp trạng thái mở khóa cục bộ (\`present=false\`, nguồn: \`${escapeMarkdown(leg.source)}\`).`,
       );
+    }
+  }
+
+  if (isPlainObject(report.topology)) {
+    const topo = report.topology;
+    lines.push('');
+    lines.push('### Cấu trúc PCIe, ASPM, DMA & ReBAR (Topology)');
+    lines.push('');
+    if (isPlainObject(topo.root_port)) {
+      const rp = topo.root_port;
+      const rpIdent = rp.identified ? 'có' : 'chưa rõ';
+      lines.push(`- **Root Port / Upstream:** nhận diện=${rpIdent} · ${escapeMarkdown(rp.name || 'unknown')} (\`${escapeMarkdown(rp.vendor_id || '?')}:${escapeMarkdown(rp.device_id || '?')}\`, BDF=\`${escapeMarkdown(rp.bdf || 'null')}\`, slot_type=\`${escapeMarkdown(rp.slot_type)}\`) · ${escapeMarkdown(rp.reason || '')}`);
+    }
+    if (Array.isArray(topo.upstream_chain) && topo.upstream_chain.length > 0) {
+      lines.push('');
+      lines.push('| Vai trò | Tên thiết bị | VID:DID | BDF | Loại | Nguồn | Trạng thái |');
+      lines.push('| --- | --- | --- | --- | --- | --- | --- |');
+      for (const n of topo.upstream_chain) {
+        if (!isPlainObject(n)) continue;
+        lines.push(`| ${escapeMarkdown(n.role)} | ${escapeMarkdown(n.name || 'unknown')} | \`${escapeMarkdown(n.vendor_id || '?')}:${escapeMarkdown(n.device_id || '?')}\` | \`${escapeMarkdown(n.bdf || 'null')}\` | ${escapeMarkdown(n.device_type)} | ${escapeMarkdown(n.source)} | ${escapeMarkdown(n.status)} |`);
+      }
+      lines.push('');
+    }
+    if (isPlainObject(topo.aspm)) {
+      lines.push(`- **Chính sách ASPM (Windows):** AC=${formatField(topo.aspm.policy_ac)} · DC=${formatField(topo.aspm.policy_dc)} · Endpoint LnkCtl=${formatField(topo.aspm.endpoint_link_control)} · *${escapeMarkdown(topo.aspm.policy_note || '')}*`);
+    }
+    if (isPlainObject(topo.pcie_caps)) {
+      const c = topo.pcie_caps;
+      lines.push(`- **PCIe DMA & Replay:** MPS tối đa=${formatField(c.mps_supported_bytes)} · MPS hiện tại=${formatField(c.mps_current_bytes)} · MRRS=${formatField(c.mrrs_current_bytes)} · AER=${formatField(c.aer_capable)} · Replay=${formatField(c.replay_counter)} (rollover=${formatField(c.replay_rollover_counter)}) · HostMaxGen=${formatField(c.link_gen_host_max)} · TLS=${formatField(c.tls_target)}`);
+    }
+    if (isPlainObject(topo.rebar)) {
+      const rb = topo.rebar;
+      lines.push(`- **BAR1 & ReBAR:** BAR1 Total=${formatField(rb.bar1_total_mib)} (Used=${formatField(rb.bar1_used_mib)}, Free=${formatField(rb.bar1_free_mib)}) · Trạng thái ReBAR=\`${escapeMarkdown(rb.rebar_capability_status)}\` · ${escapeMarkdown(rb.rebar_status_reason || '')}`);
+    }
+  }
+
+  if (isPlainObject(report.load_test)) {
+    const lt = report.load_test;
+    lines.push('');
+    lines.push('### Kiểm thử tải & băng thông PCIe (Load Benchmark)');
+    lines.push('');
+    lines.push(`- **Trạng thái:** \`${escapeMarkdown(lt.status)}\` · **Helper:** \`${escapeMarkdown(lt.helper_name || 'vgabench')}\` (${escapeMarkdown(lt.helper_version || '')}) · **Stop:** \`${escapeMarkdown(lt.stop_reason)}\` · **Thời lượng thực:** \`${escapeMarkdown(lt.actual_duration_ms)} ms\` (${escapeMarkdown(lt.reason || '')})`);
+    if (isPlainObject(lt.schedule)) {
+      lines.push(`- **Chu kỳ thử:** idle=${escapeMarkdown(lt.schedule.idle_sec)}s · load=${escapeMarkdown(lt.schedule.load_sec)}s · recovery=${escapeMarkdown(lt.schedule.recovery_sec)}s · sample=${escapeMarkdown(lt.schedule.sample_interval_ms)}ms · warmup=${lt.schedule.warmup_included ? 'true' : 'false'}`);
+    }
+    if (isPlainObject(lt.pcie_bandwidth)) {
+      const bw = lt.pcie_bandwidth;
+      lines.push(`- **Băng thông PCIe (${escapeMarkdown(bw.method)}, ${escapeMarkdown(bw.transfer_size_mb)} MiB × ${escapeMarkdown(bw.iterations)} lần, pinned=${bw.pinned_host ? 'true' : 'false'}):** H2D median=${formatField(bw.h2d_median_gbps)} (min ${formatField(bw.h2d_min_gbps)} .. max ${formatField(bw.h2d_max_gbps)}) · D2H median=${formatField(bw.d2h_median_gbps)} (min ${formatField(bw.d2h_min_gbps)} .. max ${formatField(bw.d2h_max_gbps)})`);
+    }
+    if (isPlainObject(lt.compute_test)) {
+      const ct = lt.compute_test;
+      lines.push(`- **Tính toán CUDA / Tensor:** CC=${escapeMarkdown(ct.compute_capability || 'unknown')} · FP32 (${escapeMarkdown(ct.fp32_kernel_name)})=${ct.fp32_kernel_ok ? 'OK' : 'FAIL'} (${formatField(ct.fp32_gflops)}) · Tensor=\`${escapeMarkdown(ct.tensor_check_status)}\` (${escapeMarkdown(ct.tensor_reason || '')})`);
+    }
+    if (isPlainObject(lt.timeseries)) {
+      const tsInfo = lt.timeseries;
+      lines.push(`- **Chuỗi mẫu time-series:** ${escapeMarkdown(tsInfo.included_samples)}/${escapeMarkdown(tsInfo.total_samples)} mẫu${tsInfo.truncated_to_local ? ' *(phần vượt giới hạn đã lưu đầy đủ trong ZIP cục bộ)*' : ''}`);
+    }
+  }
+
+  if (isPlainObject(report.stability)) {
+    const st = report.stability;
+    lines.push('');
+    lines.push('### Giám sát độ ổn định hệ thống (WHEA / TDR)');
+    lines.push('');
+    lines.push(`- **Cửa sổ truy vấn:** \`${escapeMarkdown(st.window_started_utc || 'null')}\` → \`${escapeMarkdown(st.window_finished_utc || 'null')}\` · **Trạng thái truy vấn:** \`${escapeMarkdown(st.query_status)}\`${st.query_error ? ` (${escapeMarkdown(st.query_error)})` : ''}`);
+    if (isPlainObject(st.whea)) {
+      lines.push(`- **WHEA (${escapeMarkdown(st.whea.query_status)}):** trong cửa sổ=${escapeMarkdown(st.whea.total_in_window)} (PCIe khớp=${escapeMarkdown(st.whea.pcie_matched_count)}, WHEA khác=${escapeMarkdown(st.whea.other_whea_count)}, ngoài cửa sổ=${escapeMarkdown(st.whea.out_of_window_count)})`);
+    }
+    if (isPlainObject(st.tdr)) {
+      lines.push(`- **TDR / Display (${escapeMarkdown(st.tdr.query_status)}):** trong cửa sổ=${escapeMarkdown(st.tdr.total_in_window)} (ứng viên TDR=${escapeMarkdown(st.tdr.candidate_tdr_count)}, Display reset=${escapeMarkdown(st.tdr.display_reset_count)}, chưa gán BDF=${escapeMarkdown(st.tdr.unattributed_count)})`);
+    }
+  }
+
+  if (isPlainObject(report.comparison)) {
+    const cmp = report.comparison;
+    lines.push('');
+    lines.push('### Đối chứng trước/sau (Experiment Comparison)');
+    lines.push('');
+    lines.push(`- **Trạng thái đối chứng:** \`${escapeMarkdown(cmp.status)}\` · **Báo cáo trước:** \`${escapeMarkdown(cmp.previous_report_id || 'null')}\` · **Chuyển giai đoạn:** \`${escapeMarkdown(cmp.stage_transition || 'unknown')}\` (hợp lệ=${cmp.stage_order_valid ? 'true' : 'false'}) · **Cùng GPU:** ${cmp.gpu_identity_matched ? 'true' : 'false'} · ${escapeMarkdown(cmp.reason || '')}`);
+    if (Array.isArray(cmp.intentional_changes) && cmp.intentional_changes.length > 0) {
+      lines.push(`- **Biến thay đổi có chủ đích:** ${cmp.intentional_changes.map((x) => `\`${escapeMarkdown(x)}\``).join(', ')}`);
+    }
+    if (Array.isArray(cmp.confounders) && cmp.confounders.length > 0) {
+      lines.push(`- **Biến gây nhiễu cảnh báo:** ${cmp.confounders.map((x) => escapeMarkdown(x)).join(' · ')}`);
+    }
+    if (Array.isArray(cmp.deltas) && cmp.deltas.length > 0) {
+      lines.push('');
+      lines.push('| Chỉ số | Trước | Sau | Chênh lệch (Delta) | Tương thích |');
+      lines.push('| --- | --- | --- | --- | --- |');
+      for (const d of cmp.deltas) {
+        if (!isPlainObject(d)) continue;
+        const unit = d.unit ? ` ${escapeMarkdown(d.unit)}` : '';
+        lines.push(`| \`${escapeMarkdown(d.metric)}\` | ${d.before ?? 'null'}${unit} | ${d.after ?? 'null'}${unit} | ${d.delta ?? 'null'}${unit} | ${d.compatible ? 'true' : 'false'} |`);
+      }
     }
   }
 

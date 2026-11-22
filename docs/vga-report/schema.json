@@ -107,6 +107,18 @@
     "legacy_status": {
       "$ref": "#/$defs/legacy_status"
     },
+    "topology": {
+      "$ref": "#/$defs/topology"
+    },
+    "load_test": {
+      "$ref": "#/$defs/load_test"
+    },
+    "stability": {
+      "$ref": "#/$defs/stability"
+    },
+    "comparison": {
+      "$ref": "#/$defs/comparison"
+    },
     "context": {
       "type": "object",
       "additionalProperties": false,
@@ -161,7 +173,11 @@
             { "required": ["evidence_level"] },
             { "required": ["security"] },
             { "required": ["completeness"] },
-            { "required": ["legacy_status"] }
+            { "required": ["legacy_status"] },
+            { "required": ["topology"] },
+            { "required": ["load_test"] },
+            { "required": ["stability"] },
+            { "required": ["comparison"] }
           ]
         }
       }
@@ -479,6 +495,305 @@
         "nvidia": { "$ref": "#/$defs/nvidia" },
         "profile": { "$ref": "#/$defs/gpu_profile" },
         "driver": { "$ref": "#/$defs/gpu_driver" }
+      }
+    },
+    "topology": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_bdf", "collected_utc", "upstream_chain", "root_port", "aspm", "pcie_caps", "rebar"],
+      "properties": {
+        "target_bdf": { "type": ["string", "null"], "minLength": 1, "maxLength": 32 },
+        "collected_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
+        "upstream_chain": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "bdf", "vendor_id", "device_id", "subsystem_id", "revision", "name", "device_type", "source", "status", "max_gen", "current_gen", "max_width", "current_width"],
+            "properties": {
+              "role": { "type": "string", "enum": ["endpoint", "bridge_or_switch", "root_port", "root_complex", "unknown"] },
+              "bdf": { "type": ["string", "null"], "minLength": 1, "maxLength": 32 },
+              "vendor_id": { "type": ["string", "null"], "maxLength": 16 },
+              "device_id": { "type": ["string", "null"], "maxLength": 16 },
+              "subsystem_id": { "type": ["string", "null"], "maxLength": 16 },
+              "revision": { "type": ["string", "null"], "maxLength": 16 },
+              "name": { "type": ["string", "null"], "maxLength": 200 },
+              "device_type": { "type": "string", "enum": ["endpoint", "root_port", "upstream_switch", "downstream_switch", "bridge", "root_complex", "unknown"] },
+              "source": { "type": "string", "minLength": 1, "maxLength": 100 },
+              "status": { "type": "string", "enum": ["ok", "partial", "unsupported", "permission_denied", "error", "skipped"] },
+              "max_gen": { "$ref": "#/$defs/field" },
+              "current_gen": { "$ref": "#/$defs/field" },
+              "max_width": { "$ref": "#/$defs/field" },
+              "current_width": { "$ref": "#/$defs/field" }
+            }
+          }
+        },
+        "root_port": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["identified", "bdf", "vendor_id", "device_id", "name", "slot_type", "source", "reason"],
+          "properties": {
+            "identified": { "type": "boolean" },
+            "bdf": { "type": ["string", "null"], "maxLength": 32 },
+            "vendor_id": { "type": ["string", "null"], "maxLength": 16 },
+            "device_id": { "type": ["string", "null"], "maxLength": 16 },
+            "name": { "type": ["string", "null"], "maxLength": 200 },
+            "slot_type": { "type": "string", "enum": ["cpu_root", "chipset_or_switch", "unknown"] },
+            "source": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "reason": { "type": "string", "maxLength": 200 }
+          }
+        },
+        "aspm": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["policy_scheme_guid", "policy_ac", "policy_dc", "endpoint_link_control", "upstream_link_control", "policy_note"],
+          "properties": {
+            "policy_scheme_guid": { "type": ["string", "null"], "maxLength": 64 },
+            "policy_ac": { "$ref": "#/$defs/field" },
+            "policy_dc": { "$ref": "#/$defs/field" },
+            "endpoint_link_control": { "$ref": "#/$defs/field" },
+            "upstream_link_control": { "$ref": "#/$defs/field" },
+            "policy_note": { "type": "string", "maxLength": 300 }
+          }
+        },
+        "pcie_caps": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mps_supported_bytes", "mps_current_bytes", "mrrs_current_bytes", "aer_capable", "replay_counter", "replay_rollover_counter", "link_gen_host_max", "tls_target"],
+          "properties": {
+            "mps_supported_bytes": { "$ref": "#/$defs/field" },
+            "mps_current_bytes": { "$ref": "#/$defs/field" },
+            "mrrs_current_bytes": { "$ref": "#/$defs/field" },
+            "aer_capable": { "$ref": "#/$defs/field" },
+            "replay_counter": { "$ref": "#/$defs/field" },
+            "replay_rollover_counter": { "$ref": "#/$defs/field" },
+            "link_gen_host_max": { "$ref": "#/$defs/field" },
+            "tls_target": { "$ref": "#/$defs/field" }
+          }
+        },
+        "rebar": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bar1_total_mib", "bar1_used_mib", "bar1_free_mib", "allocated_memory_bars", "rebar_capability_status", "rebar_status_reason"],
+          "properties": {
+            "bar1_total_mib": { "$ref": "#/$defs/field" },
+            "bar1_used_mib": { "$ref": "#/$defs/field" },
+            "bar1_free_mib": { "$ref": "#/$defs/field" },
+            "allocated_memory_bars": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["index", "size_mib", "above_4g", "source"],
+                "properties": {
+                  "index": { "type": "integer", "minimum": 0 },
+                  "size_mib": { "type": "number", "minimum": 0 },
+                  "above_4g": { "type": "boolean" },
+                  "source": { "type": "string", "minLength": 1, "maxLength": 100 }
+                }
+              }
+            },
+            "rebar_capability_status": { "type": "string", "enum": ["unknown", "enabled", "disabled", "unsupported"] },
+            "rebar_status_reason": { "type": "string", "maxLength": 300 }
+          }
+        }
+      }
+    },
+    "load_test": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason", "helper_name", "helper_version", "target_bdf", "started_utc", "finished_utc", "stop_reason", "schedule", "actual_duration_ms", "thresholds", "pcie_bandwidth", "compute_test", "timeseries"],
+      "properties": {
+        "status": { "type": "string", "enum": ["ok", "partial", "skipped", "unsupported", "timeout", "error"] },
+        "reason": { "type": "string", "maxLength": 300 },
+        "helper_name": { "type": "string", "maxLength": 50 },
+        "helper_version": { "type": "string", "maxLength": 50 },
+        "target_bdf": { "type": ["string", "null"], "maxLength": 32 },
+        "started_utc": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
+        "finished_utc": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
+        "stop_reason": { "type": "string", "enum": ["completed", "timeout", "thermal_limit", "power_limit", "gpu_lost", "gpu_error", "user_cancelled", "not_run", "error"] },
+        "schedule": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["idle_sec", "load_sec", "recovery_sec", "sample_interval_ms", "warmup_included"],
+          "properties": {
+            "idle_sec": { "type": "integer", "minimum": 0 },
+            "load_sec": { "type": "integer", "minimum": 0 },
+            "recovery_sec": { "type": "integer", "minimum": 0 },
+            "sample_interval_ms": { "type": "integer", "minimum": 0 },
+            "warmup_included": { "type": "boolean" }
+          }
+        },
+        "actual_duration_ms": { "type": "integer", "minimum": 0 },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_temp_c", "max_power_w", "timeout_ms"],
+          "properties": {
+            "max_temp_c": { "type": ["number", "null"], "minimum": 0 },
+            "max_power_w": { "type": ["number", "null"], "minimum": 0 },
+            "timeout_ms": { "type": ["integer", "null"], "minimum": 0 }
+          }
+        },
+        "pcie_bandwidth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "pinned_host", "transfer_size_mb", "iterations", "h2d_median_gbps", "h2d_min_gbps", "h2d_max_gbps", "d2h_median_gbps", "d2h_min_gbps", "d2h_max_gbps"],
+          "properties": {
+            "method": { "type": "string", "maxLength": 64 },
+            "pinned_host": { "type": "boolean" },
+            "transfer_size_mb": { "type": "integer", "minimum": 0 },
+            "iterations": { "type": "integer", "minimum": 0 },
+            "h2d_median_gbps": { "$ref": "#/$defs/field" },
+            "h2d_min_gbps": { "$ref": "#/$defs/field" },
+            "h2d_max_gbps": { "$ref": "#/$defs/field" },
+            "d2h_median_gbps": { "$ref": "#/$defs/field" },
+            "d2h_min_gbps": { "$ref": "#/$defs/field" },
+            "d2h_max_gbps": { "$ref": "#/$defs/field" }
+          }
+        },
+        "compute_test": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["driver_api_version", "compute_capability", "fp32_kernel_name", "fp32_kernel_ok", "fp32_gflops", "tensor_check_status", "tensor_reason"],
+          "properties": {
+            "driver_api_version": { "type": ["integer", "null"], "minimum": 0 },
+            "compute_capability": { "type": ["string", "null"], "maxLength": 16 },
+            "fp32_kernel_name": { "type": "string", "maxLength": 64 },
+            "fp32_kernel_ok": { "type": "boolean" },
+            "fp32_gflops": { "$ref": "#/$defs/field" },
+            "tensor_check_status": { "type": "string", "enum": ["ok", "skipped", "unsupported", "error"] },
+            "tensor_reason": { "type": "string", "maxLength": 200 }
+          }
+        },
+        "timeseries": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["total_samples", "included_samples", "truncated_to_local", "samples"],
+          "properties": {
+            "total_samples": { "type": "integer", "minimum": 0 },
+            "included_samples": { "type": "integer", "minimum": 0 },
+            "truncated_to_local": { "type": "boolean" },
+            "samples": {
+              "type": "array",
+              "maxItems": 120,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["phase", "rel_ms", "utc", "pcie_gen", "pcie_width", "temp_c", "power_w", "clocks_sm_mhz", "clocks_mem_mhz", "util_gpu_pct", "pstate"],
+                "properties": {
+                  "phase": { "type": "string", "enum": ["idle", "load", "recovery"] },
+                  "rel_ms": { "type": "integer", "minimum": 0 },
+                  "utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
+                  "pcie_gen": { "type": ["integer", "null"], "minimum": 0 },
+                  "pcie_width": { "type": ["integer", "null"], "minimum": 0 },
+                  "temp_c": { "type": ["number", "null"], "minimum": 0 },
+                  "power_w": { "type": ["number", "null"], "minimum": 0 },
+                  "clocks_sm_mhz": { "type": ["integer", "null"], "minimum": 0 },
+                  "clocks_mem_mhz": { "type": ["integer", "null"], "minimum": 0 },
+                  "util_gpu_pct": { "type": ["integer", "null"], "minimum": 0 },
+                  "pstate": { "type": ["string", "null"], "maxLength": 16 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "stability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["window_started_utc", "window_finished_utc", "query_status", "query_error", "whea", "tdr"],
+      "properties": {
+        "window_started_utc": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
+        "window_finished_utc": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
+        "query_status": { "type": "string", "enum": ["ok", "partial", "permission_denied", "provider_unavailable", "timeout", "error", "skipped"] },
+        "query_error": { "type": ["string", "null"], "maxLength": 200 },
+        "whea": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["query_status", "total_in_window", "pcie_matched_count", "other_whea_count", "out_of_window_count", "events"],
+          "properties": {
+            "query_status": { "type": "string", "enum": ["ok", "partial", "permission_denied", "provider_unavailable", "timeout", "error", "skipped"] },
+            "total_in_window": { "type": "integer", "minimum": 0 },
+            "pcie_matched_count": { "type": "integer", "minimum": 0 },
+            "other_whea_count": { "type": "integer", "minimum": 0 },
+            "out_of_window_count": { "type": "integer", "minimum": 0 },
+            "events": {
+              "type": "array",
+              "maxItems": 50,
+              "items": { "$ref": "#/$defs/stability_event" }
+            }
+          }
+        },
+        "tdr": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["query_status", "provider", "total_in_window", "candidate_tdr_count", "display_reset_count", "unattributed_count", "events"],
+          "properties": {
+            "query_status": { "type": "string", "enum": ["ok", "partial", "permission_denied", "provider_unavailable", "timeout", "error", "skipped"] },
+            "provider": { "type": "string", "maxLength": 64 },
+            "total_in_window": { "type": "integer", "minimum": 0 },
+            "candidate_tdr_count": { "type": "integer", "minimum": 0 },
+            "display_reset_count": { "type": "integer", "minimum": 0 },
+            "unattributed_count": { "type": "integer", "minimum": 0 },
+            "events": {
+              "type": "array",
+              "maxItems": 50,
+              "items": { "$ref": "#/$defs/stability_event" }
+            }
+          }
+        }
+      }
+    },
+    "stability_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "event_id", "level", "utc", "scope", "bdf"],
+      "properties": {
+        "source": { "type": "string", "maxLength": 64 },
+        "event_id": { "type": "integer", "minimum": 0 },
+        "level": { "type": "string", "maxLength": 32 },
+        "utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
+        "scope": { "type": "string", "enum": ["target_gpu", "upstream", "system_non_pcie", "unattributed"] },
+        "bdf": { "type": ["string", "null"], "maxLength": 32 }
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "previous_report_id", "previous_experiment_id", "experiment_matched", "gpu_identity_matched", "stage_transition", "stage_order_valid", "intentional_changes", "confounders", "deltas", "reason"],
+      "properties": {
+        "status": { "type": "string", "enum": ["ok", "partial", "mismatched", "missing_previous", "invalid_previous", "skipped"] },
+        "previous_report_id": { "type": ["string", "null"], "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "previous_experiment_id": { "type": ["string", "null"], "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "experiment_matched": { "type": "boolean" },
+        "gpu_identity_matched": { "type": "boolean" },
+        "stage_transition": { "type": ["string", "null"], "maxLength": 100 },
+        "stage_order_valid": { "type": "boolean" },
+        "intentional_changes": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 200 } },
+        "confounders": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 200 } },
+        "deltas": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["metric", "unit", "before", "after", "delta", "compatible", "note"],
+            "properties": {
+              "metric": { "type": "string", "maxLength": 64 },
+              "unit": { "type": ["string", "null"], "maxLength": 32 },
+              "before": { "type": ["number", "null"] },
+              "after": { "type": ["number", "null"] },
+              "delta": { "type": ["number", "null"] },
+              "compatible": { "type": "boolean" },
+              "note": { "type": "string", "maxLength": 200 }
+            }
+          }
+        },
+        "reason": { "type": "string", "maxLength": 300 }
       }
     }
   }

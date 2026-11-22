@@ -758,3 +758,256 @@ test('renderSummary_v2_includes_4_layer_summary_experiment_window_profile_detail
   assert.ok(summary2.includes('Lưu ý tái lập phép thử'));
   assert.equal(summary2.includes('Cảnh báo:'), false);
 });
+
+test('validateReport_v2_optional_phase2_3_sections_allowlisted_and_rendered', () => {
+  const fullV2 = makeValidV2Report({
+    evidence_level: 'compared',
+    topology: {
+      target_bdf: '0000:01:00.0',
+      collected_utc: '2026-11-22T02:00:00Z',
+      upstream_chain: [
+        {
+          role: 'endpoint',
+          bdf: '0000:01:00.0',
+          vendor_id: '10DE',
+          device_id: '1F07',
+          subsystem_id: '86701043',
+          revision: 'A1',
+          name: 'NVIDIA GeForce RTX 2070',
+          device_type: 'endpoint',
+          source: 'pnp',
+          status: 'ok',
+          max_gen: makeField(3, 'pnp', 'gen'),
+          current_gen: makeField(1, 'pnp', 'gen'),
+          max_width: makeField(16, 'pnp', 'lanes'),
+          current_width: makeField(16, 'pnp', 'lanes'),
+        },
+        {
+          role: 'root_port',
+          bdf: null,
+          vendor_id: '1022',
+          device_id: '1633',
+          subsystem_id: '88091043',
+          revision: '00',
+          name: 'PCI-to-PCI Bridge',
+          device_type: 'root_port',
+          source: 'pnp',
+          status: 'ok',
+          max_gen: makeField(null, 'pnp', 'gen', 'unsupported'),
+          current_gen: makeField(null, 'pnp', 'gen', 'unsupported'),
+          max_width: makeField(null, 'pnp', 'lanes', 'unsupported'),
+          current_width: makeField(null, 'pnp', 'lanes', 'unsupported'),
+        },
+      ],
+      root_port: {
+        identified: true,
+        bdf: null,
+        vendor_id: '1022',
+        device_id: '1633',
+        name: 'PCI-to-PCI Bridge',
+        slot_type: 'unknown',
+        source: 'pnp',
+        reason: 'Đã nhận diện nút cha bridge 1022:1633; loại khe vật lý cần xác nhận',
+      },
+      aspm: {
+        policy_scheme_guid: 'e0e0e0e0-5600-4ec0-9999-000000000001',
+        policy_ac: makeField('maximum_power_savings', 'powercfg'),
+        policy_dc: makeField('maximum_power_savings', 'powercfg'),
+        endpoint_link_control: makeField(null, 'pnp', null, 'unsupported'),
+        upstream_link_control: makeField(null, 'pnp', null, 'unsupported'),
+        policy_note: 'Chỉ số powercfg phản ánh chính sách Windows; chưa đọc thanh ghi LnkCtl phần cứng.',
+      },
+      pcie_caps: {
+        mps_supported_bytes: makeField(256, 'pnp', 'bytes'),
+        mps_current_bytes: makeField(128, 'pnp', 'bytes'),
+        mrrs_current_bytes: makeField(512, 'pnp', 'bytes'),
+        aer_capable: makeField(true, 'pnp'),
+        replay_counter: makeField(0, 'nvidia-smi-xml', 'count'),
+        replay_rollover_counter: makeField(0, 'nvidia-smi-xml', 'count'),
+        link_gen_host_max: makeField(3, 'nvidia-smi-xml', 'gen'),
+        tls_target: makeField(null, 'pnp', 'gen', 'unsupported'),
+      },
+      rebar: {
+        bar1_total_mib: makeField(256, 'nvidia-smi-xml', 'MiB'),
+        bar1_used_mib: makeField(2, 'nvidia-smi-xml', 'MiB'),
+        bar1_free_mib: makeField(254, 'nvidia-smi-xml', 'MiB'),
+        allocated_memory_bars: [
+          { index: 0, size_mib: 256, above_4g: false, source: 'cim_memory' },
+        ],
+        rebar_capability_status: 'unknown',
+        rebar_status_reason: 'Chỉ có BAR1 Total từ nvidia-smi; chưa đọc PCIe ReBAR Extended Capability.',
+      },
+    },
+    load_test: {
+      status: 'ok',
+      reason: 'Idle 1s -> Load 2s -> Recovery 1s completed',
+      helper_name: 'vgabench',
+      helper_version: '1.0.0',
+      target_bdf: '0000:01:00.0',
+      started_utc: '2026-11-22T02:00:01Z',
+      finished_utc: '2026-11-22T02:00:05Z',
+      stop_reason: 'completed',
+      schedule: {
+        idle_sec: 1,
+        load_sec: 2,
+        recovery_sec: 1,
+        sample_interval_ms: 1000,
+        warmup_included: true,
+      },
+      actual_duration_ms: 4120,
+      thresholds: { max_temp_c: 85, max_power_w: 269, timeout_ms: 15000 },
+      pcie_bandwidth: {
+        method: 'nvcuda_pinned_host',
+        pinned_host: true,
+        transfer_size_mb: 64,
+        iterations: 5,
+        h2d_median_gbps: makeField(12.03, 'vgabench', 'GB/s'),
+        h2d_min_gbps: makeField(11.8, 'vgabench', 'GB/s'),
+        h2d_max_gbps: makeField(12.2, 'vgabench', 'GB/s'),
+        d2h_median_gbps: makeField(12.59, 'vgabench', 'GB/s'),
+        d2h_min_gbps: makeField(12.1, 'vgabench', 'GB/s'),
+        d2h_max_gbps: makeField(12.8, 'vgabench', 'GB/s'),
+      },
+      compute_test: {
+        driver_api_version: 13050,
+        compute_capability: '7.5',
+        fp32_kernel_name: 'fp32_saxpy',
+        fp32_kernel_ok: true,
+        fp32_gflops: makeField(41.93, 'vgabench', 'GFLOPS'),
+        tensor_check_status: 'skipped',
+        tensor_reason: 'Chưa chạy bài thử Tensor chuyên biệt',
+      },
+      timeseries: {
+        total_samples: 3,
+        included_samples: 3,
+        truncated_to_local: false,
+        samples: [
+          {
+            phase: 'idle',
+            rel_ms: 0,
+            utc: '2026-11-22T02:00:01Z',
+            pcie_gen: 1,
+            pcie_width: 16,
+            temp_c: 39.5,
+            power_w: 38.0,
+            clocks_sm_mhz: 300,
+            clocks_mem_mhz: 405,
+            util_gpu_pct: 0,
+            pstate: 'P8',
+          },
+          {
+            phase: 'load',
+            rel_ms: 1500,
+            utc: '2026-11-22T02:00:02Z',
+            pcie_gen: 3,
+            pcie_width: 16,
+            temp_c: 44.0,
+            power_w: 85.2,
+            clocks_sm_mhz: 1620,
+            clocks_mem_mhz: 7000,
+            util_gpu_pct: 48,
+            pstate: 'P0',
+          },
+          {
+            phase: 'recovery',
+            rel_ms: 3500,
+            utc: '2026-11-22T02:00:04Z',
+            pcie_gen: 1,
+            pcie_width: 16,
+            temp_c: 40.2,
+            power_w: 41.0,
+            clocks_sm_mhz: 300,
+            clocks_mem_mhz: 405,
+            util_gpu_pct: 1,
+            pstate: 'P8',
+          },
+        ],
+      },
+    },
+    stability: {
+      window_started_utc: '2026-11-22T02:00:00Z',
+      window_finished_utc: '2026-11-22T02:00:06Z',
+      query_status: 'ok',
+      query_error: null,
+      whea: {
+        query_status: 'ok',
+        total_in_window: 0,
+        pcie_matched_count: 0,
+        other_whea_count: 0,
+        out_of_window_count: 1,
+        events: [],
+      },
+      tdr: {
+        query_status: 'ok',
+        provider: 'nvlddmkm',
+        total_in_window: 0,
+        candidate_tdr_count: 0,
+        display_reset_count: 0,
+        unattributed_count: 0,
+        events: [],
+      },
+    },
+    comparison: {
+      status: 'ok',
+      previous_report_id: '00000000-0000-4000-8000-000000000001',
+      previous_experiment_id: '22222222-3333-4444-8555-666666666666',
+      experiment_matched: true,
+      gpu_identity_matched: true,
+      stage_transition: 'before_unlock -> after_unlock',
+      stage_order_valid: true,
+      intentional_changes: ['context.mod_state', 'context.stage'],
+      confounders: [],
+      deltas: [
+        {
+          metric: 'h2d_median_gbps',
+          unit: 'GB/s',
+          before: 6.02,
+          after: 12.03,
+          delta: 6.01,
+          compatible: true,
+          note: '',
+        },
+      ],
+      reason: 'Đối chứng hợp lệ cùng GPU và cấu hình thử',
+    },
+  });
+
+  const val = validateReport(fullV2);
+  assert.equal(val.ok, true, `Expected full v2 report valid, got: ${val.errors.join('; ')}`);
+  assert.deepEqual(findPii(fullV2), []);
+
+  const badTopo = makeValidV2Report({
+    topology: { ...fullV2.topology, unexpected: 1 },
+  });
+  assert.equal(validateReport(badTopo).ok, false);
+
+  const v1Topo = makeValidReport({ topology: fullV2.topology });
+  assert.equal(validateReport(v1Topo).ok, false);
+
+  const overSamples = makeValidV2Report({
+    load_test: {
+      ...fullV2.load_test,
+      timeseries: {
+        total_samples: 121,
+        included_samples: 121,
+        truncated_to_local: false,
+        samples: Array.from({ length: 121 }, (_, idx) => ({
+          ...fullV2.load_test.timeseries.samples[0],
+          rel_ms: idx * 1000,
+        })),
+      },
+    },
+  });
+  assert.equal(validateReport(overSamples).ok, false);
+
+  const summary = renderSummary(fullV2);
+  assert.ok(summary.includes('PCI-to-PCI Bridge'));
+  assert.ok(summary.includes('maximum_power_savings'));
+  assert.ok(summary.includes('512 bytes'));
+  assert.ok(summary.includes('256 MiB'));
+  assert.ok(summary.includes('12.03 GB/s'));
+  assert.ok(summary.includes('41.93 GFLOPS'));
+  assert.ok(summary.includes('WHEA'));
+  assert.ok(summary.includes('before_unlock -&gt; after_unlock') || summary.includes('before_unlock -> after_unlock'));
+  assert.ok(summary.length <= 60000);
+});

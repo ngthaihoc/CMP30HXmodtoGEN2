@@ -358,6 +358,17 @@ export async function handleRequest(request, env, deps = {}) {
     return jsonResponse({ ok: true, time: nowSec }, 200);
   }
 
+  if (request.method === 'GET' && url.pathname === '/v1/capabilities') {
+    return jsonResponse(
+      {
+        ok: true,
+        schema_versions: [1, 2],
+        v2_extensions: ['topology', 'load_test', 'stability', 'comparison'],
+      },
+      200,
+    );
+  }
+
   if (request.method !== 'POST' || url.pathname !== '/v1/reports') {
     return jsonResponse({ error: 'not_found' }, 404);
   }
