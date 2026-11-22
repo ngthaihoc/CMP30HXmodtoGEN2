@@ -2,21 +2,23 @@ package main
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
 )
 
 type mockCudaDriver struct {
-	initErr      error
-	lookupErr    error
-	registerErr  error
-	driverVer    int
-	deviceName   string
-	ccMajor      int
-	ccMinor      int
-	corruptOut   bool
-	copyDelay    time.Duration
+	initErr       error
+	lookupErr     error
+	registerErr   error
+	driverVer     int
+	deviceName    string
+	ccMajor       int
+	ccMinor       int
+	corruptOut    bool
+	nonFiniteOut  bool
+	copyDelay     time.Duration
 	nextDevPtr   uint64
 	devMem       map[uint64][]byte
 	lastDA       uint64
@@ -148,7 +150,9 @@ func (m *mockCudaDriver) LaunchSAXPY(fn uintptr, n uint32, dA, dB, dOut uint64, 
 	for i := 0; i < int(n); i++ {
 		a := decodeFloat32At(aBuf, i)
 		b := decodeFloat32At(bBuf, i)
-		if m.corruptOut && i == 100 {
+		if m.nonFiniteOut && i == 50 {
+			outVals[i] = float32(math.NaN())
+		} else if m.corruptOut && i == 100 {
 			outVals[i] = 99999.0
 		} else {
 			outVals[i] = alpha*a + b
@@ -235,5 +239,58 @@ func TestRunBenchmark_WatchdogTimeoutStopsLoad(t *testing.T) {
 	})
 	if res.Status != "timeout" {
 		t.Fatalf("expected timeout, got %s (reason=%s)", res.Status, res.Reason)
+	}
+}
+
+func TestRunBenchmark_FP32NonFiniteFailsClosed(t *testing.T) {
+	drv := newMockCudaDriver()
+	drv.nonFiniteOut = true
+
+	res := RunBenchmark(drv, BenchConfig{BDF: "0000:01:00.0", SizeMB: 4, Iterations: 1})
+	if res.Status != "error" || res.FP32KernelOK {
+		t.Fatalf("expected error with FP32KernelOK=false on NaN, got %+v", res)
+	}
+	if !strings.Contains(res.Reason, "fp32_non_finite") {
+		t.Fatalf("expected fp32_non_finite reason, got %s", res.Reason)
+	}
+}
+
+func TestRunBenchmark_PinnedAllocationFailureFallsBackExplicitly(t *testing.T) {
+	drv := newMockCudaDriver()
+	drv.registerErr = errors.New("page lock failed")
+
+	res := RunBenchmark(drv, BenchConfig{BDF: "01:00.0", SizeMB: 4, Iterations: 2})
+	if res.Status != "ok" {
+		t.Fatalf("expected ok fallback with pageable buffer, got %+v", res)
+	}
+	if res.PinnedHost {
+		t.Fatalf("expected PinnedHost=false on RegisterHost error")
+	}
+	if res.BDF != "0000:01:00.0" {
+		t.Fatalf("expected normalized BDF 0000:01:00.0, got %s", res.BDF)
+	}
+	if !strings.Contains(res.Reason, "pinned_host_allocation_failed") {
+		t.Fatalf("expected explicit pinned fallback reason, got %q", res.Reason)
+	}
+}
+
+func TestRunBenchmark_InvalidBDFRejected(t *testing.T) {
+	drv := newMockCudaDriver()
+	res := RunBenchmark(drv, BenchConfig{BDF: "not-a-bdf", SizeMB: 4, Iterations: 1})
+	if res.Status != "error" || !strings.Contains(res.Reason, "invalid_target_bdf") {
+		t.Fatalf("expected invalid_target_bdf error, got %+v", res)
+	}
+}
+
+func TestSystemCudaDLLPath_RestrictedToSystem32(t *testing.T) {
+	p, err := systemCudaDLLPath(`C:\Windows\System32`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.EqualFold(p, `C:\Windows\System32\nvcuda.dll`) {
+		t.Fatalf("unexpected system path: %s", p)
+	}
+	if _, err := systemCudaDLLPath(""); err == nil {
+		t.Fatalf("expected error for empty system dir")
 	}
 }

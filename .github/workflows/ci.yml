@@ -77,6 +77,10 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             Pop-Location
           }
+          Push-Location vgabench
+          go build -trimpath -ldflags '-s -w' -o ../../release/vgabench.exe .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Pop-Location
 
       - name: Build UnlockAIO.exe
         working-directory: windows-v3.0/tools/aio
@@ -103,6 +107,7 @@ jobs:
             windows-v3.0/release/UnlockRiotGame.exe
             windows-v3.0/release/FixCMP30HX_CSM.exe
             windows-v3.0/release/UnlockAIO.exe
+            windows-v3.0/release/vgabench.exe
 
   linux:
     runs-on: ubuntu-latest
@@ -189,13 +194,13 @@ jobs:
           esac
           mkdir package
           git archive HEAD | tar -x -C package
-          for file in 40HXInstaller.exe 40HXCheck.exe 40HXUninstaller.exe UnlockRiotGame.exe FixCMP30HX_CSM.exe UnlockAIO.exe; do
+          for file in 40HXInstaller.exe 40HXCheck.exe 40HXUninstaller.exe UnlockRiotGame.exe FixCMP30HX_CSM.exe UnlockAIO.exe vgabench.exe; do
             test -s "rebuilt/$file"
             cp "rebuilt/$file" "package/windows-v3.0/release/$file"
           done
           test -s rebuilt/linux-mmio/mmio_injector
           install -m 0755 rebuilt/linux-mmio/mmio_injector package/linux-mmio/mmio_injector
-          for file in README.md README_EN.md README_ZH.md LICENSE Setup_CMP30HX_WindowsAIO.bat Setup_CMP30HX_LinuxAIO.sh Setup_ReBar_CMP30HX.bat Launch_WebUI.bat windows-v3.0/release/README.md windows-v3.0/release/files/40HXUNLK.EFI windows-v3.0/release/make_usb_efi.bat windows-v3.0/release/EFI应急修复指南.md; do
+          for file in README.md README_EN.md README_ZH.md LICENSE Setup_CMP30HX_WindowsAIO.bat Setup_CMP30HX_LinuxAIO.sh Setup_ReBar_CMP30HX.bat Launch_WebUI.bat Collect_VGA_Report.bat windows-v3.0/release/README.md windows-v3.0/release/files/40HXUNLK.EFI windows-v3.0/release/make_usb_efi.bat windows-v3.0/release/EFI应急修复指南.md; do
             test -s "package/$file"
           done
           (cd package && zip -qr "../CMP-Unlock-${GITHUB_REF_NAME}.zip" .)

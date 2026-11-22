@@ -4,64 +4,100 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"unsafe"
 )
 
 const (
-	cuAttrMultiprocessorCount       = 16
-	cuAttrComputeCapabilityMajor    = 75
-	cuAttrComputeCapabilityMinor    = 76
+	cuAttrMultiprocessorCount    = 16
+	cuAttrComputeCapabilityMajor = 75
+	cuAttrComputeCapabilityMinor = 76
+	loadLibrarySearchSystem32    = 0x00000800
 )
 
-// RealCudaDriver invokes Windows nvcuda.dll dynamically with zero CGO or Toolkit install.
-type RealCudaDriver struct {
-	dll                *syscall.LazyDLL
-	cuInit             *syscall.LazyProc
-	cuDriverGetVersion *syscall.LazyProc
-	cuDeviceByBusID    *syscall.LazyProc
-	cuDeviceGetName    *syscall.LazyProc
-	cuDeviceGetAttr    *syscall.LazyProc
-	cuCtxCreate        *syscall.LazyProc
-	cuCtxDestroy       *syscall.LazyProc
-	cuMemHostRegister  *syscall.LazyProc
-	cuMemHostUnreg     *syscall.LazyProc
-	cuMemAlloc         *syscall.LazyProc
-	cuMemFree          *syscall.LazyProc
-	cuMemcpyHtoD       *syscall.LazyProc
-	cuMemcpyDtoH       *syscall.LazyProc
-	cuCtxSynchronize   *syscall.LazyProc
-	cuModuleLoadData   *syscall.LazyProc
-	cuModuleUnload     *syscall.LazyProc
-	cuModuleGetFunc    *syscall.LazyProc
-	cuLaunchKernel     *syscall.LazyProc
+var (
+	modKernel32            = syscall.NewLazyDLL("kernel32.dll")
+	procGetSystemDirectory = modKernel32.NewProc("GetSystemDirectoryW")
+	procLoadLibraryExW     = modKernel32.NewProc("LoadLibraryExW")
+)
+
+func systemCudaDLLPath(systemDir string) (string, error) {
+	trimmed := strings.TrimSpace(systemDir)
+	if trimmed == "" {
+		return "", fmt.Errorf("%w: empty System32 path", ErrCudaUnavailable)
+	}
+	return filepath.Join(trimmed, "nvcuda.dll"), nil
 }
 
-// NewRealCudaDriver constructs a lazy-bound nvcuda.dll driver wrapper.
-func NewRealCudaDriver() *RealCudaDriver {
-	dll := syscall.NewLazyDLL("nvcuda.dll")
-	return &RealCudaDriver{
-		dll:                dll,
-		cuInit:             dll.NewProc("cuInit"),
-		cuDriverGetVersion: dll.NewProc("cuDriverGetVersion"),
-		cuDeviceByBusID:    dll.NewProc("cuDeviceGetByPCIBusId"),
-		cuDeviceGetName:    dll.NewProc("cuDeviceGetName"),
-		cuDeviceGetAttr:    dll.NewProc("cuDeviceGetAttribute"),
-		cuCtxCreate:        dll.NewProc("cuCtxCreate_v2"),
-		cuCtxDestroy:       dll.NewProc("cuCtxDestroy_v2"),
-		cuMemHostRegister:  dll.NewProc("cuMemHostRegister_v2"),
-		cuMemHostUnreg:     dll.NewProc("cuMemHostUnregister"),
-		cuMemAlloc:         dll.NewProc("cuMemAlloc_v2"),
-		cuMemFree:          dll.NewProc("cuMemFree_v2"),
-		cuMemcpyHtoD:       dll.NewProc("cuMemcpyHtoD_v2"),
-		cuMemcpyDtoH:       dll.NewProc("cuMemcpyDtoH_v2"),
-		cuCtxSynchronize:   dll.NewProc("cuCtxSynchronize"),
-		cuModuleLoadData:   dll.NewProc("cuModuleLoadData"),
-		cuModuleUnload:     dll.NewProc("cuModuleUnload"),
-		cuModuleGetFunc:    dll.NewProc("cuModuleGetFunction"),
-		cuLaunchKernel:     dll.NewProc("cuLaunchKernel"),
+func resolveSystemDir() (string, error) {
+	buf := make([]uint16, 260)
+	n, _, err := procGetSystemDirectory.Call(uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	if n == 0 {
+		return "", fmt.Errorf("%w: GetSystemDirectoryW failed: %v", ErrCudaUnavailable, err)
 	}
+	if int(n) > len(buf) {
+		buf = make([]uint16, int(n)+1)
+		n, _, err = procGetSystemDirectory.Call(uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+		if n == 0 || int(n) > len(buf) {
+			return "", fmt.Errorf("%w: GetSystemDirectoryW failed: %v", ErrCudaUnavailable, err)
+		}
+	}
+	return syscall.UTF16ToString(buf[:n]), nil
+}
+
+func loadSystemCudaDLL() (*syscall.DLL, error) {
+	sysDir, err := resolveSystemDir()
+	if err != nil {
+		return nil, err
+	}
+	dllPath, err := systemCudaDLLPath(sysDir)
+	if err != nil {
+		return nil, err
+	}
+	if _, statErr := os.Stat(dllPath); statErr != nil {
+		return nil, fmt.Errorf("%w: %v", ErrCudaUnavailable, statErr)
+	}
+	ptr, err := syscall.UTF16PtrFromString(dllPath)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrCudaUnavailable, err)
+	}
+	handle, _, callErr := procLoadLibraryExW.Call(uintptr(unsafe.Pointer(ptr)), 0, uintptr(loadLibrarySearchSystem32))
+	if handle == 0 {
+		return nil, fmt.Errorf("%w: LoadLibraryExW failed: %v", ErrCudaUnavailable, callErr)
+	}
+	return &syscall.DLL{Name: dllPath, Handle: syscall.Handle(handle)}, nil
+}
+
+// RealCudaDriver invokes Windows System32 nvcuda.dll dynamically with zero CGO or Toolkit install.
+type RealCudaDriver struct {
+	dll                *syscall.DLL
+	cuInit             *syscall.Proc
+	cuDriverGetVersion *syscall.Proc
+	cuDeviceByBusID    *syscall.Proc
+	cuDeviceGetName    *syscall.Proc
+	cuDeviceGetAttr    *syscall.Proc
+	cuCtxCreate        *syscall.Proc
+	cuCtxDestroy       *syscall.Proc
+	cuMemHostRegister  *syscall.Proc
+	cuMemHostUnreg     *syscall.Proc
+	cuMemAlloc         *syscall.Proc
+	cuMemFree          *syscall.Proc
+	cuMemcpyHtoD       *syscall.Proc
+	cuMemcpyDtoH       *syscall.Proc
+	cuCtxSynchronize   *syscall.Proc
+	cuModuleLoadData   *syscall.Proc
+	cuModuleUnload     *syscall.Proc
+	cuModuleGetFunc    *syscall.Proc
+	cuLaunchKernel     *syscall.Proc
+}
+
+// NewRealCudaDriver constructs an unbound nvcuda.dll driver wrapper; Init() loads exclusively from System32.
+func NewRealCudaDriver() *RealCudaDriver {
+	return &RealCudaDriver{}
 }
 
 func checkCU(name string, r1 uintptr) error {
@@ -79,9 +115,41 @@ func cstr(s string) []byte {
 }
 
 func (d *RealCudaDriver) Init() error {
-	if err := d.dll.Load(); err != nil {
-		return fmt.Errorf("%w: %v", ErrCudaUnavailable, err)
+	dll, err := loadSystemCudaDLL()
+	if err != nil {
+		return err
 	}
+	procs := []struct {
+		target **syscall.Proc
+		name   string
+	}{
+		{&d.cuInit, "cuInit"},
+		{&d.cuDriverGetVersion, "cuDriverGetVersion"},
+		{&d.cuDeviceByBusID, "cuDeviceGetByPCIBusId"},
+		{&d.cuDeviceGetName, "cuDeviceGetName"},
+		{&d.cuDeviceGetAttr, "cuDeviceGetAttribute"},
+		{&d.cuCtxCreate, "cuCtxCreate_v2"},
+		{&d.cuCtxDestroy, "cuCtxDestroy_v2"},
+		{&d.cuMemHostRegister, "cuMemHostRegister_v2"},
+		{&d.cuMemHostUnreg, "cuMemHostUnregister"},
+		{&d.cuMemAlloc, "cuMemAlloc_v2"},
+		{&d.cuMemFree, "cuMemFree_v2"},
+		{&d.cuMemcpyHtoD, "cuMemcpyHtoD_v2"},
+		{&d.cuMemcpyDtoH, "cuMemcpyDtoH_v2"},
+		{&d.cuCtxSynchronize, "cuCtxSynchronize"},
+		{&d.cuModuleLoadData, "cuModuleLoadData"},
+		{&d.cuModuleUnload, "cuModuleUnload"},
+		{&d.cuModuleGetFunc, "cuModuleGetFunction"},
+		{&d.cuLaunchKernel, "cuLaunchKernel"},
+	}
+	for _, p := range procs {
+		proc, ferr := dll.FindProc(p.name)
+		if ferr != nil {
+			return fmt.Errorf("%w: missing proc %s: %v", ErrCudaUnavailable, p.name, ferr)
+		}
+		*p.target = proc
+	}
+	d.dll = dll
 	r1, _, _ := d.cuInit.Call(0)
 	return checkCU("cuInit", r1)
 }

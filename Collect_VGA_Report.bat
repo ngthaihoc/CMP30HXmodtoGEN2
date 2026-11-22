@@ -1411,12 +1411,76 @@ function Save-LastReportId {
     }
 }
 
+function Invoke-ExternalCommandWithTimeout {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$Arguments = @(),
+        [AllowNull()][string]$WorkingDirectory = $null,
+        [int]$TimeoutMs = 20000
+    )
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $quotedArgs = @()
+    foreach ($a in @($Arguments)) {
+        $s = [string]$a
+        if ($s -match '[\s"]') {
+            $quotedArgs += ('"' + $s.Replace('"', '\"') + '"')
+        } else {
+            $quotedArgs += $s
+        }
+    }
+    $psi.Arguments = ($quotedArgs -join ' ')
+    if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+        $psi.WorkingDirectory = $WorkingDirectory
+    }
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.StandardOutputEncoding = $utf8NoBom
+    $psi.StandardErrorEncoding = $utf8NoBom
+
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    try {
+        [void]$proc.Start()
+        $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+        $stderrTask = $proc.StandardError.ReadToEndAsync()
+        $finished = $proc.WaitForExit($TimeoutMs)
+        if (-not $finished) {
+            try { & taskkill.exe /PID $proc.Id /T /F 2>$null | Out-Null } catch {}
+            try { if (-not $proc.HasExited) { $proc.Kill() } } catch {}
+            [void]$proc.WaitForExit(2000)
+            $outPartial = ''
+            try { if ($stdoutTask.Wait(500)) { $outPartial = $stdoutTask.Result } } catch {}
+            return [pscustomobject]@{
+                ExitCode = -1
+                Output   = $outPartial
+                StdErr   = ''
+                TimedOut = $true
+            }
+        }
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        return [pscustomobject]@{
+            ExitCode = [int]$proc.ExitCode
+            Output   = $stdout
+            StdErr   = $stderr
+            TimedOut = $false
+        }
+    } finally {
+        $proc.Dispose()
+    }
+}
+
 function Invoke-VgaBenchRaw {
     param(
         [Parameter(Mandatory = $true)][string]$TargetBdf,
         [int]$SizeMB = 64,
         [int]$Iterations = 5,
-        [int]$TimeoutMs = 15000
+        [int]$TimeoutMs = 15000,
+        [int]$ProcessTimeoutMs = 0
     )
     $rootDir = if (-not [string]::IsNullOrWhiteSpace($env:VGA_BAT_DIR)) { $env:VGA_BAT_DIR } else { (Get-Location).Path }
     $exeCandidates = @(
@@ -1432,40 +1496,51 @@ function Invoke-VgaBenchRaw {
     }
     $toolDir = Join-Path $rootDir 'windows-v3.0\tools\vgabench'
     $argsList = @('-bdf', $TargetBdf, '-size-mb', "$SizeMB", '-iters', "$Iterations", '-timeout-ms', "$TimeoutMs")
+    $hardTimeout = if ($ProcessTimeoutMs -gt 0) { $ProcessTimeoutMs } else { $TimeoutMs + 5000 }
     try {
         if ($exePath) {
-            $out = & $exePath @argsList 2>$null
-            return ($out -join "`n")
+            $run = Invoke-ExternalCommandWithTimeout -FilePath $exePath -Arguments $argsList -WorkingDirectory $rootDir -TimeoutMs $hardTimeout
+            if ($run.TimedOut) {
+                return (@{ status = 'timeout'; bdf = $TargetBdf; reason = 'collector_process_timeout_killed'; partial_output = (Remove-Pii -Text ([string]$run.Output)) } | ConvertTo-Json -Compress)
+            }
+            return ([string]$run.Output).Trim()
         }
         $goCmd = Get-Command go -ErrorAction SilentlyContinue
         if ($goCmd -and (Test-Path -LiteralPath (Join-Path $toolDir 'main.go') -PathType Leaf)) {
-            Push-Location $toolDir
-            try {
-                $out = & $goCmd.Source run . @argsList 2>$null
-                return ($out -join "`n")
-            } finally {
-                Pop-Location
+            $run = Invoke-ExternalCommandWithTimeout -FilePath $goCmd.Source -Arguments (@('run', '.') + $argsList) -WorkingDirectory $toolDir -TimeoutMs ($hardTimeout + 15000)
+            if ($run.TimedOut) {
+                return (@{ status = 'timeout'; bdf = $TargetBdf; reason = 'collector_process_timeout_killed'; partial_output = (Remove-Pii -Text ([string]$run.Output)) } | ConvertTo-Json -Compress)
             }
+            return ([string]$run.Output).Trim()
         }
     } catch {
-        return (@{ status = 'error'; reason = $_.Exception.Message } | ConvertTo-Json -Compress)
+        return (@{ status = 'error'; bdf = $TargetBdf; reason = $_.Exception.Message } | ConvertTo-Json -Compress)
     }
     return $null
 }
 
 function Get-VgaBenchInfo {
-    param([AllowNull()][string]$TargetBdf)
+    param(
+        [AllowNull()][string]$TargetBdf,
+        [int]$SizeMB = 64,
+        [int]$Iterations = 5,
+        [int]$TimeoutMs = 15000
+    )
     if ([string]::IsNullOrWhiteSpace($TargetBdf)) {
         return [pscustomobject]@{ status = 'skipped'; reason = 'missing_target_bdf' }
     }
-    $raw = Invoke-VgaBenchRaw -TargetBdf $TargetBdf
+    $normBdf = Normalize-Bdf -BusId $TargetBdf
+    if ([string]::IsNullOrWhiteSpace($normBdf) -or ($normBdf -notmatch '^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$')) {
+        return [pscustomobject]@{ status = 'error'; bdf = $TargetBdf; reason = "invalid_target_bdf: $TargetBdf" }
+    }
+    $raw = Invoke-VgaBenchRaw -TargetBdf $normBdf -SizeMB $SizeMB -Iterations $Iterations -TimeoutMs $TimeoutMs
     if ([string]::IsNullOrWhiteSpace($raw)) {
-        return [pscustomobject]@{ status = 'unsupported'; reason = 'vgabench_helper_not_found' }
+        return [pscustomobject]@{ status = 'unsupported'; bdf = $normBdf; reason = 'vgabench_helper_not_found' }
     }
     try {
-        return ($raw | ConvertFrom-Json)
+        return ($raw | ConvertFrom-Json -ErrorAction Stop)
     } catch {
-        return [pscustomobject]@{ status = 'error'; reason = 'invalid_vgabench_json' }
+        return [pscustomobject]@{ status = 'error'; bdf = $normBdf; reason = 'invalid_vgabench_json' }
     }
 }
 
@@ -1630,19 +1705,39 @@ function New-Report {
     $evidenceLevel = 'reported'
     $linkLoadEntry = & $newCompEntry $false 'skipped' @('h2d_d2h', 'load_timeseries') 'Chưa chạy bài thử tải GPU (chế độ P2)'
     $computeEntry = & $newCompEntry $false 'skipped' @('cuda_runtime', 'tensor_check') 'Chưa chạy helper kiểm tra tính toán/Tensor (chế độ P2)'
+    $targetTensorApp = 'unknown'
+    if ($primaryGpu) {
+        $pVid = if ($primaryGpu.vendor_id -and $primaryGpu.vendor_id.status -eq 'ok') { [string]$primaryGpu.vendor_id.value } else { $null }
+        $pDid = if ($primaryGpu.device_id -and $primaryGpu.device_id.status -eq 'ok') { [string]$primaryGpu.device_id.value } else { $null }
+        $pName = if ($primaryGpu.name -and $primaryGpu.name.status -eq 'ok') { [string]$primaryGpu.name.value } else { $null }
+        $pDet = if ($primaryGpu.profile) { $primaryGpu.profile } else { Get-GpuProfileDetails -VendorId $pVid -DeviceId $pDid -Name $pName }
+        if ($pDet -and $pDet.tensor_applicable) { $targetTensorApp = [string]$pDet.tensor_applicable }
+    }
     if ($null -ne $LoadBench) {
         if ($LoadBench.status -eq 'ok' -and $LoadBench.fp32_kernel_ok -eq $true) {
             $evidenceLevel = 'observed'
             $loadReason = & $truncateReason ("H2D=$($LoadBench.h2d_bandwidth_gbps) GB/s, D2H=$($LoadBench.d2h_bandwidth_gbps) GB/s ($($LoadBench.transfer_size_mb) MiB, pinned=$($LoadBench.pinned_host))")
             $compReason = & $truncateReason ("CUDA PTX FP32 OK ($($LoadBench.fp32_gflops) GFLOPS, CC $($LoadBench.compute_capability))")
-            $linkLoadEntry = & $newCompEntry $true 'ok' @() $loadReason
-            $computeEntry = & $newCompEntry $true 'ok' @() $compReason
+            $hasTs = ([bool](Get-ObjProp $LoadBench 'has_timeseries')) -or ($null -ne (Get-ObjProp $LoadBench 'timeseries') -and [int](Get-ObjProp (Get-ObjProp $LoadBench 'timeseries') 'total_samples') -gt 0)
+            if ($hasTs) {
+                $linkLoadEntry = & $newCompEntry $true 'ok' @() $loadReason
+            } else {
+                $linkLoadEntry = & $newCompEntry $false 'partial' @('load_timeseries') (& $truncateReason "$loadReason (chưa có chuỗi mẫu time-series)")
+            }
+            $hasTensorCheck = [bool](Get-ObjProp $LoadBench 'tensor_checked')
+            if ($targetTensorApp -eq 'no') {
+                $computeEntry = & $newCompEntry $true 'ok' @() (& $truncateReason "$compReason (Tensor N/A theo hồ sơ GPU)")
+            } elseif ($hasTensorCheck) {
+                $computeEntry = & $newCompEntry $true 'ok' @() $compReason
+            } else {
+                $computeEntry = & $newCompEntry $false 'partial' @('tensor_check') (& $truncateReason "$compReason (chưa thử Tensor chuyên biệt)")
+            }
         } else {
             $bStatus = if ($LoadBench.status -in @('ok', 'partial', 'skipped', 'unsupported', 'error')) { [string]$LoadBench.status } else { 'error' }
             if ($bStatus -eq 'ok') { $bStatus = 'error' }
             $bReason = if ($LoadBench.reason) { & $truncateReason ([string]$LoadBench.reason) } else { "vgabench status=$bStatus" }
-            $linkLoadEntry = & $newCompEntry $false $bStatus @('h2d_d2h') $bReason
-            $computeEntry = & $newCompEntry $false $bStatus @('cuda_runtime', 'fp32_kernel') $bReason
+            $linkLoadEntry = & $newCompEntry $false $bStatus @('h2d_d2h', 'load_timeseries') $bReason
+            $computeEntry = & $newCompEntry $false $bStatus @('cuda_runtime', 'fp32_kernel', 'tensor_check') $bReason
         }
     }
 
@@ -2286,6 +2381,12 @@ function Start-CollectorInteractive {
         if ($autoGpu -and $autoGpu.bdf -and $autoGpu.bdf.status -eq 'ok') {
             $targetBdf = [string]$autoGpu.bdf.value
         }
+    }
+    $resolvedSelectedGpu = Select-TargetGpu -Inventory $inventory -TargetBdf $targetBdf
+    if ($resolvedSelectedGpu -and $resolvedSelectedGpu.bdf -and $resolvedSelectedGpu.bdf.status -eq 'ok') {
+        $targetBdf = Normalize-Bdf -BusId ([string]$resolvedSelectedGpu.bdf.value)
+    } else {
+        $targetBdf = Normalize-Bdf -BusId $targetBdf
     }
     $nvidia = Get-NvidiaInfo -Inventory $inventory -TargetBdf $targetBdf
 

@@ -1491,10 +1491,33 @@ Invoke-TestCase 'p2_load_bench_updates_completeness_and_evidence_level' {
         $benchOk = Get-VgaBenchInfo -TargetBdf '0000:02:00.0'
         $repOk = New-Report -Inventory $inv -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctx -ExperimentDir $expDir -LoadBench $benchOk
         Assert-Equal $repOk.evidence_level 'observed' 'P2 ok upgrades evidence_level to observed'
-        Assert-Equal $repOk.completeness.link_load.status 'ok' 'link_load marked ok'
-        Assert-Equal $repOk.completeness.compute.status 'ok' 'compute marked ok'
+        Assert-Equal $repOk.completeness.link_load.status 'partial' 'link_load stays partial without timeseries'
+        Assert-True ($repOk.completeness.link_load.missing -contains 'load_timeseries') 'link_load keeps load_timeseries in missing'
+        Assert-Equal $repOk.completeness.compute.status 'partial' 'compute on 40HX stays partial without tensor_check'
+        Assert-True ($repOk.completeness.compute.missing -contains 'tensor_check') 'compute keeps tensor_check in missing on unverified Tensor GPU'
         Assert-True ($repOk.completeness.link_load.reason.Contains('5.82 GB/s')) 'H2D bandwidth recorded in link_load reason'
         Assert-True ($repOk.completeness.compute.reason.Contains('75.5 GFLOPS')) 'FP32 GFLOPS recorded in compute reason'
+
+        # On 30HX (tensor_applicable='no') with timeseries present, both link_load and compute achieve ok
+        $inv30 = @([pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:03:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '2189'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA CMP 30HX'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+        })
+        $benchFull = [pscustomobject]@{
+            status = 'ok'; bdf = '0000:03:00.0'; compute_capability = '7.5'; transfer_size_mb = 64
+            pinned_host = $true; h2d_bandwidth_gbps = 5.9; d2h_bandwidth_gbps = 6.0
+            fp32_kernel_ok = $true; fp32_gflops = 60.0
+            has_timeseries = $true
+        }
+        $rep30 = New-Report -Inventory $inv30 -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctx -ExperimentDir $expDir -LoadBench $benchFull
+        Assert-Equal $rep30.completeness.link_load.status 'ok' 'link_load ok when timeseries collected'
+        Assert-Equal $rep30.completeness.compute.status 'ok' 'compute ok on CMP 30HX (Tensor N/A)'
 
         $savedOk = Save-LocalReport -Report $repOk -Dir $expDir
         $nodeOut = & node -e "const fs=require('fs'), r=require(process.argv[1]), d=JSON.parse(fs.readFileSync(process.argv[2],'utf8')); const v=r.validateReport(d), p=r.findPii(d); if(!v.ok || p.length){ console.log(JSON.stringify({v,p})); process.exit(1); }" $reportCjsPath $savedOk.JsonPath
@@ -1655,6 +1678,80 @@ Invoke-TestCase 'save_only_and_choice_1_zero_network_even_with_pending' {
         Assert-Equal $script:Prompts.Count 1 'Interactive choice [1] has only 1 prompt even with pending.json'
     } finally {
         $env:VGA_BAT_DIR = $origDir
+        Remove-Item -LiteralPath $expDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# =========================================================================
+# Step 0B RED Tests: helper errors, timeout tree kill, normalized auto BDF
+# =========================================================================
+
+Invoke-TestCase 'p2_helper_missing_invalid_json_bad_bdf_and_process_tree_timeout' {
+    function Invoke-VgaBenchRaw { param([string]$TargetBdf) return $null }
+    $missingRes = Get-VgaBenchInfo -TargetBdf '0000:01:00.0'
+    Assert-Equal $missingRes.status 'unsupported' 'missing helper maps to unsupported'
+    Assert-Equal $missingRes.reason 'vgabench_helper_not_found' 'missing helper reason preserved'
+
+    function Invoke-VgaBenchRaw { param([string]$TargetBdf) return '{bad json output' }
+    $badJsonRes = Get-VgaBenchInfo -TargetBdf '0000:01:00.0'
+    Assert-Equal $badJsonRes.status 'error' 'invalid json helper output maps to error'
+    Assert-Equal $badJsonRes.reason 'invalid_vgabench_json' 'invalid json reason preserved'
+
+    $badBdfRes = Get-VgaBenchInfo -TargetBdf 'not-a-bdf'
+    Assert-Equal $badBdfRes.status 'error' 'bad BDF rejected cleanly'
+    Assert-True ($badBdfRes.reason -match 'invalid_target_bdf|missing_target_bdf') "unexpected bad BDF reason: $($badBdfRes.reason)"
+
+    # Real hung child process tree killed by collector ProcessTimeoutMs
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $procRes = Invoke-ExternalCommandWithTimeout -FilePath 'powershell.exe' -Arguments @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30') -TimeoutMs 500
+    $sw.Stop()
+    Assert-True $procRes.TimedOut 'hung child process triggered collector timeout'
+    Assert-True ($sw.ElapsedMilliseconds -lt 5000) "timeout killed hung process quickly (elapsed=$($sw.ElapsedMilliseconds)ms)"
+
+    # Auto mode normalizes target BDF passed to benchmark helper
+    $expDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-autobdf-" + [guid]::NewGuid())
+    $origDir = $env:VGA_BAT_DIR
+    $origBdf = $env:VGA_TARGET_BDF
+    $script:BenchCapturedBdf = $null
+    try {
+        [void][IO.Directory]::CreateDirectory($expDir)
+        $env:VGA_BAT_DIR = $expDir
+        $env:VGA_TARGET_BDF = 'auto'
+        function Get-VgaInventory {
+            return @(
+                [pscustomobject]@{
+                    bdf = [pscustomobject]@{ value = '0000:01:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+                    vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+                    device_id = [pscustomobject]@{ value = '1F07'; source = 'pnp'; unit = $null; status = 'ok' }
+                    subsystem_id = [pscustomobject]@{ value = '86701043'; source = 'pnp'; unit = $null; status = 'ok' }
+                    revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+                    name = [pscustomobject]@{ value = 'RTX 2070'; source = 'cim'; unit = $null; status = 'ok' }
+                    pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+                    driver_version = [pscustomobject]@{ value = '32.0.16.2101'; source = 'cim'; unit = $null; status = 'ok' }
+                },
+                [pscustomobject]@{
+                    bdf = [pscustomobject]@{ value = '05:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+                    vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+                    device_id = [pscustomobject]@{ value = '1F0B'; source = 'pnp'; unit = $null; status = 'ok' }
+                    subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+                    revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+                    name = [pscustomobject]@{ value = 'CMP 40HX'; source = 'cim'; unit = $null; status = 'ok' }
+                    pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+                    driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+                }
+            )
+        }
+        function Get-NvidiaInfo { param($Inventory, $TargetBdf) return (New-EmptyNvidiaBlock -Status 'skipped') }
+        function Get-VgaBenchInfo {
+            param([AllowNull()][string]$TargetBdf)
+            $script:BenchCapturedBdf = $TargetBdf
+            return [pscustomobject]@{ status = 'timeout'; bdf = $TargetBdf; reason = 'collector_process_timeout_killed' }
+        }
+        Start-CollectorInteractive -SaveOnly -RunLoadTest
+        Assert-Equal $script:BenchCapturedBdf '0000:05:00.0' 'auto target resolved to normalized CMP 40HX BDF'
+    } finally {
+        $env:VGA_BAT_DIR = $origDir
+        $env:VGA_TARGET_BDF = $origBdf
         Remove-Item -LiteralPath $expDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }

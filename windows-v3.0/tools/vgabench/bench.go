@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -12,6 +13,9 @@ import (
 
 // ErrCudaUnavailable is returned when nvcuda.dll cannot be loaded on the host.
 var ErrCudaUnavailable = errors.New("nvcuda.dll unavailable")
+
+var validBdfRe = regexp.MustCompile(`^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$`)
+var shortBdfRe = regexp.MustCompile(`^[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$`)
 
 // BenchConfig configures a user-mode CUDA PCIe bandwidth and FP32 correctness check.
 type BenchConfig struct {
@@ -28,11 +32,17 @@ type BenchResult struct {
 	DeviceName        string  `json:"device_name,omitempty"`
 	ComputeCapability string  `json:"compute_capability,omitempty"`
 	DriverVersion     int     `json:"driver_version,omitempty"`
+	BenchmarkMethod   string  `json:"benchmark_method,omitempty"`
+	WarmupIncluded    bool    `json:"warmup_included"`
 	TransferSizeMB    int     `json:"transfer_size_mb"`
 	Iterations        int     `json:"iterations"`
 	PinnedHost        bool    `json:"pinned_host"`
 	H2DBandwidthGBps  float64 `json:"h2d_bandwidth_gbps"`
+	H2DMinGBps        float64 `json:"h2d_min_gbps"`
+	H2DMaxGBps        float64 `json:"h2d_max_gbps"`
 	D2HBandwidthGBps  float64 `json:"d2h_bandwidth_gbps"`
+	D2HMinGBps        float64 `json:"d2h_min_gbps"`
+	D2HMaxGBps        float64 `json:"d2h_max_gbps"`
 	FP32KernelOK      bool    `json:"fp32_kernel_ok"`
 	FP32GFLOPS        float64 `json:"fp32_gflops"`
 	DurationMs        int64   `json:"duration_ms"`
@@ -139,6 +149,39 @@ func round2(v float64) float64 {
 	return math.Round(v*100) / 100
 }
 
+func normalizeAndValidateBDF(raw string) (string, error) {
+	t := strings.ToLower(strings.TrimSpace(raw))
+	if t == "" {
+		return "", errors.New("missing_target_bdf")
+	}
+	if strings.HasPrefix(t, "0000") && len(t) == 16 && validBdfRe.MatchString(t[4:]) {
+		return t[4:], nil
+	}
+	if shortBdfRe.MatchString(t) {
+		return "0000:" + t, nil
+	}
+	if validBdfRe.MatchString(t) {
+		return t, nil
+	}
+	return "", fmt.Errorf("invalid_target_bdf: %s", strings.TrimSpace(raw))
+}
+
+func minMaxFloat64(vals []float64) (float64, float64) {
+	if len(vals) == 0 {
+		return 0, 0
+	}
+	lo, hi := vals[0], vals[0]
+	for _, v := range vals[1:] {
+		if v < lo {
+			lo = v
+		}
+		if v > hi {
+			hi = v
+		}
+	}
+	return lo, hi
+}
+
 func medianFloat64(vals []float64) float64 {
 	if len(vals) == 0 {
 		return 0
@@ -187,11 +230,14 @@ func RunBenchmark(drv CudaDriver, cfg BenchConfig) BenchResult {
 		Iterations:     cfg.Iterations,
 	}
 
-	if cfg.BDF == "" {
-		res.Reason = "missing_target_bdf"
+	normBDF, bdfErr := normalizeAndValidateBDF(cfg.BDF)
+	if bdfErr != nil {
+		res.Reason = bdfErr.Error()
 		res.DurationMs = time.Since(start).Milliseconds()
 		return res
 	}
+	cfg.BDF = normBDF
+	res.BDF = normBDF
 
 	if err := drv.Init(); err != nil {
 		if errors.Is(err, ErrCudaUnavailable) {
@@ -234,9 +280,15 @@ func RunBenchmark(drv CudaDriver, cfg BenchConfig) BenchResult {
 	for i := 0; i < len(hostBuf); i += 4096 {
 		hostBuf[i] = byte(i)
 	}
+	pinnedNote := ""
 	if err := drv.RegisterHost(hostBuf); err == nil {
 		res.PinnedHost = true
+		res.BenchmarkMethod = "nvcuda_pinned_host"
 		defer func() { _ = drv.UnregisterHost(hostBuf) }()
+	} else {
+		res.PinnedHost = false
+		res.BenchmarkMethod = "nvcuda_pageable_host"
+		pinnedNote = fmt.Sprintf("pinned_host_allocation_failed_fallback_pageable: %v", err)
 	}
 
 	devBuf, err := drv.AllocDevice(transferBytes)
@@ -307,8 +359,15 @@ func RunBenchmark(drv CudaDriver, cfg BenchConfig) BenchResult {
 		}
 	}
 
+	res.WarmupIncluded = true
 	res.H2DBandwidthGBps = round2(medianFloat64(h2dRates))
+	h2dMin, h2dMax := minMaxFloat64(h2dRates)
+	res.H2DMinGBps = round2(h2dMin)
+	res.H2DMaxGBps = round2(h2dMax)
 	res.D2HBandwidthGBps = round2(medianFloat64(d2hRates))
+	d2hMin, d2hMax := minMaxFloat64(d2hRates)
+	res.D2HMinGBps = round2(d2hMin)
+	res.D2HMaxGBps = round2(d2hMax)
 
 	// FP32 correctness and lightweight compute check using embedded PTX.
 	const elemCount = 1024 * 1024
@@ -421,8 +480,15 @@ func RunBenchmark(drv CudaDriver, cfg BenchConfig) BenchResult {
 
 	for i := 0; i < elemCount; i++ {
 		got := decodeFloat32At(outBytes, i)
+		got64 := float64(got)
+		if math.IsNaN(got64) || math.IsInf(got64, 0) {
+			res.FP32KernelOK = false
+			res.Reason = fmt.Sprintf("fp32_non_finite_at_%d_got_%v", i, got)
+			res.DurationMs = time.Since(start).Milliseconds()
+			return res
+		}
 		want := alpha*aVals[i] + bVals[i]
-		if math.Abs(float64(got-want)) > 1e-4 {
+		if math.Abs(got64-float64(want)) > 1e-4 {
 			res.FP32KernelOK = false
 			res.Reason = fmt.Sprintf("fp32_mismatch_at_%d_got_%v_want_%v", i, got, want)
 			res.DurationMs = time.Since(start).Milliseconds()
@@ -432,6 +498,9 @@ func RunBenchmark(drv CudaDriver, cfg BenchConfig) BenchResult {
 
 	res.FP32KernelOK = true
 	res.Status = "ok"
+	if pinnedNote != "" {
+		res.Reason = pinnedNote
+	}
 	res.DurationMs = time.Since(start).Milliseconds()
 	return res
 }
