@@ -1930,11 +1930,13 @@ function Invoke-VgaBenchRaw {
         [int]$SizeMB = 64,
         [int]$Iterations = 5,
         [int]$TimeoutMs = 15000,
-        [int]$ProcessTimeoutMs = 0
+        [int]$ProcessTimeoutMs = 0,
+        [int]$DurationMs = 0
     )
     $rootDir = if (-not [string]::IsNullOrWhiteSpace($env:VGA_BAT_DIR)) { $env:VGA_BAT_DIR } else { (Get-Location).Path }
     $exeCandidates = @(
         (Join-Path $rootDir 'windows-v3.0\release\vgabench.exe'),
+        (Join-Path $rootDir 'vgabench.exe'),
         (Join-Path $rootDir 'windows-v3.0\tools\vgabench\vgabench.exe')
     )
     $exePath = $null
@@ -1946,6 +1948,9 @@ function Invoke-VgaBenchRaw {
     }
     $toolDir = Join-Path $rootDir 'windows-v3.0\tools\vgabench'
     $argsList = @('-bdf', $TargetBdf, '-size-mb', "$SizeMB", '-iters', "$Iterations", '-timeout-ms', "$TimeoutMs")
+    if ($DurationMs -gt 0) {
+        $argsList += @('-duration-ms', "$DurationMs")
+    }
     $hardTimeout = if ($ProcessTimeoutMs -gt 0) { $ProcessTimeoutMs } else { $TimeoutMs + 5000 }
     try {
         if ($exePath) {
@@ -2298,6 +2303,7 @@ function Invoke-LoadTestWorkflow {
         $rootDir = if (-not [string]::IsNullOrWhiteSpace($env:VGA_BAT_DIR)) { $env:VGA_BAT_DIR } else { (Get-Location).Path }
         $exePath = @(
             (Join-Path $rootDir 'windows-v3.0\release\vgabench.exe'),
+            (Join-Path $rootDir 'vgabench.exe'),
             (Join-Path $rootDir 'windows-v3.0\tools\vgabench\vgabench.exe')
         ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
 

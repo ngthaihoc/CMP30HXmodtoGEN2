@@ -1,8 +1,8 @@
 # VGA Collector & Modding Research System — Tài liệu Bàn giao Bối cảnh (Context Handoff)
 
-> **Cập nhật:** 2026-11-22  
-> **Trạng thái:** Hoàn thành **P0** (Độ tin cậy collector) và **P1** (Schema v2 & Collector cơ bản mở rộng), đã triển khai Worker v2 lên Cloudflare Sandbox và xác minh E2E thành công.  
-> **Mục đích:** Tài liệu kỹ thuật chuẩn theo nguyên lý *Context Engineering* nhằm cung cấp toàn bộ bối cảnh hệ thống, kiến trúc dữ liệu, các mốc đã hoàn thành, kết quả kiểm chứng và lộ trình triển khai các pha tiếp theo (P2+).
+> **Cập nhật:** 2026-11-22
+> **Trạng thái:** Đã hoàn thành triển khai **P0**, **P1**, và **Phase 2 & 3 (Topology/Stability/LoadTest/Comparison)** trên nhánh `feat/vga-report-phase2-3`, kiểm chứng với mock suite + RTX 2070 tham chiếu và redeploy Worker v2 lên Cloudflare Sandbox. Nghiệm thu trên phần cứng CMP/mining thật (`CMP 30HX`, `CMP 40HX`, `P106-100`, `P100 PCIe`) vẫn đang chờ phần cứng thực tế (`pending_hardware`).
+> **Mục đích:** Tài liệu kỹ thuật chuẩn theo nguyên lý *Context Engineering* nhằm cung cấp toàn bộ bối cảnh hệ thống, kiến trúc dữ liệu, các mốc đã hoàn thành, giới hạn chỉ-đọc, kết quả kiểm chứng và ma trận nghiệm thu phần cứng.
 
 ---
 
@@ -88,6 +88,11 @@ Tập tin schema gốc tại `docs/vga-report/schema.json` hỗ trợ song song 
     - `memory.used`, `memory.free`
     - `ecc.mode.current`
     - `clocks_throttle_reasons.active`, `clocks_throttle_reasons.sw_power_cap`, `clocks_throttle_reasons.hw_slowdown`, `clocks_throttle_reasons.hw_thermal_slowdown`, `clocks_throttle_reasons.hw_power_brake_slowdown` (collector tự ánh xạ fallback từ `clocks_event_reasons.*` sang tên khóa chuẩn này).
+  - Các khối mở rộng tùy chọn Phase 2 & 3 (chỉ cho phép trên `schema_version: 2`):
+    - `topology`: `upstream_chain`, `root_port` (từ `DEVPKEY_Device_Parent`), `aspm` (chính sách Windows `powercfg`, phân tách với thanh ghi `LnkCtl` chưa đọc trực tiếp ở user-mode), `pcie_caps` (`MPS`/`MRRS`), `rebar` (`bar1_total_mib` từ XML `nvidia-smi`, WMI `Win32_DeviceMemoryAddress`, giữ `rebar_capability_status: "unknown"` nếu không đọc được thanh ghi HW ReBAR Cap).
+    - `load_test`: chu kỳ `idle -> load -> recovery`, kết quả băng thông `H2D/D2H` (pinned/pageable, min/median/max), kiểm tra FP32 SAXPY (`math.IsNaN`/`IsInf` fail-closed), ngưỡng watchdog nhiệt/công suất/timeout, và tối đa 120 mẫu time-series (bản đầy đủ lưu cục bộ vào `*-timeseries.json` và `timeseries-full.json` trong ZIP).
+    - `stability`: truy vấn Event Log `System` có giới hạn cửa sổ thời gian cho `Microsoft-Windows-WHEA-Logger` (ID 17/18/19) và `nvlddmkm` (ID 13/14/153) + `Display` (ID 4101), phân tách `permission_denied`, `out_of_window`, `other_gpu`, `non_pcie_whea`, `unattributed`.
+    - `comparison`: ghép cặp với báo cáo trước trong cùng `experiment_id`, khớp danh tính GPU ngay cả khi BDF dịch chuyển (từ chối nếu có ≥ 2 GPU giống hệt nhau gây mơ hồ), kiểm tra thứ tự `stage` (`baseline -> before_unlock -> after_unlock -> troubleshooting`), phát hiện yếu tố gây nhiễu (`driver`, `vbios`, `bios`, `riser`, `slot`, `method`, `pinned_host`, `transfer_size_mb`, `iterations`), tính `deltas` tương thích và chỉ nâng `evidence_level = "compared"` khi mọi điều kiện đạt chuẩn.
 
 ### 2.2. Cấu trúc GitHub Issue Chuẩn hóa (Sau P1 Issue Enhancement)
 
@@ -136,26 +141,30 @@ Mỗi GitHub Issue được tạo bởi `renderSummary()` (qua Worker) và bản
 1. **Triển khai Cloudflare Worker:**
    - Đã chạy `pnpm dlx wrangler deploy` trong `worker/vga-reports`.
    - **URL triển khai:** `https://cmp-vga-reports.wellynguyen.workers.dev`
-   - **Version ID mới nhất:** `9dc489d9-4359-41ad-b6ab-8f57f94b9399` (`TARGET_REPO = "ngthaihoc/vga-report-sandbox"`, đã bao gồm giao diện Issue 4 lớp + sửa bảng GFM).
-   - Endpoint `/healthz` trả về `{"ok":true,"time":...}` (HTTP 200).
-2. **Kiểm thử đầu cuối trực tiếp (Live E2E Verification):**
-   - **Lần gửi P1 mới (`Issue #4`):** Gửi từ `Collect_VGA_Report.bat` chế độ UX 1 bước (`69cbe3b4-...`), kiểm chứng lọc PII đệ quy và không tạo file `experiment_id.txt`.
-   - **Lần gửi P2 mới (`Issue #5`):** Gửi từ `Collect_VGA_Report.bat -RunLoadTest` (`27f5116a-...`), xác minh [Issue #5](https://github.com/ngthaihoc/vga-report-sandbox/issues/5) nâng cấp mức bằng chứng `observed` (`4/7` nhóm đạt `ok`), đo được thực tế trên RTX 2070: `H2D=12.03 GB/s, D2H=12.59 GB/s (64 MiB, pinned=True)` và `CUDA PTX FP32 OK (41.93 GFLOPS, CC 7.5)`.
+   - **Version ID mới nhất:** `4952fa18-5e50-4661-b761-16177bbaf7bf` (`TARGET_REPO = "ngthaihoc/vga-report-sandbox"`, bao gồm `GET /v1/capabilities` và phần render `topology`/`load_test`/`stability`/`comparison`).
+   - Endpoint `/healthz` trả về `{"ok":true,"time":...}` (HTTP 200) và `/v1/capabilities` trả `schema_versions:[1,2]`, `v2_extensions:["topology","load_test","stability","comparison"]`.
+2. **Kiểm thử đầu cuối & Thử nghiệm ghép đôi tham chiếu RTX 2070:**
+   - **Sandbox GitHub Issues:** `#4` (P1) và `#5` (`27f5116a-...`, P2 `observed`, `H2D=12.03 GB/s`, `D2H=12.59 GB/s`, `41.93 GFLOPS`).
+   - **Thử nghiệm ghép đôi 2 lần (cục bộ offline trên RTX 2070, 2026-11-22):** chạy `Collect_VGA_Report.bat -RunLoadTest -KeepHistory -DetailedContext -SaveOnly -IdleSec 2 -LoadSec 4 -RecoverySec 2` cùng `vgabench.exe` cạnh BAT:
+     - Lần 1 (`before_unlock`, `d32bab00-6446-44d4-80da-d1dd21acdb1e`): `evidence_level = "observed"`, `H2D = 13.23 GB/s`, `D2H = 13.34 GB/s`, `FP32 = 40.2 GFLOPS`, `9` mẫu time-series, `stability = ok`, `comparison = skipped`.
+     - Lần 2 (`after_unlock`, `8d5a20a3-e4e4-46e0-857b-3c66a6df9ef8`, cùng `experiment_id = 2fd2a5a6-948f-4c73-accf-4577dddd4001`): `evidence_level = "compared"`, `previous_report_id = d32bab00-...`, `comparison.status = "ok"`, `deltas`: `pcie_gen_idle=0`, `h2d_median_gbps=-0.1`, `d2h_median_gbps=-0.26`, `fp32_gflops=0.88`, `bar1_total_mib=0`.
+     - Cả 2 báo cáo đạt `validateReport ok=true`, `findPii=[]` trên Node (`report.cjs`). `topology` giữ `partial` (thiếu `tls`, `aspm_hw_state`, `rebar_capability` vì không đọc thanh ghi HW trực tiếp ở user-mode) và `compute` giữ `partial` trên RTX 2070 (`tensor_applicable=unknown`).
 
 ---
 
-## 4. Ma trận Kiểm chứng & Kết quả Thử nghiệm
+## 4. Ma trận Kiểm chứng & Nghiệm thu Phần cứng
 
-Tất cả các bộ kiểm thử cục bộ và đầu cuối đều đạt 100% PASS:
-
-| Bộ kiểm tra | Lệnh thực thi | Kết quả | Ghi chú |
+| Đối tượng / Bộ kiểm tra | Phạm vi / Lệnh thực thi | Trạng thái | Ghi chú |
 | :--- | :--- | :---: | :--- |
-| **Shared Validator & Worker Unit Tests** | `node --test scripts/vga-report/report.test.cjs worker/vga-reports/test/worker.test.cjs` | **55/55 PASS** | Kiểm tra validator, allowlist, PII, schema v1/v2, cấu trúc Issue 4 lớp, bảng GFM 2 cột, HMAC, rate limit |
-| **Collector PowerShell Test Suite** | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-VGA-Collector.ps1` | **42/42 PASS** | Bổ sung test `-KeepHistory` opt-in, `Redact-ReportObject` giữ nguyên schema, và mock P2 `vgabench` |
-| **Real CMD Smoke Test** | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-VGA-Collector-Batch.ps1` | **4/4 PASS** | Chạy BAT thật chế độ 1 bước trong cmd.exe, xác nhận không tạo tệp theo dõi mặc định |
-| **P2 Helper Go Tests & Vet (`vgabench`)** | `Push-Location windows-v3.0/tools/vgabench; go test -cover ./...; go vet ./...` | **5/5 PASS** | Pure Go + `nvcuda.dll` + embedded PTX (`sm_50`), mock `CudaDriver` (coverage 44.8%) |
-| **Telemetry Test** | `node --test windows-v3.0/tools/aio/tests/telemetry.test.cjs` | **1/1 PASS** | Đảm bảo không xung đột với telemetry hiện hữu |
-| **Git Diff Format Check** | `git diff --check` | **0 errors** | Đảm bảo không có lỗi trailing whitespace hoặc định dạng CRLF |
+| **Shared Validator & Worker & Telemetry** | `pnpm exec node --test scripts/vga-report/report.test.cjs worker/vga-reports/test/worker.test.cjs windows-v3.0/tools/aio/tests/telemetry.test.cjs` | **58/58 PASS** | Validator v1/v2, Phase 2/3 sections, Worker `/v1/capabilities`, AIO telemetry |
+| **Collector PowerShell Test Suite** | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Test-VGA-Collector.ps1` | **52/52 PASS** | PII/offline, `System32` loader, timeout, topology, stability, load workflow, comparison |
+| **Real CMD Smoke Test** | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Test-VGA-Collector-Batch.ps1` | **6/6 PASS** | BOM/CRLF, save, placeholder offline, exit, `-SaveOnly`, 2-run `-KeepHistory -DetailedContext` |
+| **P2 Helper Go (`vgabench`)** | `windows-v3.0/tools/vgabench`: `go test -cover ./...`, `go vet ./...`, `go build ./...` | **10/10 PASS (46.6%)** | Pure Go + `System32\nvcuda.dll`, `-duration-ms`, check non-finite FP32 |
+| **RTX 2070 (`10DE:1F07`)** | Máy tham chiếu + Sandbox | **Verified Reference** | Đạt `observed` & `compared` 2 lần ghép đôi; không đại diện cho card CMP |
+| **CMP 30HX (`10DE:2189`)** | `Collect_VGA_Report.bat` + `vgabench.exe` + Gen2/reboot/sleep | **`pending_hardware`** | Chưa gắn card thật để nghiệm thu |
+| **CMP 40HX (`10DE:1F0B`)** | `Collect_VGA_Report.bat` + `vgabench.exe` + Tensor/BAR1 | **`pending_hardware`** | Chưa gắn card thật để nghiệm thu |
+| **P106-100 / P106-090 (`10DE:1C07`/`10DE:1C09`)** | `Collect_VGA_Report.bat` + `vgabench.exe` | **`pending_hardware`** | Chưa gắn card thật để nghiệm thu |
+| **Tesla P100 PCIe (`10DE:15F8`/`15F7`)** | `Collect_VGA_Report.bat` + `vgabench.exe` | **`pending_hardware`** | Chưa gắn card thật để nghiệm thu |
 
 ---
 
@@ -201,28 +210,14 @@ Khi tiếp tục phát triển hệ thống hoặc chuyển sang các pha tiếp
 
 ---
 
-## 7. Lộ trình Triển khai Tiếp theo: Pha P2 (Đo Dưới Tải & So sánh Diff)
+## 7. Hạng mục còn lại & Điều kiện chuyển Production
 
-Sau khi P0 và P1 đã hoàn thành và xác minh ổn định, giai đoạn tiếp theo cần triển khai là **P2 — Đo Idle/Load và So sánh Đối chứng**:
+Phần lớn kiến trúc P2 & P3 đã được triển khai trên nhánh `feat/vga-report-phase2-3`. Các hạng mục còn chờ trước khi mở PR vào `main`, chuyển `TARGET_REPO` sang `ngthaihoc/CMP30HXmodtoGEN2`, hoặc phát hành release:
 
-### 7.1. Các mục tiêu cụ thể trong P2
-1. **Module đo tải nhẹ và an toàn (Controlled Load Benchmark):**
-   - Đo trạng thái nhàn rỗi (Idle) trong 10 giây (lấy mẫu xung nhịp, công suất, nhiệt độ, PCIe link speed).
-   - Chạy tải kiểm tra có kiểm soát (Load) tối đa 30 giây (copy bộ nhớ Host-to-Device / Device-to-Host, kernel tính toán cơ bản).
-   - Đo thời gian phục hồi (Recovery) trong 10 giây.
-   - **Cơ chế Watchdog:** Tự động ngắt tải ngay lập tức nếu nhiệt độ vượt ngưỡng an toàn hoặc GPU gặp sự cố TDR.
-2. **Đo Băng thông PCIe thực tế (H2D / D2H Bandwidth):**
-   - Đo tốc độ truyền dữ liệu qua bộ nhớ pinned (GB/s) theo cả 2 chiều H2D và D2H để phát hiện nghẽn ở khe cắm, riser hoặc cấu hình PCIe Gen.
-3. **Kiểm tra Tính đúng đắn của Tính toán (Compute & Tensor Correctness):**
-   - Kiểm tra khả năng thực thi kernel CUDA FP32 cơ bản.
-   - Đối với dòng card hỗ trợ (hoặc cần kiểm chứng Tensor như CMP 40HX): chạy kernel matrix multiplication tương ứng để xác định khả năng tính toán thực tế thay vì chỉ nhìn vào thông số quảng cáo.
-4. **Bộ phân tích So sánh Trước/Sau (Diff Analyzer):**
-   - So sánh giữa 2 báo cáo (dựa vào `previous_report_id` hoặc chọn 2 báo cáo local) để chỉ ra thay đổi về xung nhịp, PCIe speed, nhiệt độ và công suất trước và sau khi áp dụng mod.
-
-### 7.2. Các quyết định cần chủ dự án phê duyệt trước khi lập trình P2
-- **Tên và vị trí đặt công cụ helper CUDA:** Dự kiến đặt mã nguồn helper dưới `windows-v3.0/tools/` (ví dụ `windows-v3.0/tools/vga-benchmark/` hoặc tích hợp vào `40hxcore`).
-- **Hình thức phân phối binary helper:** Chỉ đóng gói sẵn file thực thi kèm hash kiểm tra SHA-256 hay cho phép tải về từ GitHub Release đã ký?
-- **Ngưỡng nhiệt độ và công suất an toàn:** Thiết lập ngưỡng dừng khẩn cấp cho từng dòng card (ví dụ: ngắt benchmark nếu GPU temp > 85°C hoặc VRAM temp > 105°C).
+1. **Nghiệm thu phần cứng đích (`pending_hardware`):** Chạy `Collect_VGA_Report.bat -RunLoadTest -KeepHistory -DetailedContext` trên máy có `CMP 30HX`, `CMP 40HX`, `P106-100`/`090`, và `Tesla P100 PCIe` (bao gồm chu kỳ trước/sau unlock và sau reboot/sleep-wake).
+2. **Đo thanh ghi phần cứng cấp thấp (chờ phần cứng & quyết định phân quyền):** Nếu cần đưa `topology.rebar_capability_status`, `tls`, hoặc `aspm.endpoint_link_control` từ `partial` sang `ok`, cần tích hợp đọc an toàn có xác nhận từ `40hxcore`/driver thay cho user-mode BAT thuần túy.
+3. **Kiểm tra Tensor chuyên biệt (`tensor_check`):** Xem xét bổ sung kernel kiểm tra Tensor thực tế cho kiến trúc Turing/Volta nếu cần nâng `compute` lên `ok` trên card có `tensor_applicable != "no"`.
+4. **Rà soát PR & Merge:** Chờ review liên-agent trên nhánh `feat/vga-report-phase2-3`, giữ nguyên 6 `.exe` sản xuất trên `main` và chỉ đóng gói `vgabench.exe` qua CI release hoặc phê duyệt rõ ràng.
 
 ---
 *Tài liệu được khởi tạo và chuẩn hóa bởi hệ thống Antigravity Context Engineering.*

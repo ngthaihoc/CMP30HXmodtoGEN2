@@ -138,3 +138,17 @@ Chạy trong thư mục `worker/vga-reports/`:
 
 ### Nâng cấp gói Cloudflare
 Nếu lưu lượng cộng đồng tiến gần **1.000 KV writes/ngày**, đo số ghi thực tế (gồm lỗi và thao tác quản trị) trong Cloudflare trước khi nâng gói hoặc tăng `DAILY_CAP`. Workers Paid không loại bỏ giới hạn ghi cùng khóa hay biến KV thành bộ đếm nguyên tử; cần đánh giá lại kiến trúc khi tải tăng.
+
+---
+
+## 4. Vận hành Collector Phase 2 & 3 (`vgabench`, Topology, Stability, Comparison)
+
+- **Các cờ CLI của `Collect_VGA_Report.bat`:**
+  - Mặc định 1 bước: chỉ đọc thông tin cơ bản + topology + cửa sổ stability ngắn, không tạo `experiment_id.txt` / `last_report_id.txt`.
+  - `-SaveOnly`: lưu JSON, `-summary.txt` và `.zip` cục bộ, thoát ngay (0 request mạng).
+  - `-SelectGpu`: hiện menu chọn GPU mục tiêu khi có ≥ 2 GPU.
+  - `-DetailedContext`: hỏi thêm `mod_state`, `mod_type`, `riser`, `slot`, `stage`, `notes`.
+  - `-KeepHistory`: bật chuỗi thử nghiệm (`experiment_id.txt` + `last_report_id.txt` cập nhật nguyên tử chỉ sau khi đóng gói `.zip` thành công), tự động ghép đối chứng (`comparison`) và nâng `evidence_level = "compared"` khi khớp điều kiện tải.
+  - `-RunLoadTest` (tùy chọn `-IdleSec N -LoadSec N -RecoverySec N`, mặc định `10 / 30 / 10`): kích hoạt `vgabench.exe` (tìm theo thứ tự `windows-v3.0\release\vgabench.exe`, `vgabench.exe` cùng thư mục với BAT, `windows-v3.0\tools\vgabench\vgabench.exe`), nạp `nvcuda.dll` chỉ từ `System32`, theo dõi nhiệt/công suất và ghi tối đa 120 mẫu lên báo cáo từ xa (bản đầy đủ lưu cục bộ vào `*-timeseries.json` và `timeseries-full.json` trong ZIP).
+- **Endpoint kiểm tra khả năng Worker:** `GET /healthz` (`{"ok":true,"time":...}`) và `GET /v1/capabilities` (`{"ok":true,"schema_versions":[1,2],"v2_extensions":["topology","load_test","stability","comparison"]}`).
+- **Tách biệt Sandbox và Production:** Sandbox đang trỏ `TARGET_REPO = "ngthaihoc/vga-report-sandbox"`. Chỉ chuyển sang `ngthaihoc/CMP30HXmodtoGEN2` và tạo release sau khi hoàn tất nghiệm thu trên phần cứng CMP/mining thực tế.

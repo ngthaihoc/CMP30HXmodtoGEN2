@@ -13,8 +13,14 @@ function Assert-True {
 }
 
 function Invoke-BatchScenario {
-    param([string]$Name, [string]$Action)
-    $scenarioDir = Join-Path $testRoot ($Name + " Báo cáo & thử (x16) 'vga' !")
+    param(
+        [string]$Name,
+        [string]$Action,
+        [string]$ExtraArgs = '',
+        [string[]]$StdinLines = @(),
+        [string]$ExistingScenarioDir = $null
+    )
+    $scenarioDir = if ($ExistingScenarioDir) { $ExistingScenarioDir } else { Join-Path $testRoot ($Name + " Báo cáo & thử (x16) 'vga' !") }
     [void][IO.Directory]::CreateDirectory($scenarioDir)
     $copyPath = Join-Path $scenarioDir 'Collect_VGA_Report.bat'
     # Test the real entrypoint with public deployment constants forced offline.
@@ -23,9 +29,10 @@ function Invoke-BatchScenario {
     Assert-True ([regex]::Matches($copyText, $keyPattern).Count -eq 1) 'exactly one signing key assignment'
     $copyText = [regex]::Replace($copyText, $keyPattern, { '$script:SigningKey = ''REPLACE_WITH_SMOKE_TEST_SIGNING_KEY''' })
     [IO.File]::WriteAllText($copyPath, $copyText, $utf8)
+    $argTail = if ([string]::IsNullOrWhiteSpace($ExtraArgs)) { '' } else { ' ' + $ExtraArgs.Trim() }
     $start = New-Object Diagnostics.ProcessStartInfo
     $start.FileName = $env:ComSpec
-    $start.Arguments = '/d /s /c ""' + $copyPath + '""'
+    $start.Arguments = '/d /s /c ""' + $copyPath + '"' + $argTail + '"'
     $start.WorkingDirectory = $scenarioDir
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
@@ -42,7 +49,8 @@ function Invoke-BatchScenario {
         [void]$proc.Start()
         $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
         $stderrTask = $proc.StandardError.ReadToEndAsync()
-        foreach ($answer in @($Action, 'K')) {
+        $linesToFeed = if ($StdinLines.Count -gt 0 -or $null -eq $Action) { $StdinLines } else { @($Action, 'K') }
+        foreach ($answer in $linesToFeed) {
             $proc.StandardInput.WriteLine($answer)
         }
         $proc.StandardInput.Close()
@@ -53,8 +61,8 @@ function Invoke-BatchScenario {
         }
         $stdout = $stdoutTask.GetAwaiter().GetResult()
         $stderr = $stderrTask.GetAwaiter().GetResult()
-        [IO.File]::WriteAllText((Join-Path $scenarioDir 'stdout.txt'), $stdout, $utf8)
-        [IO.File]::WriteAllText((Join-Path $scenarioDir 'stderr.txt'), $stderr, $utf8)
+        [IO.File]::WriteAllText((Join-Path $scenarioDir "stdout-$Name.txt"), $stdout, $utf8)
+        [IO.File]::WriteAllText((Join-Path $scenarioDir "stderr-$Name.txt"), $stderr, $utf8)
         Assert-True ($proc.ExitCode -eq 0) "BAT exit=$($proc.ExitCode); stderr=$stderr"
         Assert-True ([string]::IsNullOrWhiteSpace($stderr)) "unexpected stderr: $stderr"
         Assert-True ($stdout.Contains('THU THẬP BÁO CÁO CHẨN ĐOÁN VGA')) 'accented UTF-8 menu is displayed'
@@ -110,6 +118,38 @@ try {
     Assert-True (@(Get-ChildItem -LiteralPath $exitResult.OutDir -Filter '*.zip' -File -ErrorAction SilentlyContinue).Count -eq 0) 'exit does not save report archive'
     Write-Host 'PASS batch_exit_does_not_execute_powershell_tail'
     $passed += 1
+
+    $saveOnlyRes = Invoke-BatchScenario -Name 'saveonly' -Action $null -ExtraArgs '-SaveOnly' -StdinLines @()
+    Assert-True ($saveOnlyRes.Output.Contains('Đã lưu báo cáo cục bộ tại:')) '-SaveOnly saves without prompting'
+    Assert-True (-not $saveOnlyRes.Output.Contains('Nhập lựa chọn (1/2/3)')) '-SaveOnly skips action prompt'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $saveOnlyRes.OutDir 'experiment_id.txt'))) '-SaveOnly preserves default zero history files'
+    Write-Host 'PASS batch_save_only_offline_no_prompt'
+    $passed += 1
+
+    $hist1 = Invoke-BatchScenario -Name 'hist1' -Action $null -ExtraArgs '-KeepHistory -DetailedContext -SaveOnly' -StdinLines @('1', '1', '1', '1', '1', 'baseline smoke')
+    $expFile = Join-Path $hist1.OutDir 'experiment_id.txt'
+    $ptrFile = Join-Path $hist1.OutDir 'last_report_id.txt'
+    Assert-True (Test-Path -LiteralPath $expFile) '-KeepHistory creates experiment_id.txt'
+    Assert-True (Test-Path -LiteralPath $ptrFile) '-KeepHistory creates last_report_id.txt'
+    $r1File = @(Get-ChildItem -LiteralPath $hist1.OutDir -Filter 'vga-report-*.json' -File | Where-Object { $_.Name -notlike '*.pending.json' -and $_.Name -notlike '*-timeseries.json' })[0]
+    $r1Obj = [IO.File]::ReadAllText($r1File.FullName, $utf8) | ConvertFrom-Json
+    Assert-True ($r1Obj.context.mod_state -eq 'stock' -and $r1Obj.context.stage -eq 'before_unlock') '-DetailedContext records run 1 context'
+
+    $hist2 = Invoke-BatchScenario -Name 'hist2' -Action $null -ExtraArgs '-KeepHistory -DetailedContext -SaveOnly' -StdinLines @('2', '3', '1', '1', '2', 'after efi smoke') -ExistingScenarioDir $hist1.Dir
+    $r2File = @(Get-ChildItem -LiteralPath $hist2.OutDir -Filter 'vga-report-*.json' -File | Where-Object { $_.Name -notlike '*.pending.json' -and $_.Name -notlike '*-timeseries.json' } | Sort-Object LastWriteTimeUtc -Descending)[0]
+    $r2Obj = [IO.File]::ReadAllText($r2File.FullName, $utf8) | ConvertFrom-Json
+    Assert-True ($r2Obj.experiment_id -eq $r1Obj.experiment_id) 'paired run retains experiment_id'
+    Assert-True ($r2Obj.previous_report_id -eq $r1Obj.report_id) 'paired run links previous_report_id'
+    Assert-True ($null -ne $r2Obj.comparison) 'paired run attaches comparison block'
+    Assert-True ($r2Obj.comparison.experiment_matched -and $r2Obj.comparison.stage_order_valid) 'paired run validates experiment and forward stage'
+    Assert-True ($r2Obj.comparison.stage_transition -eq 'before_unlock -> after_unlock') 'stage_transition matches'
+    Assert-True (([IO.File]::ReadAllText($ptrFile, $utf8).Trim()) -eq $r2Obj.report_id) 'last_report_id updated to run 2'
+    $reportCjs = Join-Path $repoRoot 'scripts\vga-report\report.cjs'
+    $nodeCheck = & node -e "const fs=require('fs'), r=require(process.argv[1]), d=JSON.parse(fs.readFileSync(process.argv[2],'utf8')); const v=r.validateReport(d), p=r.findPii(d); if(!v.ok || p.length){ console.log(JSON.stringify({v,p})); process.exit(1); }" $reportCjs $r2File.FullName
+    Assert-True ($LASTEXITCODE -eq 0) "Node schema/PII validation passed for paired BAT report: $nodeCheck"
+    Write-Host 'PASS batch_keep_history_detailed_context_pairs_two_runs'
+    $passed += 1
+
     Write-Host "Summary: Passed=$passed Failed=0 (real host read-only; CMP acceptance remains pending)"
 } catch {
     Write-Host "FAIL batch_smoke: $($_.Exception.Message)"
