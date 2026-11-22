@@ -1052,7 +1052,7 @@ function renderSummary(report) {
   lines.push('| Lớp phân tích | Dữ liệu quan sát được |');
   lines.push('| --- | --- |');
   const layer1Text = targetGpu
-    ? `${formatField(targetGpu.name)} (\`${formatField(targetGpu.vendor_id)}:${formatField(targetGpu.device_id)}\`, Subsys \`${formatField(targetGpu.subsystem_id)}\`, Rev \`${formatField(targetGpu.revision)}\`) | Hồ sơ: ${targetProfileDetails && targetProfileDetails.name ? escapeMarkdown(targetProfileDetails.name) : 'chưa nhận diện'} | Kiến trúc: ${targetProfileDetails && targetProfileDetails.family ? escapeMarkdown(targetProfileDetails.family) : 'unknown'} | Loại: ${targetProfileDetails && targetProfileDetails.category ? escapeMarkdown(targetProfileDetails.category) : 'unknown'} | Mục tiêu: ${targetProfileDetails && targetProfileDetails.target_pcie_gen ? `Gen${escapeMarkdown(targetProfileDetails.target_pcie_gen)}` : 'chưa đặt'} | Tensor: ${targetProfileDetails && targetProfileDetails.tensor_applicable ? escapeMarkdown(targetProfileDetails.tensor_applicable) : 'unknown'}`
+    ? `${formatField(targetGpu.name)} (\`${formatField(targetGpu.vendor_id)}:${formatField(targetGpu.device_id)}\`, Subsys \`${formatField(targetGpu.subsystem_id)}\`, Rev \`${formatField(targetGpu.revision)}\`) · Hồ sơ: ${targetProfileDetails && targetProfileDetails.name ? escapeMarkdown(targetProfileDetails.name) : 'chưa nhận diện'} · Kiến trúc: ${targetProfileDetails && targetProfileDetails.family ? escapeMarkdown(targetProfileDetails.family) : 'unknown'} · Loại: ${targetProfileDetails && targetProfileDetails.category ? escapeMarkdown(targetProfileDetails.category) : 'unknown'} · Mục tiêu: ${targetProfileDetails && targetProfileDetails.target_pcie_gen ? `Gen${escapeMarkdown(targetProfileDetails.target_pcie_gen)}` : 'chưa đặt'} · Tensor: ${targetProfileDetails && targetProfileDetails.tensor_applicable ? escapeMarkdown(targetProfileDetails.tensor_applicable) : 'unknown'}`
     : 'Chưa xác định GPU mục tiêu';
   const secSummary = isPlainObject(report.security)
     ? `Boot=${formatField(report.security.boot_mode)}, SecureBoot=${formatField(report.security.secure_boot)}, HVCI=${formatField(report.security.hvci_running)}, TestSigning=${formatField(report.security.test_signing)}`
@@ -1066,12 +1066,12 @@ function renderSummary(report) {
       : 'không có log cục bộ')
     : 'n/a (v1)';
   const ctxSummary = `mod=${escapeMarkdown(ctx.mod_state || 'unknown')}/${escapeMarkdown(ctx.mod_type || 'unknown')}, riser=${escapeMarkdown(ctx.riser || 'unknown')}, slot=${escapeMarkdown(ctx.slot || 'unknown')}, stage=${escapeMarkdown(ctx.stage || 'unknown')}`;
-  const layer2Text = `${secSummary} | ${drvSummary} | Legacy: ${legacySummary} | Ngữ cảnh: ${ctxSummary}`;
+  const layer2Text = `${secSummary} · ${drvSummary} · Legacy: ${legacySummary} · Ngữ cảnh: ${ctxSummary}`;
   const powerSnap = nvExt
     ? `${formatField(nvFields['power.draw'])} / Enforced ${formatField(nvExt['enforced.power.limit'])} / Default ${formatField(nvExt['power.default_limit'])} / Max ${formatField(nvExt['power.max_limit'])}`
     : formatField(nvFields['power.draw']);
   const clkThermalSnap = `P-State=${formatField(nvFields['pstate'])}, SM=${formatField(nvFields['clocks.sm'])}/${formatField(nvFields['clocks.max.sm'])}, Mem=${formatField(nvFields['clocks.mem'])}, Temp=${formatField(nvFields['temperature.gpu'])}${nvExt ? `, Fan=${formatField(nvExt['fan.speed'])}, Throttle=${formatField(nvExt['clocks_throttle_reasons.active'])}` : ''}`;
-  const layer3Text = `PCIe (${pcieSource}): ${pnpCurLink} (max ${pnpMaxLink}) | nvidia-smi: ${nvCurLink} (max ${nvMaxLink}) | Cơ bản: ${okCount}/${NVIDIA_REQUIRED_FIELDS.length}${nvExt ? ` | Mở rộng: ${extOkCount}/${NVIDIA_EXTENDED_FIELDS.length}` : ''} | Power: ${powerSnap} | ${clkThermalSnap}`;
+  const layer3Text = `PCIe (${pcieSource}): ${pnpCurLink} (max ${pnpMaxLink}) · nvidia-smi: ${nvCurLink} (max ${nvMaxLink}) · Cơ bản: ${okCount}/${NVIDIA_REQUIRED_FIELDS.length}${nvExt ? ` · Mở rộng: ${extOkCount}/${NVIDIA_EXTENDED_FIELDS.length}` : ''} · Power: ${powerSnap} · ${clkThermalSnap}`;
   let layer4Text = `Mức bằng chứng: \`${escapeMarkdown(report.evidence_level || 'reported')}\` (Schema v1 không có bảng completeness 7 nhóm)`;
   if (isPlainObject(report.completeness)) {
     let compOkCount = 0;
@@ -1084,7 +1084,7 @@ function renderSummary(report) {
         incompleteGroups.push(groupName);
       }
     }
-    layer4Text = `Mức bằng chứng: \`${escapeMarkdown(report.evidence_level || 'reported')}\` | Nhóm đạt ok: \`${compOkCount}/${COMPLETENESS_GROUPS.length}\`${incompleteGroups.length > 0 ? ` | Chưa đủ/chờ: ${incompleteGroups.map((g) => `\`${escapeMarkdown(g)}\``).join(', ')}` : ''}`;
+    layer4Text = `Mức bằng chứng: \`${escapeMarkdown(report.evidence_level || 'reported')}\` · Nhóm đạt ok: \`${compOkCount}/${COMPLETENESS_GROUPS.length}\`${incompleteGroups.length > 0 ? ` · Chưa đủ/chờ: ${incompleteGroups.map((g) => `\`${escapeMarkdown(g)}\``).join(', ')}` : ''}`;
   }
   lines.push(`| **1. Nhận diện (Identity)** | ${layer1Text} |`);
   lines.push(`| **2. Cấu hình & Môi trường (Config)** | ${layer2Text} |`);

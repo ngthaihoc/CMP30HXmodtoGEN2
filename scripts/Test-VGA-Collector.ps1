@@ -1469,6 +1469,51 @@ Invoke-TestCase 'privacy_redact_report_object_scrubs_mutated_pii_before_save_and
     }
 }
 
+Invoke-TestCase 'p2_load_bench_updates_completeness_and_evidence_level' {
+    function Invoke-VgaBenchRaw {
+        param([string]$TargetBdf)
+        return '{"status":"ok","bdf":"0000:02:00.0","device_name":"NVIDIA CMP 40HX","compute_capability":"7.5","driver_version":13050,"transfer_size_mb":64,"iterations":5,"pinned_host":true,"h2d_bandwidth_gbps":5.82,"d2h_bandwidth_gbps":6.14,"fp32_kernel_ok":true,"fp32_gflops":75.5,"duration_ms":320}'
+    }
+    $expDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-p2-" + [guid]::NewGuid())
+    try {
+        [void][IO.Directory]::CreateDirectory($expDir)
+        $inv = @([pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:02:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '1F0B'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA CMP 40HX'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+        })
+        $ctx = [pscustomobject]@{ mod_state = 'modded'; mod_type = 'efi'; riser = 'direct'; slot = 'cpu_x16'; stage = 'after_unlock'; notes = '' }
+        $benchOk = Get-VgaBenchInfo -TargetBdf '0000:02:00.0'
+        $repOk = New-Report -Inventory $inv -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctx -ExperimentDir $expDir -LoadBench $benchOk
+        Assert-Equal $repOk.evidence_level 'observed' 'P2 ok upgrades evidence_level to observed'
+        Assert-Equal $repOk.completeness.link_load.status 'ok' 'link_load marked ok'
+        Assert-Equal $repOk.completeness.compute.status 'ok' 'compute marked ok'
+        Assert-True ($repOk.completeness.link_load.reason.Contains('5.82 GB/s')) 'H2D bandwidth recorded in link_load reason'
+        Assert-True ($repOk.completeness.compute.reason.Contains('75.5 GFLOPS')) 'FP32 GFLOPS recorded in compute reason'
+
+        $savedOk = Save-LocalReport -Report $repOk -Dir $expDir
+        $nodeOut = & node -e "const fs=require('fs'), r=require(process.argv[1]), d=JSON.parse(fs.readFileSync(process.argv[2],'utf8')); const v=r.validateReport(d), p=r.findPii(d); if(!v.ok || p.length){ console.log(JSON.stringify({v,p})); process.exit(1); }" $reportCjsPath $savedOk.JsonPath
+        Assert-Equal $LASTEXITCODE 0 "P2 ok report passes schema validation: $nodeOut"
+
+        function Invoke-VgaBenchRaw {
+            param([string]$TargetBdf)
+            return '{"status":"timeout","bdf":"0000:02:00.0","reason":"watchdog_timeout_during_pcie_copy"}'
+        }
+        $benchTo = Get-VgaBenchInfo -TargetBdf '0000:02:00.0'
+        $repTo = New-Report -Inventory $inv -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctx -ExperimentDir $expDir -LoadBench $benchTo
+        Assert-Equal $repTo.evidence_level 'reported' 'P2 timeout keeps evidence_level=reported'
+        Assert-Equal $repTo.completeness.link_load.status 'error' 'timeout mapped to schema-valid error status'
+        Assert-Equal $repTo.completeness.link_load.reason 'watchdog_timeout_during_pcie_copy' 'timeout reason recorded'
+    } finally {
+        Remove-Item -LiteralPath $expDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Host "Summary: Passed=$script:Passed Failed=$script:Failed"
 if ($script:Failed -gt 0) { exit 1 }
 exit 0

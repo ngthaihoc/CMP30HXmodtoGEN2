@@ -696,6 +696,11 @@ test('renderSummary_v2_includes_4_layer_summary_experiment_window_profile_detail
   assert.ok(summary.includes('2026-11-21T07:00:00Z'));
   assert.ok(summary.includes('2026-11-21T07:00:03Z'));
   assert.ok(summary.includes('Tóm tắt 4 lớp kết luận tách biệt'));
+  for (const layerNum of ['1. Nhận diện', '2. Cấu hình', '3. Trạng thái đo', '4. Workload']) {
+    const row = summary.split('\n').find((l) => l.includes(layerNum));
+    assert.ok(row, `Missing row for ${layerNum}`);
+    assert.equal(row.split('|').length - 1, 3, `Row must keep 2 GFM columns (3 pipes): ${row}`);
+  }
   assert.ok(summary.includes('TU106'));
   assert.ok(summary.includes('cmp'));
   assert.ok(summary.includes('Gen2'));

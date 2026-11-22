@@ -1349,6 +1349,64 @@ function Save-LastReportId {
     }
 }
 
+function Invoke-VgaBenchRaw {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetBdf,
+        [int]$SizeMB = 64,
+        [int]$Iterations = 5,
+        [int]$TimeoutMs = 15000
+    )
+    $rootDir = if (-not [string]::IsNullOrWhiteSpace($env:VGA_BAT_DIR)) { $env:VGA_BAT_DIR } else { (Get-Location).Path }
+    $exeCandidates = @(
+        (Join-Path $rootDir 'windows-v3.0\release\vgabench.exe'),
+        (Join-Path $rootDir 'windows-v3.0\tools\vgabench\vgabench.exe')
+    )
+    $exePath = $null
+    foreach ($c in $exeCandidates) {
+        if (Test-Path -LiteralPath $c -PathType Leaf) {
+            $exePath = $c
+            break
+        }
+    }
+    $toolDir = Join-Path $rootDir 'windows-v3.0\tools\vgabench'
+    $argsList = @('-bdf', $TargetBdf, '-size-mb', "$SizeMB", '-iters', "$Iterations", '-timeout-ms', "$TimeoutMs")
+    try {
+        if ($exePath) {
+            $out = & $exePath @argsList 2>$null
+            return ($out -join "`n")
+        }
+        $goCmd = Get-Command go -ErrorAction SilentlyContinue
+        if ($goCmd -and (Test-Path -LiteralPath (Join-Path $toolDir 'main.go') -PathType Leaf)) {
+            Push-Location $toolDir
+            try {
+                $out = & $goCmd.Source run . @argsList 2>$null
+                return ($out -join "`n")
+            } finally {
+                Pop-Location
+            }
+        }
+    } catch {
+        return (@{ status = 'error'; reason = $_.Exception.Message } | ConvertTo-Json -Compress)
+    }
+    return $null
+}
+
+function Get-VgaBenchInfo {
+    param([AllowNull()][string]$TargetBdf)
+    if ([string]::IsNullOrWhiteSpace($TargetBdf)) {
+        return [pscustomobject]@{ status = 'skipped'; reason = 'missing_target_bdf' }
+    }
+    $raw = Invoke-VgaBenchRaw -TargetBdf $TargetBdf
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        return [pscustomobject]@{ status = 'unsupported'; reason = 'vgabench_helper_not_found' }
+    }
+    try {
+        return ($raw | ConvertFrom-Json)
+    } catch {
+        return [pscustomobject]@{ status = 'error'; reason = 'invalid_vgabench_json' }
+    }
+}
+
 function New-Report {
     param(
         [Parameter(Mandatory = $false)]$Inventory,
@@ -1359,7 +1417,8 @@ function New-Report {
         [Parameter(Mandatory = $false)]$Security = $null,
         [AllowNull()][string]$LegacyStatusDir = $null,
         [AllowNull()][string]$CollectionStartedUtc = $null,
-        [switch]$KeepHistory
+        [switch]$KeepHistory,
+        [Parameter(Mandatory = $false)]$LoadBench = $null
     )
     $startedUtc = if (-not [string]::IsNullOrWhiteSpace($CollectionStartedUtc)) { $CollectionStartedUtc } else { (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
     $invArray = @($Inventory)
@@ -1499,12 +1558,38 @@ function New-Report {
         }
     }
 
+    $truncateReason = {
+        param([string]$Txt)
+        $clean = Remove-Pii -Text $Txt
+        if ($clean.Length -gt 200) { return $clean.Substring(0, 200) }
+        return $clean
+    }
+
+    $evidenceLevel = 'reported'
+    $linkLoadEntry = & $newCompEntry $false 'skipped' @('h2d_d2h', 'load_timeseries') 'Chưa chạy bài thử tải GPU (chế độ P2)'
+    $computeEntry = & $newCompEntry $false 'skipped' @('cuda_runtime', 'tensor_check') 'Chưa chạy helper kiểm tra tính toán/Tensor (chế độ P2)'
+    if ($null -ne $LoadBench) {
+        if ($LoadBench.status -eq 'ok' -and $LoadBench.fp32_kernel_ok -eq $true) {
+            $evidenceLevel = 'observed'
+            $loadReason = & $truncateReason ("H2D=$($LoadBench.h2d_bandwidth_gbps) GB/s, D2H=$($LoadBench.d2h_bandwidth_gbps) GB/s ($($LoadBench.transfer_size_mb) MiB, pinned=$($LoadBench.pinned_host))")
+            $compReason = & $truncateReason ("CUDA PTX FP32 OK ($($LoadBench.fp32_gflops) GFLOPS, CC $($LoadBench.compute_capability))")
+            $linkLoadEntry = & $newCompEntry $true 'ok' @() $loadReason
+            $computeEntry = & $newCompEntry $true 'ok' @() $compReason
+        } else {
+            $bStatus = if ($LoadBench.status -in @('ok', 'partial', 'skipped', 'unsupported', 'error')) { [string]$LoadBench.status } else { 'error' }
+            if ($bStatus -eq 'ok') { $bStatus = 'error' }
+            $bReason = if ($LoadBench.reason) { & $truncateReason ([string]$LoadBench.reason) } else { "vgabench status=$bStatus" }
+            $linkLoadEntry = & $newCompEntry $false $bStatus @('h2d_d2h') $bReason
+            $computeEntry = & $newCompEntry $false $bStatus @('cuda_runtime', 'fp32_kernel') $bReason
+        }
+    }
+
     $completeness = [ordered]@{
         inventory  = (& $newCompEntry ($invMissing.Count -eq 0) $(if ($invMissing.Count -eq 0) { 'ok' } elseif ($invArray.Count -gt 0) { 'partial' } else { 'error' }) $invMissing.ToArray() $(if ($invMissing.Count -eq 0) { '' } else { 'Một hoặc nhiều GPU lỗi đọc thuộc tính PnP' }))
         topology   = (& $newCompEntry $false 'partial' @('upstream_root_port', 'tls', 'aspm', 'rebar_capability') 'Chế độ cơ bản P1 chưa đọc topology upstream và PCIe BAR (chờ P3)')
         link_idle  = (& $newCompEntry $linkIdleOk $(if ($linkIdleOk) { 'ok' } else { 'partial' }) $linkIdleMissing.ToArray() $(if ($linkIdleOk) { '' } else { 'Thiếu một phần thông số link hoặc nvidia-smi cơ bản ở trạng thái nhàn rỗi' }))
-        link_load  = (& $newCompEntry $false 'skipped' @('h2d_d2h', 'load_timeseries') 'Chưa chạy bài thử tải GPU (chế độ P2)')
-        compute    = (& $newCompEntry $false 'skipped' @('cuda_runtime', 'tensor_check') 'Chưa chạy helper kiểm tra tính toán/Tensor (chế độ P2)')
+        link_load  = $linkLoadEntry
+        compute    = $computeEntry
         stability  = (& $newCompEntry $false 'skipped' @('whea_events', 'tdr_events') 'Chưa ghi cửa sổ ổn định dưới tải (chế độ P2)')
         comparison = (& $newCompEntry $false $(if ($prevReportId) { 'partial' } else { 'skipped' }) $compMissing.ToArray() $(if ($prevReportId) { 'Đã liên kết báo cáo trước nhưng chưa có dữ liệu đối chứng dưới tải' } else { 'Chưa có báo cáo trước trong experiment này' }))
     }
@@ -1525,7 +1610,7 @@ function New-Report {
         }
         experiment_id           = Get-OrCreateExperimentId -BaseDir $ExperimentDir -KeepHistory:$KeepHistory
         target_bdf              = $resolvedTargetBdf
-        evidence_level          = 'reported'
+        evidence_level          = $evidenceLevel
         consent                 = $true
         gpus                    = $gpuEntries.ToArray()
         nvidia                  = $nvBlock
@@ -2060,12 +2145,14 @@ function Start-CollectorInteractive {
         [switch]$SaveOnly,
         [switch]$KeepHistory,
         [switch]$DetailedContext,
-        [switch]$SelectGpu
+        [switch]$SelectGpu,
+        [switch]$RunLoadTest
     )
     $useSaveOnly = $SaveOnly -or ($env:VGA_SAVE_ONLY -eq '1')
     $useKeepHistory = $KeepHistory -or ($env:VGA_KEEP_HISTORY -eq '1')
     $useDetailedContext = $DetailedContext -or ($env:VGA_DETAILED_CONTEXT -eq '1')
     $useSelectGpu = $SelectGpu -or ($env:VGA_SELECT_GPU -eq '1')
+    $useRunLoadTest = $RunLoadTest -or ($env:VGA_RUN_LOAD_TEST -eq '1')
 
     Write-Host '================================================================'
     Write-Host '  THU THẬP BÁO CÁO CHẨN ĐOÁN VGA (CHỈ ĐỌC - KHÔNG GHI HỆ THỐNG)'
@@ -2195,8 +2282,14 @@ function Start-CollectorInteractive {
         }
     }
 
+    $loadBench = $null
+    if ($useRunLoadTest) {
+        Write-Host 'Đang chạy bài thử tải nhẹ P2 (vgabench CUDA Driver API / PCIe H2D-D2H)...'
+        $loadBench = Get-VgaBenchInfo -TargetBdf $targetBdf
+    }
+
     $outDir = if (-not [string]::IsNullOrWhiteSpace($env:VGA_BAT_DIR)) { Join-Path $env:VGA_BAT_DIR 'vga-reports-out' } else { Join-Path (Get-Location).Path 'vga-reports-out' }
-    $report = New-Report -Inventory $inventory -Nvidia $nvidia -Context $ctx -ExperimentDir $outDir -TargetBdf $targetBdf -CollectionStartedUtc $collectionStartedUtc -KeepHistory:$useKeepHistory
+    $report = New-Report -Inventory $inventory -Nvidia $nvidia -Context $ctx -ExperimentDir $outDir -TargetBdf $targetBdf -CollectionStartedUtc $collectionStartedUtc -KeepHistory:$useKeepHistory -LoadBench $loadBench
 
     $rawPreviewJson = $report | ConvertTo-Json -Depth 12
     [void](Redact-ReportObject -InputObject $report)

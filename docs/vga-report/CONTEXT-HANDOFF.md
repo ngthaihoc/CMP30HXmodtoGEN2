@@ -136,12 +136,11 @@ Mỗi GitHub Issue được tạo bởi `renderSummary()` (qua Worker) và bản
 1. **Triển khai Cloudflare Worker:**
    - Đã chạy `pnpm dlx wrangler deploy` trong `worker/vga-reports`.
    - **URL triển khai:** `https://cmp-vga-reports.wellynguyen.workers.dev`
-   - **Version ID:** `928f3b16-fb26-4720-b7d2-51842d5134d1`
+   - **Version ID mới nhất:** `9dc489d9-4359-41ad-b6ab-8f57f94b9399` (`TARGET_REPO = "ngthaihoc/vga-report-sandbox"`, đã bao gồm giao diện Issue 4 lớp + sửa bảng GFM).
    - Endpoint `/healthz` trả về `{"ok":true,"time":...}` (HTTP 200).
 2. **Kiểm thử đầu cuối trực tiếp (Live E2E Verification):**
-   - **Lần gửi 1 (Tạo mới):** Gửi báo cáo v2 thật (`report_id: 63554098-e4e0-434c-b88f-bf6b55ccec3d`) từ máy testbed RTX 2070. Worker trả về HTTP 201 `issue_created` và tạo thành công [Issue #2](https://github.com/ngthaihoc/vga-report-sandbox/issues/2).
-   - **Lần gửi 2 (Chống trùng lặp):** Gửi lại cùng payload báo cáo trên. Worker phát hiện trùng trong KV, không tiêu tốn hạn mức daily quota, trả về HTTP 200 `duplicate` kèm đúng link Issue #2.
-   - **Xác minh nội dung Issue #2:** Tiêu đề `[VGA Report] NVIDIA GeForce RTX 2070 (baseline)`, nhãn `vga-report`, `hardware-sample`, `unverified`, chứa bảng 18 trường mở rộng, thông tin bảo mật Windows và marker định danh.
+   - **Lần gửi P1 mới (`Issue #4`):** Gửi từ `Collect_VGA_Report.bat` chế độ UX 1 bước (`69cbe3b4-...`), kiểm chứng lọc PII đệ quy và không tạo file `experiment_id.txt`.
+   - **Lần gửi P2 mới (`Issue #5`):** Gửi từ `Collect_VGA_Report.bat -RunLoadTest` (`27f5116a-...`), xác minh [Issue #5](https://github.com/ngthaihoc/vga-report-sandbox/issues/5) nâng cấp mức bằng chứng `observed` (`4/7` nhóm đạt `ok`), đo được thực tế trên RTX 2070: `H2D=12.03 GB/s, D2H=12.59 GB/s (64 MiB, pinned=True)` và `CUDA PTX FP32 OK (41.93 GFLOPS, CC 7.5)`.
 
 ---
 
@@ -151,9 +150,10 @@ Tất cả các bộ kiểm thử cục bộ và đầu cuối đều đạt 100
 
 | Bộ kiểm tra | Lệnh thực thi | Kết quả | Ghi chú |
 | :--- | :--- | :---: | :--- |
-| **Shared Validator & Worker Unit Tests** | `node --test scripts/vga-report/report.test.cjs worker/vga-reports/test/worker.test.cjs` | **55/55 PASS** | Kiểm tra validator, allowlist, PII, schema v1/v2, cấu trúc Issue 4 lớp, chữ ký HMAC, rate limit |
-| **Collector PowerShell Test Suite** | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-VGA-Collector.ps1` | **39/39 PASS** | Kiểm tra mock CIM, PnP, NVIDIA-SMI, format tóm tắt mở rộng, security, v2 structure |
-| **Real CMD Smoke Test** | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-VGA-Collector-Batch.ps1` | **4/4 PASS** | Chạy BAT thật trong cmd.exe với đường dẫn có dấu, ký tự đặc biệt |
+| **Shared Validator & Worker Unit Tests** | `node --test scripts/vga-report/report.test.cjs worker/vga-reports/test/worker.test.cjs` | **55/55 PASS** | Kiểm tra validator, allowlist, PII, schema v1/v2, cấu trúc Issue 4 lớp, bảng GFM 2 cột, HMAC, rate limit |
+| **Collector PowerShell Test Suite** | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-VGA-Collector.ps1` | **42/42 PASS** | Bổ sung test `-KeepHistory` opt-in, `Redact-ReportObject` giữ nguyên schema, và mock P2 `vgabench` |
+| **Real CMD Smoke Test** | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-VGA-Collector-Batch.ps1` | **4/4 PASS** | Chạy BAT thật chế độ 1 bước trong cmd.exe, xác nhận không tạo tệp theo dõi mặc định |
+| **P2 Helper Go Tests & Vet (`vgabench`)** | `Push-Location windows-v3.0/tools/vgabench; go test -cover ./...; go vet ./...` | **5/5 PASS** | Pure Go + `nvcuda.dll` + embedded PTX (`sm_50`), mock `CudaDriver` (coverage 44.8%) |
 | **Telemetry Test** | `node --test windows-v3.0/tools/aio/tests/telemetry.test.cjs` | **1/1 PASS** | Đảm bảo không xung đột với telemetry hiện hữu |
 | **Git Diff Format Check** | `git diff --check` | **0 errors** | Đảm bảo không có lỗi trailing whitespace hoặc định dạng CRLF |
 
@@ -172,6 +172,7 @@ Tất cả các bộ kiểm thử cục bộ và đầu cuối đều đạt 100
 - `worker/vga-reports/wrangler.toml`: Cấu hình Cloudflare Worker, KV binding và biến môi trường.
 - `scripts/Test-VGA-Collector.ps1`: Unit test cho các hàm PowerShell bên trong collector.
 - `scripts/Test-VGA-Collector-Batch.ps1`: Integration test chạy `Collect_VGA_Report.bat` qua `cmd.exe`.
+- `windows-v3.0/tools/vgabench/`: Công cụ Go thuần (`nvcuda.dll` + PTX nhúng sẵn, không cần cài CUDA Toolkit) đo băng thông PCIe H2D/D2H và kiểm tra tính đúng FP32 cho P2 (`-RunLoadTest`).
 - `docs/vga-report/modding-data-plan.md`: Kế hoạch dữ liệu modding từ P0 đến P5.
 - `docs/vga-report/runbook.md` & `docs/vga-report/policy.md`: Tài liệu vận hành và chính sách bảo mật/quyền riêng tư.
 
