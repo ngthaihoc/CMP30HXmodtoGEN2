@@ -431,6 +431,51 @@ function Get-RawPnpDeviceProperties {
     }
 }
 
+function Get-RawPnpDeviceByInstanceId {
+    param([string]$InstanceId)
+    if ([string]::IsNullOrWhiteSpace($InstanceId)) { return $null }
+    try {
+        return (Get-PnpDevice -InstanceId $InstanceId -ErrorAction Stop | Select-Object -First 1 InstanceId, FriendlyName, Status)
+    } catch {
+        return $null
+    }
+}
+
+function Get-RawPowerCfgAspm {
+    try {
+        $run = Invoke-ExternalCommandWithTimeout -FilePath 'powercfg.exe' -Arguments @('/query', 'SCHEME_CURRENT', 'SUB_PCIEXPRESS') -TimeoutMs 5000
+        if ($run -and -not $run.TimedOut -and $run.ExitCode -eq 0) {
+            return ([string]$run.Output)
+        }
+    } catch {}
+    return $null
+}
+
+function Get-RawNvidiaXml {
+    $exe = Find-NvidiaSmiExecutable
+    if (-not $exe) { return $null }
+    try {
+        $run = Invoke-ExternalCommandWithTimeout -FilePath $exe -Arguments @('-q', '-x') -TimeoutMs 8000
+        if ($run -and -not $run.TimedOut -and $run.ExitCode -eq 0) {
+            return ([string]$run.Output)
+        }
+    } catch {}
+    return $null
+}
+
+function Get-RawCimDeviceMemoryRanges {
+    param([AllowNull()][string]$PnpDeviceId)
+    if ([string]::IsNullOrWhiteSpace($PnpDeviceId)) { return @() }
+    try {
+        $escapedId = $PnpDeviceId.Replace('\', '\\').Replace('''', '\''')
+        $ent = Get-CimInstance -ClassName 'Win32_PnPEntity' -Filter "PNPDeviceID='$escapedId'" -ErrorAction Stop | Select-Object -First 1
+        if ($ent) {
+            return @(Get-CimAssociatedInstance -InputObject $ent -ResultClassName 'Win32_DeviceMemoryAddress' -ErrorAction Stop | Select-Object StartingAddress, EndingAddress)
+        }
+    } catch {}
+    return @()
+}
+
 function Get-RawPlatformInfo {
     $cpuName = $null
     $board = $null
@@ -642,6 +687,7 @@ function Get-VgaInventory {
                     current_width = if ($propErr -and $null -eq $curW) { New-ReportField -Value $null -Source 'pnp' -Unit 'lanes' -Status $pcieStatus } else { New-ReportField -Value $curW -Source 'pnp' -Unit 'lanes' }
                 }
                 nvidia         = $null
+                instance_id    = $rec.InstanceId
             }
         } catch {
             $gpus += [pscustomobject]@{
@@ -669,6 +715,7 @@ function Get-VgaInventory {
                     current_width = New-ReportField -Value $null -Source 'pnp' -Unit 'lanes' -Status 'error'
                 }
                 nvidia         = $null
+                instance_id    = $rec.InstanceId
             }
         }
     }
@@ -1544,6 +1591,283 @@ function Get-VgaBenchInfo {
     }
 }
 
+function Convert-PcieSizeCodeToBytes {
+    param($Code)
+    if ($null -eq $Code) { return $null }
+    $iv = 0
+    if ([int]::TryParse([string]$Code, [ref]$iv) -and $iv -ge 0 -and $iv -le 5) {
+        return [int](128 * [Math]::Pow(2, $iv))
+    }
+    return $null
+}
+
+function Parse-MibString {
+    param([AllowNull()][string]$Raw)
+    if ([string]::IsNullOrWhiteSpace($Raw)) { return $null }
+    if ($Raw -match '([0-9]+(?:\.[0-9]+)?)\s*(MiB|GiB)?') {
+        $v = [double]::Parse($Matches[1], [System.Globalization.CultureInfo]::InvariantCulture)
+        if ($Matches[2] -eq 'GiB') { $v = $v * 1024.0 }
+        return [int][Math]::Round($v)
+    }
+    return $null
+}
+
+function Get-PcieTopologyInfo {
+    param([Parameter(Mandatory = $false)]$TargetGpu)
+    $collectedUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    $targetBdf = if ($TargetGpu -and $TargetGpu.bdf -and $TargetGpu.bdf.status -eq 'ok') {
+        Normalize-Bdf -BusId ([string]$TargetGpu.bdf.value)
+    } else {
+        $null
+    }
+    $startId = if ($TargetGpu -and (Get-ObjProp $TargetGpu 'instance_id')) { [string](Get-ObjProp $TargetGpu 'instance_id') } else { $null }
+
+    $chain = New-Object System.Collections.ArrayList
+    $visited = New-Object 'System.Collections.Generic.HashSet[string]'
+    $curId = $startId
+    $gpuPropMap = @{}
+    $hop = 0
+
+    while (-not [string]::IsNullOrWhiteSpace($curId) -and $hop -lt 10) {
+        if (-not $visited.Add($curId.ToUpperInvariant())) { break }
+        $devObj = Get-RawPnpDeviceByInstanceId -InstanceId $curId
+        $props = @(Get-RawPnpDeviceProperties -InstanceId $curId)
+        $pMap = @{}
+        foreach ($pr in $props) {
+            if ($pr -and $pr.KeyName) { $pMap[$pr.KeyName] = $pr.Data }
+        }
+        if ($hop -eq 0) { $gpuPropMap = $pMap }
+
+        $ids = Parse-PciIdsFromInstanceId -InstanceId $curId
+        $nodeBdf = $null
+        if ($pMap.ContainsKey('DEVPKEY_Device_BusNumber') -and $null -ne $pMap['DEVPKEY_Device_BusNumber'] -and $pMap.ContainsKey('DEVPKEY_Device_Address') -and $null -ne $pMap['DEVPKEY_Device_Address']) {
+            $bNum = [int]$pMap['DEVPKEY_Device_BusNumber']
+            $aVal = [int]$pMap['DEVPKEY_Device_Address']
+            $dNum = ($aVal -shr 16) -band 0x1F
+            $fNum = $aVal -band 0x07
+            $nodeBdf = ('0000:{0:x2}:{1:x2}.{2}' -f $bNum, $dNum, $fNum)
+        } elseif ($hop -eq 0) {
+            $nodeBdf = $targetBdf
+        }
+
+        $dtCode = if ($pMap.ContainsKey('DEVPKEY_PciDevice_DeviceType') -and $null -ne $pMap['DEVPKEY_PciDevice_DeviceType']) { [int]$pMap['DEVPKEY_PciDevice_DeviceType'] } else { -1 }
+        $devType = 'unknown'
+        if ($curId -like 'ACPI\*') {
+            $devType = 'root_complex'
+        } else {
+            switch ($dtCode) {
+                5 { $devType = 'endpoint' }
+                11 { $devType = 'upstream_switch' }
+                12 { $devType = 'downstream_switch' }
+                13 { $devType = 'root_port' }
+                default {
+                    if ($hop -eq 0) { $devType = 'endpoint' }
+                    elseif ($devObj -and $devObj.FriendlyName -match '(?i)Root Port') { $devType = 'root_port' }
+                    elseif ($devObj -and $devObj.FriendlyName -match '(?i)Bridge|Switch') { $devType = 'bridge' }
+                }
+            }
+        }
+        $parentId = if ($pMap.ContainsKey('DEVPKEY_Device_Parent') -and -not [string]::IsNullOrWhiteSpace([string]$pMap['DEVPKEY_Device_Parent'])) { [string]$pMap['DEVPKEY_Device_Parent'] } else { $null }
+        if ($hop -gt 0 -and $devType -eq 'bridge' -and $parentId -like 'ACPI\*') {
+            $devType = 'root_port'
+        }
+
+        $role = if ($hop -eq 0) {
+            'endpoint'
+        } elseif ($devType -eq 'root_port') {
+            'root_port'
+        } elseif ($devType -eq 'root_complex') {
+            'root_complex'
+        } else {
+            'bridge_or_switch'
+        }
+
+        $nMaxG = if ($pMap.ContainsKey('DEVPKEY_PciDevice_MaxLinkSpeed') -and [int]$pMap['DEVPKEY_PciDevice_MaxLinkSpeed'] -gt 0) { [int]$pMap['DEVPKEY_PciDevice_MaxLinkSpeed'] } else { $null }
+        $nCurG = if ($pMap.ContainsKey('DEVPKEY_PciDevice_CurrentLinkSpeed') -and [int]$pMap['DEVPKEY_PciDevice_CurrentLinkSpeed'] -gt 0) { [int]$pMap['DEVPKEY_PciDevice_CurrentLinkSpeed'] } else { $null }
+        $nMaxW = if ($pMap.ContainsKey('DEVPKEY_PciDevice_MaxLinkWidth') -and [int]$pMap['DEVPKEY_PciDevice_MaxLinkWidth'] -gt 0) { [int]$pMap['DEVPKEY_PciDevice_MaxLinkWidth'] } else { $null }
+        $nCurW = if ($pMap.ContainsKey('DEVPKEY_PciDevice_CurrentLinkWidth') -and [int]$pMap['DEVPKEY_PciDevice_CurrentLinkWidth'] -gt 0) { [int]$pMap['DEVPKEY_PciDevice_CurrentLinkWidth'] } else { $null }
+
+        $nodeName = if ($devObj -and $devObj.FriendlyName) { Remove-Pii -Text ([string]$devObj.FriendlyName) } elseif ($hop -eq 0 -and $TargetGpu -and $TargetGpu.name -and $TargetGpu.name.status -eq 'ok') { [string]$TargetGpu.name.value } else { $null }
+        if ($nodeName -and $nodeName.Length -gt 200) { $nodeName = $nodeName.Substring(0, 200) }
+        $nodeStatus = if ($pMap.Count -gt 0 -or $devObj) { 'ok' } else { 'unsupported' }
+
+        [void]$chain.Add([ordered]@{
+            role          = $role
+            bdf           = $nodeBdf
+            vendor_id     = $ids.Vendor
+            device_id     = $ids.Device
+            subsystem_id  = $ids.Subsys
+            revision      = $ids.Revision
+            name          = $nodeName
+            device_type   = $devType
+            source        = 'pnp'
+            status        = $nodeStatus
+            max_gen       = (New-ReportField -Value $nMaxG -Source 'pnp' -Unit 'gen')
+            current_gen   = (New-ReportField -Value $nCurG -Source 'pnp' -Unit 'gen')
+            max_width     = (New-ReportField -Value $nMaxW -Source 'pnp' -Unit 'lanes')
+            current_width = (New-ReportField -Value $nCurW -Source 'pnp' -Unit 'lanes')
+        })
+
+        $curId = $parentId
+        $hop += 1
+    }
+
+    $rpNode = $null
+    $bridgeHops = 0
+    foreach ($n in $chain) {
+        if ($n.role -eq 'root_port') { $rpNode = $n; break }
+        if ($n.role -eq 'bridge_or_switch') { $bridgeHops += 1 }
+    }
+    if ($rpNode) {
+        $rpReason = if ($bridgeHops -gt 0) {
+            "Đã nhận diện Root Port qua $bridgeHops nút bridge/switch trung gian; loại khe vật lý cần xác nhận"
+        } else {
+            'Đã nhận diện Root Port trực tiếp từ chuỗi cha PnP; loại khe vật lý cần xác nhận'
+        }
+        $rootPortObj = [ordered]@{
+            identified = $true
+            bdf        = $rpNode.bdf
+            vendor_id  = $rpNode.vendor_id
+            device_id  = $rpNode.device_id
+            name       = $rpNode.name
+            slot_type  = 'unknown'
+            source     = 'pnp'
+            reason     = $rpReason
+        }
+    } else {
+        $rootPortObj = [ordered]@{
+            identified = $false
+            bdf        = $null
+            vendor_id  = $null
+            device_id  = $null
+            name       = $null
+            slot_type  = 'unknown'
+            source     = 'pnp'
+            reason     = 'Không xác định được nút PCIe Root Port từ DEVPKEY_Device_Parent'
+        }
+    }
+
+    # ASPM policy via powercfg
+    $rawPowerCfg = Get-RawPowerCfgAspm
+    $schemeGuid = $null
+    $acPolicyField = New-ReportField -Value $null -Source 'powercfg' -Status 'unsupported'
+    $dcPolicyField = New-ReportField -Value $null -Source 'powercfg' -Status 'unsupported'
+    $mapAspmIdx = {
+        param([string]$HexIdx)
+        switch ($HexIdx.ToLowerInvariant()) {
+            '00000000' { return 'off' }
+            '00000001' { return 'moderate_power_savings' }
+            '00000002' { return 'maximum_power_savings' }
+            default { return "index_0x$HexIdx" }
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($rawPowerCfg)) {
+        if ($rawPowerCfg -match 'Power Scheme GUID:\s*([0-9a-fA-F-]+)') { $schemeGuid = $Matches[1].ToLowerInvariant() }
+        if ($rawPowerCfg -match 'Current AC Power Setting Index:\s*0x([0-9a-fA-F]+)') {
+            $acPolicyField = New-ReportField -Value (& $mapAspmIdx $Matches[1]) -Source 'powercfg'
+        }
+        if ($rawPowerCfg -match 'Current DC Power Setting Index:\s*0x([0-9a-fA-F]+)') {
+            $dcPolicyField = New-ReportField -Value (& $mapAspmIdx $Matches[1]) -Source 'powercfg'
+        }
+    }
+    $aspmObj = [ordered]@{
+        policy_scheme_guid    = $schemeGuid
+        policy_ac             = $acPolicyField
+        policy_dc             = $dcPolicyField
+        endpoint_link_control = New-ReportField -Value $null -Source 'pnp' -Status 'unsupported'
+        upstream_link_control = New-ReportField -Value $null -Source 'pnp' -Status 'unsupported'
+        policy_note           = 'Chính sách powercfg chỉ phản ánh cấu hình nguồn Windows; chưa đọc thanh ghi LnkCtl ASPM phần cứng.'
+    }
+
+    # MPS / MRRS / AER + nvidia-smi XML BAR1 & Replay
+    $mpsMax = if ($gpuPropMap.ContainsKey('DEVPKEY_PciDevice_MaxPayloadSize')) { Convert-PcieSizeCodeToBytes $gpuPropMap['DEVPKEY_PciDevice_MaxPayloadSize'] } else { $null }
+    $mpsCur = if ($gpuPropMap.ContainsKey('DEVPKEY_PciDevice_CurrentPayloadSize')) { Convert-PcieSizeCodeToBytes $gpuPropMap['DEVPKEY_PciDevice_CurrentPayloadSize'] } else { $null }
+    $mrrsCur = if ($gpuPropMap.ContainsKey('DEVPKEY_PciDevice_MaxReadRequestSize')) { Convert-PcieSizeCodeToBytes $gpuPropMap['DEVPKEY_PciDevice_MaxReadRequestSize'] } else { $null }
+    $aerPresent = if ($gpuPropMap.ContainsKey('DEVPKEY_PciDevice_AERCapabilityPresent') -and $null -ne $gpuPropMap['DEVPKEY_PciDevice_AERCapabilityPresent']) { [bool]$gpuPropMap['DEVPKEY_PciDevice_AERCapabilityPresent'] } else { $null }
+
+    $replayVal = $null; $replayRollVal = $null; $hostMaxGenVal = $null
+    $bar1Total = $null; $bar1Used = $null; $bar1Free = $null
+    $rawXml = Get-RawNvidiaXml
+    if (-not [string]::IsNullOrWhiteSpace($rawXml)) {
+        try {
+            [xml]$xDoc = $rawXml
+            $xGpus = @($xDoc.nvidia_smi_log.gpu)
+            $matchedX = $null
+            foreach ($xg in $xGpus) {
+                $xBdf = Normalize-Bdf -BusId ([string]$xg.pci.pci_bus_id)
+                if ($targetBdf -and $xBdf -eq $targetBdf) { $matchedX = $xg; break }
+            }
+            if (-not $matchedX -and $xGpus.Count -eq 1 -and (-not $targetBdf -or ($TargetGpu -and $TargetGpu.vendor_id -and $TargetGpu.vendor_id.value -eq '10DE'))) {
+                $matchedX = $xGpus[0]
+            }
+            if ($matchedX) {
+                $iv = 0
+                if ($matchedX.pci.replay_counter -and [int]::TryParse(([string]$matchedX.pci.replay_counter).Trim(), [ref]$iv)) { $replayVal = $iv }
+                if ($matchedX.pci.replay_rollover_counter -and [int]::TryParse(([string]$matchedX.pci.replay_rollover_counter).Trim(), [ref]$iv)) { $replayRollVal = $iv }
+                if ($matchedX.pci.pci_gpu_link_info -and $matchedX.pci.pci_gpu_link_info.pcie_gen -and $matchedX.pci.pci_gpu_link_info.pcie_gen.max_host_link_gen -and [int]::TryParse(([string]$matchedX.pci.pci_gpu_link_info.pcie_gen.max_host_link_gen).Trim(), [ref]$iv)) {
+                    $hostMaxGenVal = $iv
+                }
+                if ($matchedX.bar1_memory_usage) {
+                    $bar1Total = Parse-MibString ([string]$matchedX.bar1_memory_usage.total)
+                    $bar1Used = Parse-MibString ([string]$matchedX.bar1_memory_usage.used)
+                    $bar1Free = Parse-MibString ([string]$matchedX.bar1_memory_usage.free)
+                }
+            }
+        } catch {}
+    }
+
+    $pcieCapsObj = [ordered]@{
+        mps_supported_bytes     = New-ReportField -Value $mpsMax -Source 'pnp' -Unit 'bytes'
+        mps_current_bytes       = New-ReportField -Value $mpsCur -Source 'pnp' -Unit 'bytes'
+        mrrs_current_bytes      = New-ReportField -Value $mrrsCur -Source 'pnp' -Unit 'bytes'
+        aer_capable             = New-ReportField -Value $aerPresent -Source 'pnp'
+        replay_counter          = New-ReportField -Value $replayVal -Source 'nvidia-smi-xml' -Unit 'count'
+        replay_rollover_counter = New-ReportField -Value $replayRollVal -Source 'nvidia-smi-xml' -Unit 'count'
+        link_gen_host_max       = New-ReportField -Value $hostMaxGenVal -Source 'nvidia-smi-xml' -Unit 'gen'
+        tls_target              = New-ReportField -Value $null -Source 'pnp' -Unit 'gen' -Status 'unsupported'
+    }
+
+    $bars = New-Object System.Collections.ArrayList
+    $rawMem = @(Get-RawCimDeviceMemoryRanges -PnpDeviceId $startId)
+    $barIdx = 0
+    foreach ($rm in $rawMem) {
+        if ($barIdx -ge 16) { break }
+        if ($null -ne $rm -and $null -ne $rm.StartingAddress -and $null -ne $rm.EndingAddress) {
+            $sAddr = [double]$rm.StartingAddress
+            $eAddr = [double]$rm.EndingAddress
+            if ($eAddr -ge $sAddr) {
+                $szMib = [Math]::Round(($eAddr - $sAddr + 1.0) / 1048576.0, 2)
+                [void]$bars.Add([ordered]@{
+                    index    = $barIdx
+                    size_mib = $szMib
+                    above_4g = ($eAddr -gt 4294967295.0)
+                    source   = 'cim_memory'
+                })
+                $barIdx += 1
+            }
+        }
+    }
+
+    $rebarObj = [ordered]@{
+        bar1_total_mib          = New-ReportField -Value $bar1Total -Source 'nvidia-smi-xml' -Unit 'MiB'
+        bar1_used_mib           = New-ReportField -Value $bar1Used -Source 'nvidia-smi-xml' -Unit 'MiB'
+        bar1_free_mib           = New-ReportField -Value $bar1Free -Source 'nvidia-smi-xml' -Unit 'MiB'
+        allocated_memory_bars   = $bars.ToArray()
+        rebar_capability_status = 'unknown'
+        rebar_status_reason     = 'Chỉ đọc BAR1 Total từ nvidia-smi và tài nguyên bộ nhớ Windows; chưa đọc thanh ghi PCIe ReBAR Extended Capability.'
+    }
+
+    return [ordered]@{
+        target_bdf    = $targetBdf
+        collected_utc = $collectedUtc
+        upstream_chain= $chain.ToArray()
+        root_port     = $rootPortObj
+        aspm          = $aspmObj
+        pcie_caps     = $pcieCapsObj
+        rebar         = $rebarObj
+    }
+}
+
 function New-Report {
     param(
         [Parameter(Mandatory = $false)]$Inventory,
@@ -1555,7 +1879,8 @@ function New-Report {
         [AllowNull()][string]$LegacyStatusDir = $null,
         [AllowNull()][string]$CollectionStartedUtc = $null,
         [switch]$KeepHistory,
-        [Parameter(Mandatory = $false)]$LoadBench = $null
+        [Parameter(Mandatory = $false)]$LoadBench = $null,
+        [Parameter(Mandatory = $false)]$Topology = $null
     )
     $startedUtc = if (-not [string]::IsNullOrWhiteSpace($CollectionStartedUtc)) { $CollectionStartedUtc } else { (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
     $invArray = @($Inventory)
@@ -1741,9 +2066,31 @@ function New-Report {
         }
     }
 
+    $topoObj = $Topology
+    if ($null -eq $topoObj -and $primaryGpu -and (Get-ObjProp $primaryGpu 'instance_id')) {
+        $topoObj = Get-PcieTopologyInfo -TargetGpu $primaryGpu
+    }
+
+    $topoMissing = New-Object 'System.Collections.Generic.List[string]'
+    $topoReason = 'Chế độ cơ bản P1 chưa đọc topology upstream và PCIe BAR (chờ P3)'
+    if ($null -ne $topoObj) {
+        if (-not ($topoObj.root_port -and $topoObj.root_port.identified)) { [void]$topoMissing.Add('upstream_root_port') }
+        if (-not ($topoObj.pcie_caps -and $topoObj.pcie_caps.tls_target -and $topoObj.pcie_caps.tls_target.status -eq 'ok')) { [void]$topoMissing.Add('tls') }
+        if (-not ($topoObj.aspm -and $topoObj.aspm.endpoint_link_control -and $topoObj.aspm.endpoint_link_control.status -eq 'ok')) { [void]$topoMissing.Add('aspm_hw_state') }
+        if (-not ($topoObj.rebar -and $topoObj.rebar.rebar_capability_status -in @('enabled', 'disabled'))) { [void]$topoMissing.Add('rebar_capability') }
+        $rpTag = if ($topoObj.root_port -and $topoObj.root_port.identified) { "$($topoObj.root_port.vendor_id):$($topoObj.root_port.device_id)" } else { 'unknown' }
+        $topoReason = & $truncateReason ("RootPort=$rpTag, ASPM_AC=$($topoObj.aspm.policy_ac.value), MRRS=$($topoObj.pcie_caps.mrrs_current_bytes.value)B, BAR1=$($topoObj.rebar.bar1_total_mib.value)MiB (thiếu thanh ghi HW TLS/LnkCtl/ReBAR)")
+    } else {
+        [void]$topoMissing.Add('upstream_root_port')
+        [void]$topoMissing.Add('tls')
+        [void]$topoMissing.Add('aspm')
+        [void]$topoMissing.Add('rebar_capability')
+    }
+    $topoOk = ($topoMissing.Count -eq 0)
+
     $completeness = [ordered]@{
         inventory  = (& $newCompEntry ($invMissing.Count -eq 0) $(if ($invMissing.Count -eq 0) { 'ok' } elseif ($invArray.Count -gt 0) { 'partial' } else { 'error' }) $invMissing.ToArray() $(if ($invMissing.Count -eq 0) { '' } else { 'Một hoặc nhiều GPU lỗi đọc thuộc tính PnP' }))
-        topology   = (& $newCompEntry $false 'partial' @('upstream_root_port', 'tls', 'aspm', 'rebar_capability') 'Chế độ cơ bản P1 chưa đọc topology upstream và PCIe BAR (chờ P3)')
+        topology   = (& $newCompEntry $topoOk $(if ($topoOk) { 'ok' } else { 'partial' }) $topoMissing.ToArray() $topoReason)
         link_idle  = (& $newCompEntry $linkIdleOk $(if ($linkIdleOk) { 'ok' } else { 'partial' }) $linkIdleMissing.ToArray() $(if ($linkIdleOk) { '' } else { 'Thiếu một phần thông số link hoặc nvidia-smi cơ bản ở trạng thái nhàn rỗi' }))
         link_load  = $linkLoadEntry
         compute    = $computeEntry
@@ -1751,7 +2098,7 @@ function New-Report {
         comparison = (& $newCompEntry $false $(if ($prevReportId) { 'partial' } else { 'skipped' }) $compMissing.ToArray() $(if ($prevReportId) { 'Đã liên kết báo cáo trước nhưng chưa có dữ liệu đối chứng dưới tải' } else { 'Chưa có báo cáo trước trong experiment này' }))
     }
 
-    return [ordered]@{
+    $resultReport = [ordered]@{
         schema_version          = $script:SchemaVersion
         collector_version       = $script:CollectorVersion
         report_id               = [guid]::NewGuid().ToString()
@@ -1783,6 +2130,10 @@ function New-Report {
         legacy_status           = $legacyObj
         context                 = $ctxObj
     }
+    if ($null -ne $topoObj) {
+        $resultReport['topology'] = $topoObj
+    }
+    return $resultReport
 }
 
 function Get-ObjProp {
@@ -1981,6 +2332,34 @@ function Format-VietnameseSummary {
             [void]$sb.AppendLine("Trạng thái mở khóa cũ ($($leg.source)): $($leg.status_code) (error=$($leg.error_code), device_id=$devTxt, Gen$($leg.speed_current) ×$($leg.width_current), TLS=$($leg.tls_target), mrrs=$mrrsTxt)")
         } else {
             [void]$sb.AppendLine('Trạng thái mở khóa cũ: không phát hiện tệp trạng thái cục bộ (present=false)')
+        }
+    }
+
+    if ($Report.topology) {
+        $tp = $Report.topology
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine('--- Cấu trúc PCIe, ASPM, DMA & ReBAR ---')
+        if ($tp.root_port) {
+            $rp = $tp.root_port
+            [void]$sb.AppendLine("Root Port    : identified=$($rp.identified) | $($rp.name) ($($rp.vendor_id):$($rp.device_id)) | BDF=$($rp.bdf) | slot_type=$($rp.slot_type)")
+        }
+        if ($tp.aspm) {
+            $acVal = if ($tp.aspm.policy_ac -and $tp.aspm.policy_ac.status -eq 'ok') { $tp.aspm.policy_ac.value } else { 'unsupported' }
+            $dcVal = if ($tp.aspm.policy_dc -and $tp.aspm.policy_dc.status -eq 'ok') { $tp.aspm.policy_dc.value } else { 'unsupported' }
+            [void]$sb.AppendLine("ASPM (OS)    : AC=$acVal | DC=$dcVal (chính sách Windows, không phải thanh ghi LnkCtl)")
+        }
+        if ($tp.pcie_caps) {
+            $c = $tp.pcie_caps
+            $mpsM = if ($c.mps_supported_bytes -and $c.mps_supported_bytes.status -eq 'ok') { "$($c.mps_supported_bytes.value)B" } else { 'unsupported' }
+            $mpsC = if ($c.mps_current_bytes -and $c.mps_current_bytes.status -eq 'ok') { "$($c.mps_current_bytes.value)B" } else { 'unsupported' }
+            $mrrs = if ($c.mrrs_current_bytes -and $c.mrrs_current_bytes.status -eq 'ok') { "$($c.mrrs_current_bytes.value)B" } else { 'unsupported' }
+            $repC = if ($c.replay_counter -and $c.replay_counter.status -eq 'ok') { "$($c.replay_counter.value)" } else { 'unsupported' }
+            [void]$sb.AppendLine("DMA & Replay : MPS max=$mpsM | MPS cur=$mpsC | MRRS=$mrrs | Replay=$repC")
+        }
+        if ($tp.rebar) {
+            $rb = $tp.rebar
+            $b1 = if ($rb.bar1_total_mib -and $rb.bar1_total_mib.status -eq 'ok') { "$($rb.bar1_total_mib.value) MiB" } else { 'unsupported' }
+            [void]$sb.AppendLine("BAR1 & ReBAR : BAR1=$b1 | ReBAR=$($rb.rebar_capability_status) | $($rb.rebar_status_reason)")
         }
     }
 

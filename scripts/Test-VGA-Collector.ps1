@@ -1756,6 +1756,166 @@ Invoke-TestCase 'p2_helper_missing_invalid_json_bad_bdf_and_process_tree_timeout
     }
 }
 
+# =========================================================================
+# Phase 2 Task 2 RED Tests: Topology chain, Switch/Bridge, ASPM, MPS/MRRS, BAR1/ReBAR
+# =========================================================================
+
+Invoke-TestCase 'p2_topology_collects_switch_chain_root_port_aspm_caps_and_bar1_unknown_rebar' {
+    $gpuId = 'PCI\VEN_10DE&DEV_1F0B&SUBSYS_000010DE&REV_A1\5&AAAA&0&0008'
+    $swDownId = 'PCI\VEN_10B5&DEV_8747&REV_CA\4&BBBB&0&0808'
+    $rpId = 'PCI\VEN_8086&DEV_1901&SUBSYS_86941043&REV_07\3&11583659&0&08'
+    $otherGpuId = 'PCI\VEN_1002&DEV_1638&REV_C9\4&CCCC&0&0041'
+
+    function Get-RawPnpDeviceByInstanceId {
+        param([string]$InstanceId)
+        switch ($InstanceId) {
+            $gpuId { return [pscustomobject]@{ InstanceId = $gpuId; FriendlyName = 'NVIDIA CMP 40HX'; Status = 'OK' } }
+            $swDownId { return [pscustomobject]@{ InstanceId = $swDownId; FriendlyName = 'PLX PEX8747 Downstream Port'; Status = 'OK' } }
+            $rpId { return [pscustomobject]@{ InstanceId = $rpId; FriendlyName = 'Intel PCIe Root Port'; Status = 'OK' } }
+            default { return $null }
+        }
+    }
+    function Get-RawPnpDeviceProperties {
+        param([string]$InstanceId)
+        switch ($InstanceId) {
+            $gpuId {
+                return @(
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_Device_Parent'; Data = $swDownId },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_PciDevice_DeviceType'; Data = 5 },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_PciDevice_MaxPayloadSize'; Data = 1 },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_PciDevice_CurrentPayloadSize'; Data = 0 },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_PciDevice_MaxReadRequestSize'; Data = 2 },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_PciDevice_AERCapabilityPresent'; Data = $true },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_PciDevice_MaxLinkSpeed'; Data = 3 },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_PciDevice_CurrentLinkSpeed'; Data = 2 },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_PciDevice_MaxLinkWidth'; Data = 16 },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_PciDevice_CurrentLinkWidth'; Data = 16 },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_Device_BusNumber'; Data = 5 },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_Device_Address'; Data = 0 }
+                )
+            }
+            $swDownId {
+                return @(
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_Device_Parent'; Data = $rpId },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_PciDevice_DeviceType'; Data = 12 },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_Device_BusNumber'; Data = 3 },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_Device_Address'; Data = 524288 }
+                )
+            }
+            $rpId {
+                return @(
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_Device_Parent'; Data = 'ACPI\PNP0A08\0' },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_PciDevice_DeviceType'; Data = 13 },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_Device_BusNumber'; Data = 0 },
+                    [pscustomobject]@{ KeyName = 'DEVPKEY_Device_Address'; Data = 65536 }
+                )
+            }
+            default { return @() }
+        }
+    }
+    function Get-RawPowerCfgAspm {
+        return @"
+Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)
+  Subgroup GUID: 501a4d13-42af-4429-9fd1-a8218c268e20  (PCI Express)
+    Power Setting GUID: ee12f906-d277-404b-b6da-e5fa1a576df5  (Link State Power Management)
+    Current AC Power Setting Index: 0x00000002
+    Current DC Power Setting Index: 0x00000001
+"@
+    }
+    function Get-RawNvidiaXml {
+        return @"
+<?xml version="1.0" ?>
+<nvidia_smi_log>
+  <gpu id="00000000:05:00.0">
+    <pci>
+      <pci_bus_id>00000000:05:00.0</pci_bus_id>
+      <pci_gpu_link_info>
+        <pcie_gen><max_host_link_gen>3</max_host_link_gen></pcie_gen>
+      </pci_gpu_link_info>
+      <replay_counter>0</replay_counter>
+      <replay_rollover_counter>0</replay_rollover_counter>
+    </pci>
+    <bar1_memory_usage>
+      <total>8192 MiB</total>
+      <used>2 MiB</used>
+      <free>8190 MiB</free>
+    </bar1_memory_usage>
+  </gpu>
+</nvidia_smi_log>
+"@
+    }
+    function Get-RawCimDeviceMemoryRanges {
+        param([string]$PnpDeviceId)
+        return @(
+            [pscustomobject]@{ StartingAddress = 3758096384; EndingAddress = 4026531839 },
+            [pscustomobject]@{ StartingAddress = 8589934592; EndingAddress = 17179869183 }
+        )
+    }
+
+    $inv = @(
+        [pscustomobject]@{
+            instance_id = $otherGpuId
+            bdf = [pscustomobject]@{ value = '0000:00:02.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '1002'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '1638'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '88091043'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'C9'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'AMD Radeon Graphics'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '31.0.21921.1000'; source = 'cim'; unit = $null; status = 'ok' }
+        },
+        [pscustomobject]@{
+            instance_id = $gpuId
+            bdf = [pscustomobject]@{ value = '0000:05:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '1F0B'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA CMP 40HX'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+        }
+    )
+
+    $topo = Get-PcieTopologyInfo -TargetGpu $inv[1]
+    Assert-Equal $topo.root_port.identified $true 'root port identified behind switch'
+    Assert-Equal $topo.root_port.vendor_id '8086' 'root port VID 8086'
+    Assert-Equal $topo.root_port.device_id '1901' 'root port DID 1901'
+    Assert-True ($topo.upstream_chain.Count -ge 3) 'chain contains endpoint, switch, and root port'
+    Assert-Equal $topo.aspm.policy_ac.value 'maximum_power_savings' 'AC ASPM index 2'
+    Assert-Equal $topo.aspm.policy_dc.value 'moderate_power_savings' 'DC ASPM index 1'
+    Assert-Equal $topo.pcie_caps.mps_supported_bytes.value 256 'MPS max 256B'
+    Assert-Equal $topo.pcie_caps.mps_current_bytes.value 128 'MPS current 128B'
+    Assert-Equal $topo.pcie_caps.mrrs_current_bytes.value 512 'MRRS current 512B'
+    Assert-Equal $topo.pcie_caps.aer_capable.value $true 'AER capability parsed'
+    Assert-Equal $topo.pcie_caps.replay_counter.value 0 'replay_counter 0'
+    Assert-Equal $topo.rebar.bar1_total_mib.value 8192 'BAR1 8192 MiB parsed'
+    Assert-Equal $topo.rebar.rebar_capability_status 'unknown' 'BAR1 alone MUST keep ReBAR status unknown'
+    Assert-Equal $topo.rebar.allocated_memory_bars.Count 2 'WMI memory bars recorded'
+    Assert-True ($topo.rebar.allocated_memory_bars[1].above_4g) 'above_4g flag detected'
+
+    # Full report integrates topology cleanly and passes Node schema validator without leaking InstanceIds
+    $ctx = [pscustomobject]@{ mod_state = 'stock'; mod_type = 'none'; riser = 'direct'; slot = 'cpu_x16'; stage = 'baseline'; notes = '' }
+    $rep = New-Report -Inventory $inv -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctx -Topology $topo
+    Assert-Equal $rep.completeness.topology.status 'partial' 'topology remains partial without user-mode ReBAR ext cap/TLS'
+    Assert-True ($rep.completeness.topology.missing -contains 'rebar_capability') 'rebar_capability listed missing'
+    $json = $rep | ConvertTo-Json -Depth 12
+    Assert-True (-not $json.Contains('AAAA')) 'raw PnP InstanceId segment must not leak into payload'
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("vga-topo-" + [guid]::NewGuid() + ".json")
+    try {
+        [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false)))
+        $nodeOut = & node -e "const fs=require('fs'), r=require(process.argv[1]), d=JSON.parse(fs.readFileSync(process.argv[2],'utf8')); const v=r.validateReport(d), p=r.findPii(d); if(!v.ok || p.length){ console.log(JSON.stringify({v,p})); process.exit(1); }" $reportCjsPath $tmp
+        Assert-Equal $LASTEXITCODE 0 "Topology v2 report failed Node schema check: $nodeOut"
+    } finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+
+    # Missing parent chain case
+    function Get-RawPnpDeviceProperties { param([string]$InstanceId) return @() }
+    $topoMiss = Get-PcieTopologyInfo -TargetGpu $inv[1]
+    Assert-Equal $topoMiss.root_port.identified $false 'missing parent chain -> root_port.identified false'
+}
+
 Write-Host "Summary: Passed=$script:Passed Failed=$script:Failed"
 if ($script:Failed -gt 0) { exit 1 }
 exit 0
