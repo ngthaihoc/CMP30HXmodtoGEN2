@@ -788,7 +788,7 @@ function validateReport(report) {
 const PII_PATTERNS = [
   {
     name: 'path_user',
-    regex: /(?:[A-Za-z]:\\Users\\[^\\\s]+|\\\\[^\\\s]+\\[^\\\s]+|\/(?:home|Users)\/[^/\s]+|%USERPROFILE%)/i,
+    regex: /(?:[A-Za-z]:\\Users\\[^\\\r\n"']+|\\\\[^\\\r\n"']+\\[^\\\r\n"']+|\/(?:home|Users)\/[^/\r\n"']+|%USERPROFILE%)/i,
   },
   {
     name: 'mac',

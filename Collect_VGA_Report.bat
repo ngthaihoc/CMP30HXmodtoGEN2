@@ -203,9 +203,9 @@ function Remove-Pii {
     param([AllowNull()][string]$Text)
     if ($null -eq $Text -or $Text -eq '') { return '' }
     $out = $Text
-    $out = [regex]::Replace($out, '(?i)[A-Za-z]:\\Users\\[^\\\s"''<>|]+(?:\\[^\s"''<>|]*)*', '[PATH_USER]')
-    $out = [regex]::Replace($out, '(?i)\\\\[^\\\s"''<>|]+\\[^\\\s"''<>|]+(?:\\[^\s"''<>|]*)*', '[PATH_USER]')
-    $out = [regex]::Replace($out, '(?i)(?:^|(?<=[\s"'']))/(?:home|Users)/[^/\s"''<>|]+(?:/[^\s"''<>|]*)*', '[PATH_USER]')
+    $out = [regex]::Replace($out, '(?i)[A-Za-z]:\\{1,2}Users\\{1,2}(?:[^\\\r\n"''<>|]+\\{1,2})*(?:[^\s\\\r\n"''<>|]+(?:[ \t]+[^\s\\\r\n"''<>|.]+)*?\.[A-Za-z0-9]{1,8}(?=\s|$|["''<>|,;\)\]])|[^\\\r\n"''<>|]+?(?=["''<>|])|[^\s\\\r\n"''<>|]+)', '[PATH_USER]')
+    $out = [regex]::Replace($out, '(?i)(?<![A-Za-z]:)(?<!\\)\\{2}(?:\\{2})?[^\\\s\r\n"''<>|]+(?:[ \t]+[^\\\s\r\n"''<>|]+)*\\{1,2}(?:[^\\\r\n"''<>|]+\\{1,2})*(?:[^\s\\\r\n"''<>|]+(?:[ \t]+[^\s\\\r\n"''<>|.]+)*?\.[A-Za-z0-9]{1,8}(?=\s|$|["''<>|,;\)\]])|[^\\\r\n"''<>|]+?(?=["''<>|])|[^\s\\\r\n"''<>|]+)', '[PATH_USER]')
+    $out = [regex]::Replace($out, '(?i)(?:^|(?<=[\s"'':]))/(?:home|Users)/(?:[^/\r\n"''<>|]+/)*(?:[^\s/\r\n"''<>|]+(?:[ \t]+[^\s/\r\n"''<>|.]+)*?\.[A-Za-z0-9]{1,8}(?=\s|$|["''<>|,;\)\]])|[^/\r\n"''<>|]+?(?=["''<>|])|[^\s/\r\n"''<>|]+)', '[PATH_USER]')
     $out = [regex]::Replace($out, '(?i)%USERPROFILE%', '[PATH_USER]')
     $out = [regex]::Replace($out, '(?<![0-9a-fA-F:-])(?:[0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}(?![0-9a-fA-F:-])', '[MAC]')
     $out = [regex]::Replace($out, '(?<![\w:.])(?:[a-fA-F0-9]*:){2,}[a-fA-F0-9:.]*(?:%[a-zA-Z0-9_.~-]+)?', {
@@ -274,6 +274,68 @@ function Redact-ReportObject {
         return ,$InputObject
     }
     return $InputObject
+}
+
+function Test-ReportBasicValidity {
+    param($Report)
+    if ($null -eq $Report) { return $false }
+    if ($Report -isnot [System.Collections.IDictionary] -and $Report -isnot [pscustomobject]) {
+        return $false
+    }
+    $schemaVer = Get-ObjProp $Report 'schema_version'
+    if ($schemaVer -notin @(1, 2, [int64]1, [int64]2)) { return $false }
+    $uuidPattern = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+    $repId = Get-ObjProp $Report 'report_id'
+    $expId = Get-ObjProp $Report 'experiment_id'
+    if ([string]::IsNullOrWhiteSpace([string]$repId) -or ([string]$repId -notmatch $uuidPattern)) { return $false }
+    if ([string]::IsNullOrWhiteSpace([string]$expId) -or ([string]$expId -notmatch $uuidPattern)) { return $false }
+    $created = Get-ObjProp $Report 'created_utc'
+    if ([string]::IsNullOrWhiteSpace([string]$created)) { return $false }
+    $gpusProp = if ($Report -is [System.Collections.IDictionary]) {
+        if ($Report.Contains('gpus')) { [pscustomobject]@{ Exists = $true; Value = $Report['gpus'] } } else { $null }
+    } else {
+        $p = $Report.PSObject.Properties['gpus']
+        if ($p) { [pscustomobject]@{ Exists = $true; Value = $p.Value } } else { $null }
+    }
+    if ($null -eq $gpusProp -or $null -eq $gpusProp.Value) { return $false }
+    if ($gpusProp.Value -isnot [System.Collections.IList]) { return $false }
+    foreach ($reqKey in @('nvidia', 'pcie', 'platform', 'context')) {
+        if ($null -eq (Get-ObjProp $Report $reqKey)) { return $false }
+    }
+    return $true
+}
+
+function ConvertTo-SanitizedReportJson {
+    param([Parameter(Mandatory = $true)]$Report)
+    $obj = $Report
+    if ($Report -is [string]) {
+        try {
+            $obj = $Report | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            return [pscustomobject]@{
+                Ok       = $false
+                Object   = $null
+                JsonText = $null
+                Reason   = 'Báo cáo chờ cục bộ không phải JSON hợp lệ (đã giữ tệp trên máy, không gửi).'
+            }
+        }
+    }
+    if (-not (Test-ReportBasicValidity -Report $obj)) {
+        return [pscustomobject]@{
+            Ok       = $false
+            Object   = $null
+            JsonText = $null
+            Reason   = 'Báo cáo chờ cục bộ sai cấu trúc/schema cơ bản (đã giữ tệp trên máy, không gửi).'
+        }
+    }
+    [void](Redact-ReportObject -InputObject $obj)
+    $jsonText = Remove-Pii -Text ($obj | ConvertTo-Json -Depth 12)
+    return [pscustomobject]@{
+        Ok       = $true
+        Object   = $obj
+        JsonText = $jsonText
+        Reason   = $null
+    }
 }
 
 function New-ReportField {
@@ -1848,7 +1910,13 @@ function Save-LocalReport {
         [switch]$KeepHistory
     )
     [void][System.IO.Directory]::CreateDirectory($Dir)
-    [void](Redact-ReportObject -InputObject $Report)
+    $san = ConvertTo-SanitizedReportJson -Report $Report
+    if (-not $san.Ok) {
+        [void](Redact-ReportObject -InputObject $Report)
+        $jsonText = Remove-Pii -Text ($Report | ConvertTo-Json -Depth 12)
+    } else {
+        $jsonText = $san.JsonText
+    }
     $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
     $shortId = ([string]$Report.report_id).Split('-')[0]
     $baseName = "vga-report-$stamp-$shortId"
@@ -1858,7 +1926,6 @@ function Save-LocalReport {
     $zipPath = Join-Path -Path $Dir -ChildPath "$baseName.zip"
 
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    $jsonText = Remove-Pii -Text ($Report | ConvertTo-Json -Depth 12)
     $summaryText = Remove-Pii -Text (Format-VietnameseSummary -Report $Report)
 
     [System.IO.File]::WriteAllText($jsonPath, $jsonText, $utf8NoBom)
@@ -2036,7 +2103,11 @@ function Send-Report {
     $bodyText = $null
 
     if ($Report -is [string]) {
-        $bodyText = Remove-Pii -Text $Report
+        $san = ConvertTo-SanitizedReportJson -Report $Report
+        if (-not $san.Ok) {
+            return [pscustomobject]@{ Status = 'rejected_local'; IssueUrl = $null; Error = $san.Reason; RetryAfter = $null; PendingPath = $pendingPath }
+        }
+        $bodyText = $san.JsonText
     } else {
         [void](Redact-ReportObject -InputObject $Report)
         if (-not [string]::IsNullOrWhiteSpace($ReportDir)) {
@@ -2047,7 +2118,8 @@ function Send-Report {
                 [System.IO.File]::WriteAllText($pendingPath, $bodyText, $utf8NoBom)
             }
         } else {
-            $bodyText = Remove-Pii -Text ($Report | ConvertTo-Json -Depth 12)
+            $sanObj = ConvertTo-SanitizedReportJson -Report $Report
+            $bodyText = if ($sanObj.Ok) { $sanObj.JsonText } else { Remove-Pii -Text ($Report | ConvertTo-Json -Depth 12) }
         }
     }
 
@@ -2113,10 +2185,18 @@ function Send-Report {
 
 function Open-FallbackForm {
     param([Parameter(Mandatory = $true)]$Report)
-    $jsonText = if ($Report -is [string]) { $Report } else { $Report | ConvertTo-Json -Depth 12 }
+    $san = ConvertTo-SanitizedReportJson -Report $Report
+    if ($san.Ok) {
+        $jsonText = $san.JsonText
+    } elseif ($Report -is [string]) {
+        $jsonText = Remove-Pii -Text $Report
+    } else {
+        [void](Redact-ReportObject -InputObject $Report)
+        $jsonText = Remove-Pii -Text ($Report | ConvertTo-Json -Depth 12)
+    }
     try {
         Set-Clipboard -Value $jsonText -ErrorAction Stop
-        Write-Host 'Đã chép nội dung JSON báo cáo vào clipboard.'
+        Write-Host 'Đã chép nội dung JSON báo cáo đã lọc PII vào clipboard.'
     } catch {
         Write-Host 'Không chép được tự động vào clipboard; vui lòng sao chép từ tệp JSON cục bộ.'
     }
@@ -2166,25 +2246,6 @@ function Start-CollectorInteractive {
     Write-Host ''
 
     $outDir = if (-not [string]::IsNullOrWhiteSpace($env:VGA_BAT_DIR)) { Join-Path $env:VGA_BAT_DIR 'vga-reports-out' } else { Join-Path (Get-Location).Path 'vga-reports-out' }
-    if (Test-Path -LiteralPath $outDir) {
-        $pendingFiles = @(Get-ChildItem -LiteralPath $outDir -Filter '*.pending.json' -File -ErrorAction SilentlyContinue)
-        if ($pendingFiles.Count -gt 0) {
-            Write-Host "[PHÁT HIỆN] Có $($pendingFiles.Count) báo cáo đang chờ gửi lại trong: $outDir"
-            $resendChoice = Read-Host 'Bạn có muốn thử gửi lại các báo cáo này trước không? (C/K, mặc định K)'
-            if ($resendChoice -match '^(c|co|có|y|yes)$') {
-                foreach ($pf in $pendingFiles) {
-                    $rawPending = [System.IO.File]::ReadAllText($pf.FullName, [System.Text.Encoding]::UTF8)
-                    $resendRes = Send-Report -Report $rawPending -ExistingPendingPath $pf.FullName -KeepHistory:$useKeepHistory
-                    if ($resendRes.Status -in @('sent', 'duplicate') -and -not [string]::IsNullOrWhiteSpace($resendRes.IssueUrl)) {
-                        Write-Host "  [OK] Đã gửi ($($resendRes.Status)): $($resendRes.IssueUrl)"
-                    } else {
-                        Write-Host "  [CHƯA GỬI] $($pf.Name): $($resendRes.Status) - $($resendRes.Error)"
-                    }
-                }
-            }
-            Write-Host ''
-        }
-    }
 
     Write-Host 'Đang quét thiết bị VGA và nvidia-smi...'
     $collectionStartedUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -2326,6 +2387,24 @@ function Start-CollectorInteractive {
         if ($sendRes.Status -in @('sent', 'duplicate') -and -not [string]::IsNullOrWhiteSpace($sendRes.IssueUrl)) {
             $label = if ($sendRes.Status -eq 'duplicate') { 'Báo cáo đã tồn tại (trùng lặp)' } else { 'Đã gửi báo cáo thành công' }
             Write-Host "${label}: $($sendRes.IssueUrl)"
+            if (Test-Path -LiteralPath $outDir) {
+                $remainingPending = @(Get-ChildItem -LiteralPath $outDir -Filter '*.pending.json' -File -ErrorAction SilentlyContinue)
+                if ($remainingPending.Count -gt 0) {
+                    Write-Host "[PHÁT HIỆN] Có $($remainingPending.Count) báo cáo chờ trước đó trong: $outDir"
+                    $resendChoice = Read-Host 'Bạn có muốn gửi lại các báo cáo chờ này không? (C/K, mặc định K)'
+                    if ($resendChoice -match '^(c|co|có|y|yes)$') {
+                        foreach ($pf in $remainingPending) {
+                            $rawPending = [System.IO.File]::ReadAllText($pf.FullName, [System.Text.Encoding]::UTF8)
+                            $resendRes = Send-Report -Report $rawPending -ExistingPendingPath $pf.FullName -KeepHistory:$useKeepHistory
+                            if ($resendRes.Status -in @('sent', 'duplicate') -and -not [string]::IsNullOrWhiteSpace($resendRes.IssueUrl)) {
+                                Write-Host "  [OK] Đã gửi ($($resendRes.Status)): $($resendRes.IssueUrl)"
+                            } else {
+                                Write-Host "  [CHƯA GỬI] $($pf.Name): $($resendRes.Status) - $($resendRes.Error)"
+                            }
+                        }
+                    }
+                }
+            }
         } else {
             Write-Host "[CHƯA GỬI ĐƯỢC] Trạng thái: $($sendRes.Status)"
             if ($sendRes.Error) { Write-Host "  Chi tiết: $($sendRes.Error)" }

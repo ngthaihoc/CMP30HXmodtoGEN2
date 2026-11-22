@@ -192,6 +192,17 @@ test('findPii_flags_user_path_mac_ipv4', () => {
   assert.ok(findings.includes('mac'));
   assert.ok(findings.includes('ipv4'));
 
+  const spacedReport = makeValidReport({
+    context: {
+      mod_state: 'unknown',
+      riser: 'unknown',
+      slot: 'unknown',
+      stage: 'unknown',
+      notes: 'UNC \\\\file server\\shared logs\\vga.txt',
+    },
+  });
+  assert.ok(findPii(spacedReport).includes('path_user'));
+
   // Valid hardware versions like 90.06.18.80.06 or 32.0.16.2101 must NOT trigger ipv4
   const cleanReport = makeValidReport();
   assert.deepEqual(findPii(cleanReport), []);

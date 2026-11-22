@@ -1514,6 +1514,151 @@ Invoke-TestCase 'p2_load_bench_updates_completeness_and_evidence_level' {
     }
 }
 
+# =========================================================================
+# Step 0A RED Tests: PII spaced/JSON-escaped paths, fallback clipboard, pending parse, offline 0-network
+# =========================================================================
+
+Invoke-TestCase 'remove_pii_handles_spaced_paths_unc_and_json_escaped' {
+    $s1 = Remove-Pii -Text 'Error at C:\Users\Nguyen Van A\My Docs\secret log.txt while testing'
+    Assert-True ($s1 -notmatch 'Nguyen|Van|My Docs|secret|log\.txt') "spaced Windows user path leaked: $s1"
+    Assert-True ($s1 -match 'while testing') "non-PII trailing prose preserved: $s1"
+
+    $s2 = Remove-Pii -Text 'Share \\file server\shared logs\vga debug\out.txt done'
+    Assert-True ($s2 -notmatch 'file server|shared logs|vga debug|out\.txt') "spaced UNC path leaked: $s2"
+
+    $s3 = Remove-Pii -Text 'Linux /home/john doe/my folder/test file.txt ok'
+    Assert-True ($s3 -notmatch 'john|doe|my folder|test file\.txt') "spaced Unix path leaked: $s3"
+
+    $jsonEscaped = '{"notes":"Seen at C:\\Users\\Nguyen Van A\\Desktop\\a b.txt","unc":"\\\\srv name\\share name\\f.txt"}'
+    $s4 = Remove-Pii -Text $jsonEscaped
+    Assert-True ($s4 -notmatch 'Nguyen|Van|Desktop|srv name|share name') "JSON-escaped path leaked: $s4"
+}
+
+Invoke-TestCase 'redact_preserves_empty_and_single_element_arrays_and_nested_notes' {
+    $expDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-arr-" + [guid]::NewGuid())
+    try {
+        [void][IO.Directory]::CreateDirectory($expDir)
+        $inv = @([pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:01:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '1F07'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '86701043'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA GeForce RTX 2070'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.16.2101'; source = 'cim'; unit = $null; status = 'ok' }
+        })
+        $ctx = [pscustomobject]@{ mod_state = 'stock'; mod_type = 'none'; riser = 'direct'; slot = 'cpu_x16'; stage = 'baseline'; notes = 'C:\Users\Van A\My Folder\n.txt' }
+        $rep = New-Report -Inventory $inv -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctx -ExperimentDir $expDir
+        $saved = Save-LocalReport -Report $rep -Dir $expDir
+        $nodeOut = & node -e "const fs=require('fs'), r=require(process.argv[1]), d=JSON.parse(fs.readFileSync(process.argv[2],'utf8')); if(!Array.isArray(d.gpus) || d.gpus.length!==1 || !Array.isArray(d.completeness.inventory.missing)){ console.log('ARRAY_UNWRAPPED'); process.exit(2); } const v=r.validateReport(d), p=r.findPii(d); if(!v.ok || p.length){ console.log(JSON.stringify({v,p})); process.exit(1); }" $reportCjsPath $saved.JsonPath
+        Assert-Equal $LASTEXITCODE 0 "Arrays preserved & validated: $nodeOut"
+    } finally {
+        Remove-Item -LiteralPath $expDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'open_fallback_form_sanitizes_before_clipboard' {
+    $script:CapturedClipboard = $null
+    function Set-Clipboard { param([string]$Value) $script:CapturedClipboard = $Value }
+    function Start-Process { param([string]$FilePath) }
+
+    $rep = New-SampleTestReport
+    $rep.context.notes = 'Path C:\Users\Alice User\Desktop\dump file.txt IP 192.168.1.99'
+    Open-FallbackForm -Report $rep
+    Assert-True ($null -ne $script:CapturedClipboard) 'clipboard populated from object'
+    Assert-True (-not $script:CapturedClipboard.Contains('Alice User')) 'user path scrubbed from clipboard object'
+    Assert-True (-not $script:CapturedClipboard.Contains('192.168.1.99')) 'IPv4 scrubbed from clipboard object'
+
+    $rawJson = $rep | ConvertTo-Json -Depth 12
+    $rawJson = $rawJson.Replace('[PATH_USER]', 'C:\\Users\\Second User\\x.log')
+    $script:CapturedClipboard = $null
+    Open-FallbackForm -Report $rawJson
+    Assert-True (-not $script:CapturedClipboard.Contains('Second User')) 'user path scrubbed from clipboard string'
+}
+
+Invoke-TestCase 'send_report_pending_string_parses_validates_and_sanitizes_and_keeps_corrupt_local' {
+    $expDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-pend-" + [guid]::NewGuid())
+    $srv = Start-MockHttpServer
+    try {
+        [void][IO.Directory]::CreateDirectory($expDir)
+        $badJsonPath = Join-Path $expDir 'corrupt.pending.json'
+        [IO.File]::WriteAllText($badJsonPath, '{bad json', (New-Object Text.UTF8Encoding($false)))
+        $resBad = Send-Report -Report '{bad json' -Endpoint $srv.Url -KeyId 'k1' -Key $testSignKey -AllowLoopbackHttp -ExistingPendingPath $badJsonPath
+        Assert-Equal $resBad.Status 'rejected_local' 'corrupt pending JSON rejected locally'
+        Assert-Equal $srv.State.Requests.Count 0 'zero HTTP requests on corrupt pending JSON'
+        Assert-True (Test-Path -LiteralPath $badJsonPath) 'corrupt pending file kept on disk'
+
+        $badSchemaPath = Join-Path $expDir 'badschema.pending.json'
+        $badSchemaText = '{"schema_version":2,"report_id":"not-a-uuid"}'
+        [IO.File]::WriteAllText($badSchemaPath, $badSchemaText, (New-Object Text.UTF8Encoding($false)))
+        $resSchema = Send-Report -Report $badSchemaText -Endpoint $srv.Url -KeyId 'k1' -Key $testSignKey -AllowLoopbackHttp -ExistingPendingPath $badSchemaPath
+        Assert-Equal $resSchema.Status 'rejected_local' 'invalid schema pending JSON rejected locally'
+        Assert-Equal $srv.State.Requests.Count 0 'zero HTTP requests on invalid schema pending JSON'
+        Assert-True (Test-Path -LiteralPath $badSchemaPath) 'invalid schema pending file kept on disk'
+
+        $rep = New-SampleTestReport
+        $rep.context.notes = 'Pending C:\Users\Pending User\a b.log and 10.0.0.55'
+        $rawPending = $rep | ConvertTo-Json -Depth 12
+        $goodPendingPath = Join-Path $expDir 'good.pending.json'
+        [IO.File]::WriteAllText($goodPendingPath, $rawPending, (New-Object Text.UTF8Encoding($false)))
+        $srv.State.Responses.Enqueue(@{ StatusCode = 201; Body = '{"issue_url":"https://github.com/ngthaihoc/vga-report-sandbox/issues/91"}' })
+        $resOk = Send-Report -Report $rawPending -Endpoint $srv.Url -KeyId 'k1' -Key $testSignKey -AllowLoopbackHttp -ExistingPendingPath $goodPendingPath
+        Assert-Equal $resOk.Status 'sent' 'valid pending sent after structured sanitize'
+        Assert-Equal $srv.State.Requests.Count 1 'one HTTP request made for valid pending'
+        $sentBody = $srv.State.Requests[0].BodyText
+        Assert-True (-not $sentBody.Contains('Pending User')) 'pending spaced path redacted'
+        Assert-True (-not $sentBody.Contains('10.0.0.55')) 'pending IPv4 redacted'
+        Assert-True (-not (Test-Path -LiteralPath $goodPendingPath)) 'valid pending cleaned up after 201'
+    } finally {
+        Stop-MockHttpServer $srv
+        Remove-Item -LiteralPath $expDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'save_only_and_choice_1_zero_network_even_with_pending' {
+    $expDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-offline-" + [guid]::NewGuid())
+    $outSub = Join-Path $expDir 'vga-reports-out'
+    $origDir = $env:VGA_BAT_DIR
+    $script:NetworkCalls = 0
+    try {
+        [void][IO.Directory]::CreateDirectory($outSub)
+        $pendFile = Join-Path $outSub 'old.pending.json'
+        $samplePend = (New-SampleTestReport) | ConvertTo-Json -Depth 12
+        [IO.File]::WriteAllText($pendFile, $samplePend, (New-Object Text.UTF8Encoding($false)))
+
+        $env:VGA_BAT_DIR = $expDir
+        function Get-VgaInventory {
+            return @([pscustomobject]@{
+                bdf = [pscustomobject]@{ value = '0000:01:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+                vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+                device_id = [pscustomobject]@{ value = '1F07'; source = 'pnp'; unit = $null; status = 'ok' }
+                subsystem_id = [pscustomobject]@{ value = '86701043'; source = 'pnp'; unit = $null; status = 'ok' }
+                revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+                name = [pscustomobject]@{ value = 'NVIDIA GeForce RTX 2070'; source = 'cim'; unit = $null; status = 'ok' }
+                pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+                driver_version = [pscustomobject]@{ value = '32.0.16.2101'; source = 'cim'; unit = $null; status = 'ok' }
+            })
+        }
+        function Get-NvidiaInfo { param($Inventory, $TargetBdf) return (New-EmptyNvidiaBlock -Status 'skipped') }
+        function Invoke-HttpPostBytes { $script:NetworkCalls += 1; throw 'MUST_NOT_CALL_NETWORK_OFFLINE' }
+        function Read-Host { param($Prompt) $script:Prompts += $Prompt; return '1' }
+
+        $script:Prompts = @()
+        Start-CollectorInteractive -SaveOnly
+        Assert-Equal $script:NetworkCalls 0 '-SaveOnly makes 0 network calls even with pending.json'
+        Assert-Equal $script:Prompts.Count 0 '-SaveOnly makes 0 Read-Host prompts even with pending.json'
+
+        $script:Prompts = @()
+        Start-CollectorInteractive
+        Assert-Equal $script:NetworkCalls 0 'Choice [1] makes 0 network calls even with pending.json'
+        Assert-Equal $script:Prompts.Count 1 'Interactive choice [1] has only 1 prompt even with pending.json'
+    } finally {
+        $env:VGA_BAT_DIR = $origDir
+        Remove-Item -LiteralPath $expDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Host "Summary: Passed=$script:Passed Failed=$script:Failed"
 if ($script:Failed -gt 0) { exit 1 }
 exit 0
