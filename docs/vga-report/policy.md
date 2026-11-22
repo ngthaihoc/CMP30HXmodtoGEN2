@@ -6,7 +6,7 @@ Tài liệu này mô tả phạm vi dữ liệu do `Collect_VGA_Report.bat` thu 
 
 Collector chỉ đọc dữ liệu kỹ thuật theo hợp đồng [schema.json](schema.json):
 
-- **Siêu dữ liệu báo cáo:** `schema_version`, `collector_version`, `report_id` (UUID ngẫu nhiên mỗi báo cáo), `created_utc`, `experiment_id` (UUID ngẫu nhiên lưu cục bộ trong `experiment_id.txt` cạnh nơi xuất báo cáo), `consent`.
+- **Siêu dữ liệu báo cáo:** `schema_version`, `collector_version`, `report_id` (UUID ngẫu nhiên mỗi báo cáo), `created_utc`, `experiment_id` (mặc định là UUID ngẫu nhiên dùng một lần trong RAM và **không** ghi tệp `experiment_id.txt` / `last_report_id.txt` xuống đĩa; chỉ lưu liên kết chuỗi khi người dùng chủ động bật `-KeepHistory`), `consent`.
 - **Danh sách GPU (CIM `Win32_VideoController` và PnP):** địa chỉ PCIe (`bdf`), `vendor_id`, `device_id`, `subsystem_id`, `revision`, tên thiết bị (`name`), trạng thái PnP (`pnp_status`), phiên bản driver (`driver_version`), tốc độ/băng thông PCIe (`max_gen`, `current_gen`, `max_width`, `current_width`).
 - **Thông số `nvidia-smi` (18 trường cố định):** `name`, `driver_version`, `vbios_version`, `pci.bus_id`, `pci.device_id`, `pci.sub_device_id`, `memory.total`, `compute_cap`, `pcie.link.gen.max`, `pcie.link.gen.gpucurrent`, `pcie.link.width.max`, `pcie.link.width.current`, `temperature.gpu`, `power.draw`, `clocks.sm`, `clocks.mem`, `clocks.max.sm`, `pstate`, kèm `complete` và `missing[]`. Giá trị không hỗ trợ được ghi `unsupported` (giá trị `null`), không thay bằng `0`.
 - **Nền tảng hệ thống:** tên CPU, hãng/mẫu bo mạch chủ, phiên bản BIOS, bản build Windows.
@@ -14,7 +14,7 @@ Collector chỉ đọc dữ liệu kỹ thuật theo hợp đồng [schema.json]
 
 ## 2. Dữ liệu KHÔNG thu thập
 
-Công cụ tuyệt đối không thu thập và có bộ lọc PII ở cả hai phía (client `Remove-Pii` và Worker `findPii`):
+Công cụ tuyệt đối không thu thập và có bộ lọc PII đệ quy ở cả hai phía (client `Remove-Pii` + `Redact-ReportObject` trước mọi thao tác lưu/gửi, và Worker `findPii`):
 
 - Tên người dùng Windows, tên máy (`hostname`), biến môi trường cá nhân.
 - Đường dẫn thư mục cá nhân (`C:\Users\...`, `/home/...`, đường dẫn mạng UNC).
@@ -24,8 +24,9 @@ Công cụ tuyệt đối không thu thập và có bộ lọc PII ở cả hai 
 
 ## 3. Tính công khai của GitHub Issue
 
+- Mặc định khi mở `Collect_VGA_Report.bat`, công cụ chỉ hỏi 1 lựa chọn cuối: chọn `[1]` (hoặc chạy với `-SaveOnly`) để lưu cục bộ **offline 100%** không kết nối Internet; chỉ khi bạn chủ động chọn `[2]` mới gửi báo cáo lên máy chủ Worker (mã nguồn mở công khai tại `worker/vga-reports/src/index.js`).
 - Mọi báo cáo gửi lên đều tạo thành **GitHub Issue công khai** kèm nhãn `vga-report`, `hardware-sample`, `unverified`.
-- Trước khi gửi, `Collect_VGA_Report.bat` hiển thị bản tóm tắt, tên máy chủ đích và yêu cầu xác nhận đồng ý.
+- Trước khi lưu hoặc gửi, `Collect_VGA_Report.bat` chạy lọc PII đệ quy (`Redact-ReportObject`), hiển thị bản tóm tắt, tên máy chủ đích và chỉ gửi khi bạn chọn `[2]`.
 - Báo cáo chỉ phản ánh thông số đọc được tại thời điểm chạy, **không phải bằng chứng mở khóa phần cứng thành công** và không thay thế kiểm chứng trên tải thực tế.
 
 ## 4. Địa chỉ IP, hạ tầng Cloudflare và nhật ký (Logs)

@@ -168,10 +168,13 @@ Trong thư mục dự án có sẵn các công cụ tiện ích hỗ trợ ngư�
 
 Để hỗ trợ kiểm tra lỗi nhận card, tốc độ liên kết PCIe và dữ liệu phần cứng trên nhiều cấu hình máy khác nhau, dự án cung cấp công cụ chỉ đọc `Collect_VGA_Report.bat` (chạy không cần quyền Administrator, không sửa registry, MMIO hay tác vụ hệ thống).
 
-- **Công cụ làm gì:** đọc thông tin GPU từ CIM/PnP và 18 trường cố định từ `nvidia-smi` (nếu có GPU NVIDIA), lọc thông tin cá nhân (PII), cho bạn xem trước tóm tắt và chỉ gửi khi bạn đồng ý.
-- **Tệp tạo cục bộ:** nằm trong thư mục `vga-reports-out\` cạnh `Collect_VGA_Report.bat`, gồm tệp `.json`, `-summary.txt`, `.zip` (chỉ lưu cục bộ, không tải ZIP lên server) và `.pending.json` (tạm giữ khi gửi chưa thành công).
-- **Tính công khai & không phải bằng chứng mở khóa:** báo cáo gửi lên sẽ tạo **GitHub Issue công khai** trên repository này. Thông số trong báo cáo phản ánh trạng thái tại thời điểm thu thập và **không phải bằng chứng mở khóa thành công**.
-- **Gửi lại khi mất mạng hoặc lỗi máy chủ:** nếu mất mạng hoặc máy chủ tiếp nhận bảo trì (`503`), tệp `.zip` và `.pending.json` được giữ lại. Khi chạy lại `Collect_VGA_Report.bat`, công cụ sẽ hỏi gửi lại báo cáo đang chờ, hoặc bạn có thể chọn mở Issue Form dự phòng để dán nội dung JSON thủ công.
+- **Thao tác tối giản (1 bước duy nhất):** khi mở `Collect_VGA_Report.bat`, công cụ tự quét VGA/PCIe, lọc thông tin cá nhân đệ quy (`Redact-ReportObject`), hiển thị bản tóm tắt tiếng Việt và chỉ hỏi đúng **1 lựa chọn cuối**: `[1] Chỉ lưu báo cáo cục bộ (Offline 100%, không gửi mạng)`, `[2] Gửi lên GitHub Issue`, hoặc `[3] Thoát`.
+- **Bảo vệ quyền riêng tư mặc định:**
+  - Chọn `[1]` (hoặc chạy `Collect_VGA_Report.bat -SaveOnly`) hoạt động **hoàn toàn offline**, không kết nối Internet để bạn tự kiểm tra `report.json` trước.
+  - Mặc định công cụ **không lưu** tệp theo dõi phiên (`experiment_id.txt` / `last_report_id.txt`); mỗi lần chạy dùng UUID ngẫu nhiên một lần. Chỉ khi người nghiên cứu bật `-KeepHistory` (hoặc `-DetailedContext` / `-SelectGpu`) mới ghi liên kết chuỗi thử nghiệm.
+  - Mã nguồn máy chủ tiếp nhận được công khai 100% trong cùng kho lưu trữ tại [worker/vga-reports/src/index.js](worker/vga-reports/src/index.js); chuỗi `$script:SigningKey` trong BAT là khóa định danh client công khai chống spam (không phải bí mật cá nhân) và có thể thay thành `REPLACE_WITH_DISABLED` để khóa gửi mạng cứng.
+- **Tệp tạo cục bộ:** nằm trong thư mục `vga-reports-out\` cạnh `Collect_VGA_Report.bat`, gồm tệp `.json`, `-summary.txt`, `.zip` (chỉ lưu cục bộ, không tải ZIP lên server) và `.pending.json` (chỉ tạm giữ khi chọn gửi nhưng máy chủ tạm thời không nhận).
+- **Tính công khai & không phải bằng chứng mở khóa:** báo cáo gửi lên (khi chọn `[2]`) sẽ tạo **GitHub Issue công khai** trên repository đích. Thông số trong báo cáo phản ánh trạng thái tại thời điểm thu thập và **không phải bằng chứng mở khóa thành công**.
 - **Chính sách dữ liệu & yêu cầu xóa:** xem chi tiết trường thu thập, dữ liệu không thu thập và cách yêu cầu xóa issue tại [docs/vga-report/policy.md](docs/vga-report/policy.md).
 
 ---

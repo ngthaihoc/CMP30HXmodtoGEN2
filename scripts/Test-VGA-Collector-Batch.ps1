@@ -42,7 +42,7 @@ function Invoke-BatchScenario {
         [void]$proc.Start()
         $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
         $stderrTask = $proc.StandardError.ReadToEndAsync()
-        foreach ($answer in @('3', '8', '3', '4', '4', '', $Action, 'K')) {
+        foreach ($answer in @($Action, 'K')) {
             $proc.StandardInput.WriteLine($answer)
         }
         $proc.StandardInput.Close()
@@ -82,6 +82,8 @@ try {
     $summaries = @(Get-ChildItem -LiteralPath $saved.OutDir -Filter '*-summary.txt' -File)
     $zips = @(Get-ChildItem -LiteralPath $saved.OutDir -Filter '*.zip' -File)
     Assert-True ($jsonFiles.Count -eq 1 -and $summaries.Count -eq 1 -and $zips.Count -eq 1) 'JSON, summary and ZIP saved'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $saved.OutDir 'experiment_id.txt'))) 'experiment_id.txt not created by default'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $saved.OutDir 'last_report_id.txt'))) 'last_report_id.txt not created by default'
     $report = [IO.File]::ReadAllText($jsonFiles[0].FullName, $utf8) | ConvertFrom-Json
     Assert-True ($report.schema_version -in @(1, 2) -and $report.report_id) 'JSON contains report metadata'
     Write-Host "Observed GPUs=$(@($report.gpus).Count), nvidia.complete=$($report.nvidia.complete) (not hardware acceptance)"

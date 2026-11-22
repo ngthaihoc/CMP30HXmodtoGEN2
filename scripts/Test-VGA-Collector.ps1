@@ -1349,13 +1349,13 @@ Invoke-TestCase 'p1_v2_report_validates_in_node_and_links_previous_report_id' {
         })
         $ctx = [pscustomobject]@{ mod_state = 'modded'; mod_type = 'efi'; riser = 'direct'; slot = 'cpu_x16'; stage = 'after_unlock'; notes = '' }
         $nv1 = Get-NvidiaInfo -Inventory $inv
-        $rep1 = New-Report -Inventory $inv -Nvidia $nv1 -Context $ctx -ExperimentDir $expDir -LegacyStatusDir $expDir
+        $rep1 = New-Report -Inventory $inv -Nvidia $nv1 -Context $ctx -ExperimentDir $expDir -LegacyStatusDir $expDir -KeepHistory
         Assert-Equal $rep1.schema_version 2 'v2 schema emitted'
         Assert-True ($null -eq $rep1.previous_report_id) 'first report has null previous_report_id'
-        [void](Save-LocalReport -Report $rep1 -Dir $expDir)
+        [void](Save-LocalReport -Report $rep1 -Dir $expDir -KeepHistory)
 
         $nv2 = Get-NvidiaInfo -Inventory $inv
-        $rep2 = New-Report -Inventory $inv -Nvidia $nv2 -Context $ctx -ExperimentDir $expDir -LegacyStatusDir $expDir
+        $rep2 = New-Report -Inventory $inv -Nvidia $nv2 -Context $ctx -ExperimentDir $expDir -LegacyStatusDir $expDir -KeepHistory
         Assert-Equal $rep2.experiment_id $rep1.experiment_id 'same experiment_id across runs'
         Assert-Equal $rep2.previous_report_id $rep1.report_id 'second report links previous_report_id'
 
@@ -1392,6 +1392,79 @@ OBSERVED_AT=2026-11-22T00:00:00Z
         Assert-True ($sum3.Contains('device_id=1F0B')) 'summary includes legacy device_id'
         Assert-True ($sum3.Contains('mrrs=512')) 'summary includes legacy mrrs_bytes'
     } finally {
+        Remove-Item -LiteralPath $expDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'privacy_default_no_history_does_not_write_tracking_files' {
+    $expDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-nohist-" + [guid]::NewGuid())
+    try {
+        [void][IO.Directory]::CreateDirectory($expDir)
+        $origKeep = $env:VGA_KEEP_HISTORY
+        $env:VGA_KEEP_HISTORY = $null
+        $inv = @([pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:01:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '1F07'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA GeForce RTX 2070'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.16.2101'; source = 'cim'; unit = $null; status = 'ok' }
+        })
+        $ctx = [pscustomobject]@{ mod_state = 'unknown'; mod_type = 'unknown'; riser = 'unknown'; slot = 'unknown'; stage = 'unknown'; notes = '' }
+        $rep1 = New-Report -Inventory $inv -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctx -ExperimentDir $expDir -LegacyStatusDir $expDir
+        [void](Save-LocalReport -Report $rep1 -Dir $expDir)
+        $rep2 = New-Report -Inventory $inv -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctx -ExperimentDir $expDir -LegacyStatusDir $expDir
+
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $expDir 'experiment_id.txt'))) 'experiment_id.txt must not exist by default'
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $expDir 'last_report_id.txt'))) 'last_report_id.txt must not exist by default'
+        Assert-True ($null -eq $rep2.previous_report_id) 'previous_report_id stays null without KeepHistory'
+        Assert-True ($rep1.experiment_id -ne $rep2.experiment_id) 'each run gets an ephemeral experiment_id without KeepHistory'
+    } finally {
+        $env:VGA_KEEP_HISTORY = $origKeep
+        Remove-Item -LiteralPath $expDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Invoke-TestCase 'privacy_redact_report_object_scrubs_mutated_pii_before_save_and_send' {
+    $expDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-redact-" + [guid]::NewGuid())
+    $srv = Start-MockHttpServer
+    try {
+        [void][IO.Directory]::CreateDirectory($expDir)
+        $rep = New-SampleTestReport
+        $rep.context.notes = 'Path C:\Users\Alice\secret.txt IP 192.168.1.50'
+        $saved = Save-LocalReport -Report $rep -Dir $expDir
+        $savedJson = [IO.File]::ReadAllText($saved.JsonPath, (New-Object Text.UTF8Encoding($false)))
+        Assert-True (-not $savedJson.Contains('Alice')) 'user path scrubbed before Save-LocalReport'
+        Assert-True (-not $savedJson.Contains('192.168.1.50')) 'IPv4 scrubbed before Save-LocalReport'
+        Assert-True ($savedJson.Contains('[PATH_USER]') -and $savedJson.Contains('[IPV4]')) 'PII placeholders stored'
+
+        $v2Inv = @([pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:01:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '1F07'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA GeForce RTX 2070'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.16.2101'; source = 'cim'; unit = $null; status = 'ok' }
+        })
+        $v2Rep = New-Report -Inventory $v2Inv -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context ([pscustomobject]@{ mod_state = 'unknown'; mod_type = 'unknown'; riser = 'unknown'; slot = 'unknown'; stage = 'unknown'; notes = '' }) -ExperimentDir $expDir
+        $v2Saved = Save-LocalReport -Report $v2Rep -Dir $expDir
+        $nodeValOut = & node -e "const fs=require('fs'), r=require(process.argv[1]), d=JSON.parse(fs.readFileSync(process.argv[2],'utf8')); const v=r.validateReport(d), p=r.findPii(d); if(!v.ok || p.length){ console.log(JSON.stringify({v,p})); process.exit(1); }" $reportCjsPath $v2Saved.JsonPath
+        Assert-Equal $LASTEXITCODE 0 "Saved v2 report stays schema-valid after Redact-ReportObject: $nodeValOut"
+
+        $repSend = New-SampleTestReport
+        $repSend.context.notes = 'MAC 00:11:22:33:44:55 and C:\Users\Bob\test.log'
+        $srv.State.Responses.Enqueue(@{ StatusCode = 201; Body = '{"issue_url":"https://github.com/ngthaihoc/vga-report-sandbox/issues/88"}' })
+        $res = Send-Report -Report $repSend -Endpoint $srv.Url -KeyId 'k1' -Key $testSignKey -AllowLoopbackHttp
+        Assert-Equal $res.Status 'sent' 'send succeeds with redacted payload'
+        $sentBody = $srv.State.Requests[0].BodyText
+        Assert-True (-not $sentBody.Contains('Bob')) 'user path scrubbed before Send-Report'
+        Assert-True (-not $sentBody.Contains('00:11:22:33:44:55')) 'MAC scrubbed before Send-Report'
+    } finally {
+        Stop-MockHttpServer $srv
         Remove-Item -LiteralPath $expDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }

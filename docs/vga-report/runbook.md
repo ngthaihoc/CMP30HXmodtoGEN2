@@ -107,7 +107,7 @@ Chạy trong thư mục `worker/vga-reports/`:
    - `$script:AllowedEndpointHost` (hostname `*.workers.dev` thật)
    - `$script:SigningKeyId` (`'k1'`)
    - `$script:SigningKey` (chuỗi base64 công khai chống spam tương ứng trong `SIGNING_KEYS`)
-   *(Lưu ý: khóa ký nằm trong BAT để chống curl/bot quét thông thường, không phải bí mật thật; không bao giờ đưa khóa GitHub App vào BAT).*
+   *(Lưu ý: khóa ký nằm trong BAT là public anti-spam client tag để chống curl/bot quét thông thường, không phải bí mật thật; không bao giờ đưa khóa GitHub App vào BAT. Người dùng muốn khóa cứng gửi mạng có thể đổi `$script:SigningKey` thành `'REPLACE_WITH_DISABLED'`. Mặc định BAT chạy chế độ 1 bước không ghi `experiment_id.txt`/`last_report_id.txt`; dùng `-KeepHistory`, `-DetailedContext`, `-SelectGpu` hoặc `-SaveOnly` khi cần).*
 
 ---
 

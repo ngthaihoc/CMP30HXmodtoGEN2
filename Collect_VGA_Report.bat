@@ -15,6 +15,17 @@ set "VGA_BAT_SELF=%~f0"
 set "VGA_BAT_DIR=%~dp0"
 set "VGA_COLLECTOR_LIB_ONLY=0"
 
+:parse_args
+if "%~1"=="" goto args_done
+if /i "%~1"=="-SaveOnly" set "VGA_SAVE_ONLY=1"
+if /i "%~1"=="-KeepHistory" set "VGA_KEEP_HISTORY=1"
+if /i "%~1"=="-DetailedContext" set "VGA_DETAILED_CONTEXT=1"
+if /i "%~1"=="-SelectGpu" set "VGA_SELECT_GPU=1"
+if /i "%~1"=="-RunLoadTest" set "VGA_RUN_LOAD_TEST=1"
+shift
+goto parse_args
+:args_done
+
 powershell.exe -NoProfile -Command "& { $raw = [System.IO.File]::ReadAllText($env:VGA_BAT_SELF, [System.Text.Encoding]::UTF8); $m = '# === BEGIN_POWERSHELL ==='; $idx = $raw.LastIndexOf($m); if ($idx -lt 0) { Write-Error 'Không tìm thấy khối PowerShell trong file BAT.'; exit 1 }; $code = $raw.Substring($idx + $m.Length); . ([ScriptBlock]::Create($code)) }"
 set "EXIT_CODE=%ERRORLEVEL%"
 exit /b %EXIT_CODE%
@@ -33,7 +44,9 @@ if (-not [Environment]::Is64BitOperatingSystem) {
 
 $script:CollectorVersion = '1.1.0'
 $script:SchemaVersion = 2
-# Khóa ký công khai chống spam, không phải bí mật (điền endpoint và khóa thật sau Task 6)
+# Khóa định danh client công khai dùng để giới hạn tần suất (anti-spam rate-limit tag) trên Worker.
+# Đây KHÔNG phải khóa bí mật cá nhân. Mã nguồn máy chủ công khai tại: worker/vga-reports/src/index.js
+# Nếu muốn vô hiệu hóa hoàn toàn tính năng gửi mạng, hãy đổi giá trị $script:SigningKey thành 'REPLACE_WITH_DISABLED'.
 $script:AllowedEndpointHost = 'cmp-vga-reports.wellynguyen.workers.dev'
 $script:DefaultEndpoint = "https://$($script:AllowedEndpointHost)/v1/reports"
 $script:TargetHostname = $script:AllowedEndpointHost
@@ -208,6 +221,59 @@ function Remove-Pii {
     $out = [regex]::Replace($out, '(?i)\b(?:MIG-)?GPU-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b', '[UUID_GPU]')
     $out = [regex]::Replace($out, '(?i)\b(?:serial(?:\s*(?:number|no|#))?|s/n|sn)\s*[:=]\s*[A-Za-z0-9_-]{4,}', '[SERIAL]')
     return $out
+}
+
+function Invoke-RedactReportInPlace {
+    param($Node)
+    if ($null -eq $Node) { return }
+    if ($Node -is [System.Collections.IDictionary]) {
+        $keys = @($Node.Keys)
+        foreach ($k in $keys) {
+            $val = $Node[$k]
+            if ($val -is [string]) {
+                $Node[$k] = Remove-Pii -Text $val
+            } elseif ($null -ne $val -and -not ($val.GetType().IsPrimitive -or $val -is [decimal])) {
+                Invoke-RedactReportInPlace -Node $val
+            }
+        }
+        return
+    }
+    if ($Node -is [System.Collections.IList]) {
+        for ($i = 0; $i -lt $Node.Count; $i += 1) {
+            $item = $Node[$i]
+            if ($item -is [string]) {
+                $Node[$i] = Remove-Pii -Text $item
+            } elseif ($null -ne $item -and -not ($item.GetType().IsPrimitive -or $item -is [decimal])) {
+                Invoke-RedactReportInPlace -Node $item
+            }
+        }
+        return
+    }
+    if ($Node -is [pscustomobject]) {
+        foreach ($p in @($Node.PSObject.Properties)) {
+            if ($p.IsSettable) {
+                $val = $p.Value
+                if ($val -is [string]) {
+                    $p.Value = Remove-Pii -Text $val
+                } elseif ($null -ne $val -and -not ($val.GetType().IsPrimitive -or $val -is [decimal])) {
+                    Invoke-RedactReportInPlace -Node $val
+                }
+            }
+        }
+    }
+}
+
+function Redact-ReportObject {
+    param($InputObject)
+    if ($null -eq $InputObject) { return $null }
+    if ($InputObject -is [string]) {
+        return (Remove-Pii -Text $InputObject)
+    }
+    Invoke-RedactReportInPlace -Node $InputObject
+    if ($InputObject -is [System.Collections.IList]) {
+        return ,$InputObject
+    }
+    return $InputObject
 }
 
 function New-ReportField {
@@ -1213,7 +1279,13 @@ function Get-LegacyUnlockStatus {
 }
 
 function Get-OrCreateExperimentId {
-    param([AllowNull()][string]$BaseDir)
+    param(
+        [AllowNull()][string]$BaseDir,
+        [switch]$KeepHistory
+    )
+    if (-not $KeepHistory -and $env:VGA_KEEP_HISTORY -ne '1') {
+        return [guid]::NewGuid().ToString()
+    }
     $dir = if (-not [string]::IsNullOrWhiteSpace($BaseDir)) { $BaseDir } else { $env:VGA_BAT_DIR }
     if (-not [string]::IsNullOrWhiteSpace($dir)) {
         try {
@@ -1225,6 +1297,7 @@ function Get-OrCreateExperimentId {
                     return $parsed.ToString()
                 }
             }
+            [void][System.IO.Directory]::CreateDirectory($dir)
             $newId = [guid]::NewGuid().ToString()
             [System.IO.File]::WriteAllText($idPath, $newId, (New-Object System.Text.UTF8Encoding($false)))
             return $newId
@@ -1234,7 +1307,13 @@ function Get-OrCreateExperimentId {
 }
 
 function Get-PreviousReportId {
-    param([AllowNull()][string]$BaseDir)
+    param(
+        [AllowNull()][string]$BaseDir,
+        [switch]$KeepHistory
+    )
+    if (-not $KeepHistory -and $env:VGA_KEEP_HISTORY -ne '1') {
+        return $null
+    }
     $dir = if (-not [string]::IsNullOrWhiteSpace($BaseDir)) { $BaseDir } else { $env:VGA_BAT_DIR }
     if (-not [string]::IsNullOrWhiteSpace($dir)) {
         try {
@@ -1254,8 +1333,12 @@ function Get-PreviousReportId {
 function Save-LastReportId {
     param(
         [AllowNull()][string]$BaseDir,
-        [Parameter(Mandatory = $true)][string]$ReportId
+        [Parameter(Mandatory = $true)][string]$ReportId,
+        [switch]$KeepHistory
     )
+    if (-not $KeepHistory -and $env:VGA_KEEP_HISTORY -ne '1') {
+        return
+    }
     $dir = if (-not [string]::IsNullOrWhiteSpace($BaseDir)) { $BaseDir } else { $env:VGA_BAT_DIR }
     if (-not [string]::IsNullOrWhiteSpace($dir)) {
         try {
@@ -1275,7 +1358,8 @@ function New-Report {
         [AllowNull()][string]$TargetBdf = $null,
         [Parameter(Mandatory = $false)]$Security = $null,
         [AllowNull()][string]$LegacyStatusDir = $null,
-        [AllowNull()][string]$CollectionStartedUtc = $null
+        [AllowNull()][string]$CollectionStartedUtc = $null,
+        [switch]$KeepHistory
     )
     $startedUtc = if (-not [string]::IsNullOrWhiteSpace($CollectionStartedUtc)) { $CollectionStartedUtc } else { (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
     $invArray = @($Inventory)
@@ -1381,7 +1465,7 @@ function New-Report {
         $nvBlock['extended_missing'] = $extMiss.ToArray()
     }
 
-    $prevReportId = Get-PreviousReportId -BaseDir $ExperimentDir
+    $prevReportId = Get-PreviousReportId -BaseDir $ExperimentDir -KeepHistory:$KeepHistory
     $finishedUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     $pnpTs = if ($script:LastSourceTimestamps['pnp_utc']) { $script:LastSourceTimestamps['pnp_utc'] } else { $finishedUtc }
     $cimTs = if ($script:LastSourceTimestamps['cim_utc']) { $script:LastSourceTimestamps['cim_utc'] } else { $finishedUtc }
@@ -1439,7 +1523,7 @@ function New-Report {
             nvidia_smi_utc = $nvTs
             security_utc   = $secTs
         }
-        experiment_id           = Get-OrCreateExperimentId -BaseDir $ExperimentDir
+        experiment_id           = Get-OrCreateExperimentId -BaseDir $ExperimentDir -KeepHistory:$KeepHistory
         target_bdf              = $resolvedTargetBdf
         evidence_level          = 'reported'
         consent                 = $true
@@ -1675,9 +1759,11 @@ function Format-VietnameseSummary {
 function Save-LocalReport {
     param(
         [Parameter(Mandatory = $true)]$Report,
-        [Parameter(Mandatory = $true)][string]$Dir
+        [Parameter(Mandatory = $true)][string]$Dir,
+        [switch]$KeepHistory
     )
     [void][System.IO.Directory]::CreateDirectory($Dir)
+    [void](Redact-ReportObject -InputObject $Report)
     $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
     $shortId = ([string]$Report.report_id).Split('-')[0]
     $baseName = "vga-report-$stamp-$shortId"
@@ -1687,12 +1773,12 @@ function Save-LocalReport {
     $zipPath = Join-Path -Path $Dir -ChildPath "$baseName.zip"
 
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    $jsonText = $Report | ConvertTo-Json -Depth 12
-    $summaryText = Format-VietnameseSummary -Report $Report
+    $jsonText = Remove-Pii -Text ($Report | ConvertTo-Json -Depth 12)
+    $summaryText = Remove-Pii -Text (Format-VietnameseSummary -Report $Report)
 
     [System.IO.File]::WriteAllText($jsonPath, $jsonText, $utf8NoBom)
     [System.IO.File]::WriteAllText($summaryPath, $summaryText, $utf8NoBom)
-    Save-LastReportId -BaseDir $Dir -ReportId ([string]$Report.report_id)
+    Save-LastReportId -BaseDir $Dir -ReportId ([string]$Report.report_id) -KeepHistory:$KeepHistory
 
     $stageDir = Join-Path -Path ([System.IO.Path]::GetTempPath()) ("vga-zip-" + [guid]::NewGuid().ToString())
     try {
@@ -1840,7 +1926,8 @@ function Send-Report {
         [Parameter(Mandatory = $false)][AllowNull()][string]$ReportDir = $null,
         [Parameter(Mandatory = $false)][long]$NowUnix = 0,
         [Parameter(Mandatory = $false)][switch]$AllowLoopbackHttp,
-        [Parameter(Mandatory = $false)][AllowNull()][string]$ExistingPendingPath = $null
+        [Parameter(Mandatory = $false)][AllowNull()][string]$ExistingPendingPath = $null,
+        [Parameter(Mandatory = $false)][switch]$KeepHistory
     )
 
     $parsedUri = $null
@@ -1864,17 +1951,18 @@ function Send-Report {
     $bodyText = $null
 
     if ($Report -is [string]) {
-        $bodyText = $Report
+        $bodyText = Remove-Pii -Text $Report
     } else {
+        [void](Redact-ReportObject -InputObject $Report)
         if (-not [string]::IsNullOrWhiteSpace($ReportDir)) {
-            $saved = Save-LocalReport -Report $Report -Dir $ReportDir
+            $saved = Save-LocalReport -Report $Report -Dir $ReportDir -KeepHistory:$KeepHistory
             $bodyText = $saved.JsonText
             if ([string]::IsNullOrWhiteSpace($pendingPath)) {
                 $pendingPath = Join-Path -Path $ReportDir -ChildPath "$($saved.BaseName).pending.json"
                 [System.IO.File]::WriteAllText($pendingPath, $bodyText, $utf8NoBom)
             }
         } else {
-            $bodyText = $Report | ConvertTo-Json -Depth 12
+            $bodyText = Remove-Pii -Text ($Report | ConvertTo-Json -Depth 12)
         }
     }
 
@@ -1968,14 +2056,26 @@ function Read-ChoiceWithDefault {
 }
 
 function Start-CollectorInteractive {
+    param(
+        [switch]$SaveOnly,
+        [switch]$KeepHistory,
+        [switch]$DetailedContext,
+        [switch]$SelectGpu
+    )
+    $useSaveOnly = $SaveOnly -or ($env:VGA_SAVE_ONLY -eq '1')
+    $useKeepHistory = $KeepHistory -or ($env:VGA_KEEP_HISTORY -eq '1')
+    $useDetailedContext = $DetailedContext -or ($env:VGA_DETAILED_CONTEXT -eq '1')
+    $useSelectGpu = $SelectGpu -or ($env:VGA_SELECT_GPU -eq '1')
+
     Write-Host '================================================================'
     Write-Host '  THU THẬP BÁO CÁO CHẨN ĐOÁN VGA (CHỈ ĐỌC - KHÔNG GHI HỆ THỐNG)'
     Write-Host '================================================================'
     Write-Host 'Công cụ chỉ đọc thông tin VGA/PCIe/nền tảng (không sửa registry,'
     Write-Host 'không sửa MMIO, không cài đặt Persistence, không cần Admin).'
-    Write-Host "Máy chủ đích dự kiến: $($script:TargetHostname)"
-    Write-Host 'Chính sách dữ liệu: Issue GitHub là CÔNG KHAI. Không thu thập'
-    Write-Host 'tên người dùng, tên máy, đường dẫn cá nhân, IP/MAC, serial, UUID GPU.'
+    Write-Host 'Quyền riêng tư: Chế độ [1] Lưu cục bộ là OFFLINE 100% (không gửi mạng).'
+    Write-Host 'Mặc định KHÔNG lưu tệp theo dõi phiên (experiment_id.txt / last_report_id.txt).'
+    Write-Host "Nếu chọn [2] Gửi: dữ liệu đẩy qua $($script:TargetHostname) lên GitHub Issue CÔNG KHAI."
+    Write-Host 'Mã nguồn mở máy chủ: worker/vga-reports/src/index.js | Chính sách: docs/vga-report/policy.md'
     Write-Host ''
 
     $outDir = if (-not [string]::IsNullOrWhiteSpace($env:VGA_BAT_DIR)) { Join-Path $env:VGA_BAT_DIR 'vga-reports-out' } else { Join-Path (Get-Location).Path 'vga-reports-out' }
@@ -1987,7 +2087,7 @@ function Start-CollectorInteractive {
             if ($resendChoice -match '^(c|co|có|y|yes)$') {
                 foreach ($pf in $pendingFiles) {
                     $rawPending = [System.IO.File]::ReadAllText($pf.FullName, [System.Text.Encoding]::UTF8)
-                    $resendRes = Send-Report -Report $rawPending -ExistingPendingPath $pf.FullName
+                    $resendRes = Send-Report -Report $rawPending -ExistingPendingPath $pf.FullName -KeepHistory:$useKeepHistory
                     if ($resendRes.Status -in @('sent', 'duplicate') -and -not [string]::IsNullOrWhiteSpace($resendRes.IssueUrl)) {
                         Write-Host "  [OK] Đã gửi ($($resendRes.Status)): $($resendRes.IssueUrl)"
                     } else {
@@ -2005,7 +2105,7 @@ function Start-CollectorInteractive {
     $targetBdf = $null
     if (-not [string]::IsNullOrWhiteSpace($env:VGA_TARGET_BDF)) {
         $targetBdf = $env:VGA_TARGET_BDF.Trim()
-    } elseif ($inventory.Count -ge 2) {
+    } elseif ($inventory.Count -ge 2 -and $useSelectGpu) {
         $defaultGpu = Select-TargetGpu -Inventory $inventory
         $defaultIdx = 1
         Write-Host 'Phát hiện nhiều GPU:'
@@ -2033,55 +2133,74 @@ function Start-CollectorInteractive {
         if ($chosenGpu -and $chosenGpu.bdf -and $chosenGpu.bdf.status -eq 'ok') {
             $targetBdf = [string]$chosenGpu.bdf.value
         }
+    } else {
+        $autoGpu = Select-TargetGpu -Inventory $inventory
+        if ($autoGpu -and $autoGpu.bdf -and $autoGpu.bdf.status -eq 'ok') {
+            $targetBdf = [string]$autoGpu.bdf.value
+        }
     }
     $nvidia = Get-NvidiaInfo -Inventory $inventory -TargetBdf $targetBdf
 
-    $modState = Read-ChoiceWithDefault -Prompt '1. Trạng thái hàn trở / VBIOS của card:' -DefaultKey '3' -Map ([ordered]@{
-        '1' = @{ Label = 'Nguyên bản (stock)'; Value = 'stock' }
-        '2' = @{ Label = 'Đã mod (modded)'; Value = 'modded' }
-        '3' = @{ Label = 'Không biết'; Value = 'unknown' }
-    })
-    $modType = Read-ChoiceWithDefault -Prompt '1b. Loại can thiệp/mod đã áp dụng:' -DefaultKey '8' -Map ([ordered]@{
-        '1' = @{ Label = 'Không mod / nguyên bản (none)'; Value = 'none' }
-        '2' = @{ Label = 'Mod driver / INF (driver)'; Value = 'driver' }
-        '3' = @{ Label = 'EFI / UEFI loader (efi)'; Value = 'efi' }
-        '4' = @{ Label = 'Flash VBIOS (vbios)'; Value = 'vbios' }
-        '5' = @{ Label = 'Hàn trở / strap phần cứng (strap)'; Value = 'strap' }
-        '6' = @{ Label = 'Bộ mở khóa AIO / LNKCTL2 (software_aio)'; Value = 'software_aio' }
-        '7' = @{ Label = 'Kết hợp nhiều cách (multi)'; Value = 'multi' }
-        '8' = @{ Label = 'Không biết (unknown)'; Value = 'unknown' }
-    })
-    $riser = Read-ChoiceWithDefault -Prompt '2. Cách cắm card:' -DefaultKey '3' -Map ([ordered]@{
-        '1' = @{ Label = 'Cắm trực tiếp vào mainboard'; Value = 'direct' }
-        '2' = @{ Label = 'Dùng dây riser'; Value = 'riser' }
-        '3' = @{ Label = 'Không biết'; Value = 'unknown' }
-    })
-    $slot = Read-ChoiceWithDefault -Prompt '3. Khe PCIe đang cắm:' -DefaultKey '4' -Map ([ordered]@{
-        '1' = @{ Label = 'Khe x16 nối CPU'; Value = 'cpu_x16' }
-        '2' = @{ Label = 'Khe qua chipset'; Value = 'chipset' }
-        '3' = @{ Label = 'Khác'; Value = 'other' }
-        '4' = @{ Label = 'Không biết'; Value = 'unknown' }
-    })
-    $stage = Read-ChoiceWithDefault -Prompt '4. Giai đoạn thu thập:' -DefaultKey '5' -Map ([ordered]@{
-        '1' = @{ Label = 'Trước khi mở khóa'; Value = 'before_unlock' }
-        '2' = @{ Label = 'Sau khi mở khóa'; Value = 'after_unlock' }
-        '3' = @{ Label = 'Đang xử lý sự cố'; Value = 'troubleshooting' }
-        '4' = @{ Label = 'Card đối chứng (không phải CMP)'; Value = 'baseline' }
-        '5' = @{ Label = 'Không biết'; Value = 'unknown' }
-    })
-    $notes = Read-Host '5. Ghi chú thêm (tối đa 500 ký tự, Enter để bỏ qua)'
-
-    $ctx = [pscustomobject]@{
-        mod_state = $modState
-        mod_type  = $modType
-        riser     = $riser
-        slot      = $slot
-        stage     = $stage
-        notes     = $notes
+    if ($useDetailedContext) {
+        $modState = Read-ChoiceWithDefault -Prompt '1. Trạng thái hàn trở / VBIOS của card:' -DefaultKey '3' -Map ([ordered]@{
+            '1' = @{ Label = 'Nguyên bản (stock)'; Value = 'stock' }
+            '2' = @{ Label = 'Đã mod (modded)'; Value = 'modded' }
+            '3' = @{ Label = 'Không biết'; Value = 'unknown' }
+        })
+        $modType = Read-ChoiceWithDefault -Prompt '1b. Loại can thiệp/mod đã áp dụng:' -DefaultKey '8' -Map ([ordered]@{
+            '1' = @{ Label = 'Không mod / nguyên bản (none)'; Value = 'none' }
+            '2' = @{ Label = 'Mod driver / INF (driver)'; Value = 'driver' }
+            '3' = @{ Label = 'EFI / UEFI loader (efi)'; Value = 'efi' }
+            '4' = @{ Label = 'Flash VBIOS (vbios)'; Value = 'vbios' }
+            '5' = @{ Label = 'Hàn trở / strap phần cứng (strap)'; Value = 'strap' }
+            '6' = @{ Label = 'Bộ mở khóa AIO / LNKCTL2 (software_aio)'; Value = 'software_aio' }
+            '7' = @{ Label = 'Kết hợp nhiều cách (multi)'; Value = 'multi' }
+            '8' = @{ Label = 'Không biết (unknown)'; Value = 'unknown' }
+        })
+        $riser = Read-ChoiceWithDefault -Prompt '2. Cách cắm card:' -DefaultKey '3' -Map ([ordered]@{
+            '1' = @{ Label = 'Cắm trực tiếp vào mainboard'; Value = 'direct' }
+            '2' = @{ Label = 'Dùng dây riser'; Value = 'riser' }
+            '3' = @{ Label = 'Không biết'; Value = 'unknown' }
+        })
+        $slot = Read-ChoiceWithDefault -Prompt '3. Khe PCIe đang cắm:' -DefaultKey '4' -Map ([ordered]@{
+            '1' = @{ Label = 'Khe x16 nối CPU'; Value = 'cpu_x16' }
+            '2' = @{ Label = 'Khe qua chipset'; Value = 'chipset' }
+            '3' = @{ Label = 'Khác'; Value = 'other' }
+            '4' = @{ Label = 'Không biết'; Value = 'unknown' }
+        })
+        $stage = Read-ChoiceWithDefault -Prompt '4. Giai đoạn thu thập:' -DefaultKey '5' -Map ([ordered]@{
+            '1' = @{ Label = 'Trước khi mở khóa'; Value = 'before_unlock' }
+            '2' = @{ Label = 'Sau khi mở khóa'; Value = 'after_unlock' }
+            '3' = @{ Label = 'Đang xử lý sự cố'; Value = 'troubleshooting' }
+            '4' = @{ Label = 'Card đối chứng (không phải CMP)'; Value = 'baseline' }
+            '5' = @{ Label = 'Không biết'; Value = 'unknown' }
+        })
+        $notes = Read-Host '5. Ghi chú thêm (tối đa 500 ký tự, Enter để bỏ qua)'
+        $ctx = [pscustomobject]@{
+            mod_state = $modState
+            mod_type  = $modType
+            riser     = $riser
+            slot      = $slot
+            stage     = $stage
+            notes     = $notes
+        }
+    } else {
+        $ctx = [pscustomobject]@{
+            mod_state = 'unknown'
+            mod_type  = 'unknown'
+            riser     = 'unknown'
+            slot      = 'unknown'
+            stage     = 'unknown'
+            notes     = ''
+        }
     }
 
     $outDir = if (-not [string]::IsNullOrWhiteSpace($env:VGA_BAT_DIR)) { Join-Path $env:VGA_BAT_DIR 'vga-reports-out' } else { Join-Path (Get-Location).Path 'vga-reports-out' }
-    $report = New-Report -Inventory $inventory -Nvidia $nvidia -Context $ctx -ExperimentDir $outDir -TargetBdf $targetBdf -CollectionStartedUtc $collectionStartedUtc
+    $report = New-Report -Inventory $inventory -Nvidia $nvidia -Context $ctx -ExperimentDir $outDir -TargetBdf $targetBdf -CollectionStartedUtc $collectionStartedUtc -KeepHistory:$useKeepHistory
+
+    $rawPreviewJson = $report | ConvertTo-Json -Depth 12
+    [void](Redact-ReportObject -InputObject $report)
+    $sanitizedPreviewJson = Remove-Pii -Text ($report | ConvertTo-Json -Depth 12)
 
     Write-Host ''
     Write-Host (Format-VietnameseSummary -Report $report)
@@ -2089,26 +2208,28 @@ function Start-CollectorInteractive {
         Write-Host "[CẢNH BÁO] nvidia-smi không lấy đủ 18/18 trường NVIDIA cơ bản. Các trường thiếu:"
         Write-Host "  $((@($report.nvidia.missing)) -join ', ')"
     }
-    $previewJson = $report | ConvertTo-Json -Depth 12
-    $previewRedacted = Remove-Pii -Text $previewJson
-    if ($previewRedacted -eq $previewJson) {
+    if ($sanitizedPreviewJson -eq $rawPreviewJson) {
         Write-Host '[KIỂM TRA PII] Không phát hiện thông tin cá nhân (đường dẫn người dùng/IP/MAC/serial/UUID).'
     } else {
-        Write-Host '[CẢNH BÁO PII] Đã phát hiện và lọc chuỗi nhạy cảm trước khi xuất.'
+        Write-Host '[CẢNH BÁO PII] Đã phát hiện và tự động lọc sạch chuỗi nhạy cảm trong báo cáo.'
     }
     Write-Host ''
-    Write-Host 'Lựa chọn hành động:'
-    Write-Host '  [1] Chỉ lưu báo cáo cục bộ (JSON + summary + ZIP)'
-    Write-Host '  [2] Gửi báo cáo lên GitHub Issue (đồng ý công khai dữ liệu trên)'
-    Write-Host '  [3] Thoát không lưu'
-    $action = Read-Host 'Nhập lựa chọn (1/2/3)'
+    if ($useSaveOnly) {
+        $action = '1'
+    } else {
+        Write-Host 'Lựa chọn hành động:'
+        Write-Host '  [1] Chỉ lưu báo cáo cục bộ (JSON + summary + ZIP — Offline 100%)'
+        Write-Host '  [2] Gửi báo cáo lên GitHub Issue (đồng ý công khai dữ liệu trên)'
+        Write-Host '  [3] Thoát không lưu'
+        $action = Read-Host 'Nhập lựa chọn (1/2/3)'
+    }
     if ($action -eq '1') {
-        $saved = Save-LocalReport -Report $report -Dir $outDir
+        $saved = Save-LocalReport -Report $report -Dir $outDir -KeepHistory:$useKeepHistory
         Write-Host "Đã lưu báo cáo cục bộ tại:"
         Write-Host "  JSON: $($saved.JsonPath)"
         Write-Host "  ZIP : $($saved.ZipPath)"
     } elseif ($action -eq '2') {
-        $sendRes = Send-Report -Report $report -ReportDir $outDir
+        $sendRes = Send-Report -Report $report -ReportDir $outDir -KeepHistory:$useKeepHistory
         if ($sendRes.Status -in @('sent', 'duplicate') -and -not [string]::IsNullOrWhiteSpace($sendRes.IssueUrl)) {
             $label = if ($sendRes.Status -eq 'duplicate') { 'Báo cáo đã tồn tại (trùng lặp)' } else { 'Đã gửi báo cáo thành công' }
             Write-Host "${label}: $($sendRes.IssueUrl)"
