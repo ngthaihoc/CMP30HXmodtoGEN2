@@ -3,8 +3,7 @@ main = "src/index.js"
 compatibility_date = "2024-11-01"
 
 [vars]
-# Đặt repo thử trước (ví dụ: ngthaihoc/vga-report-sandbox), sau khi đạt mới đổi sang ngthaihoc/CMP30HXmodtoGEN2
-TARGET_REPO = "ngthaihoc/vga-report-sandbox"
+TARGET_REPO = "ngthaihoc/CMP30HXmodtoGEN2"
 INTAKE_ENABLED = "true"
 DAILY_CAP = "200"
 IP_LIMIT = "10"
