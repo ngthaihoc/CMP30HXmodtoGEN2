@@ -1462,11 +1462,402 @@ function Save-LastReportId {
     }
     $dir = if (-not [string]::IsNullOrWhiteSpace($BaseDir)) { $BaseDir } else { $env:VGA_BAT_DIR }
     if (-not [string]::IsNullOrWhiteSpace($dir)) {
+        $tmpPath = $null
         try {
             [void][System.IO.Directory]::CreateDirectory($dir)
             $prevPath = Join-Path -Path $dir -ChildPath 'last_report_id.txt'
-            [System.IO.File]::WriteAllText($prevPath, $ReportId, (New-Object System.Text.UTF8Encoding($false)))
-        } catch {}
+            $tmpPath = Join-Path -Path $dir -ChildPath ("last_report_id.tmp." + [guid]::NewGuid().ToString('N'))
+            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($tmpPath, $ReportId, $utf8NoBom)
+            if (Test-Path -LiteralPath $prevPath) {
+                try {
+                    [System.IO.File]::Replace($tmpPath, $prevPath, $null, $true)
+                    $tmpPath = $null
+                } catch {
+                    Move-Item -LiteralPath $tmpPath -Destination $prevPath -Force
+                    $tmpPath = $null
+                }
+            } else {
+                Move-Item -LiteralPath $tmpPath -Destination $prevPath -Force
+                $tmpPath = $null
+            }
+        } catch {
+        } finally {
+            if ($tmpPath -and (Test-Path -LiteralPath $tmpPath)) {
+                Remove-Item -LiteralPath $tmpPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
+function Find-PreviousReportInDir {
+    param(
+        [AllowNull()][string]$Dir,
+        [AllowNull()][string]$ReportId
+    )
+    if ([string]::IsNullOrWhiteSpace($Dir) -or [string]::IsNullOrWhiteSpace($ReportId)) {
+        return [pscustomobject]@{ Found = $false; Valid = $false; Report = $null }
+    }
+    $parsedId = [guid]::Empty
+    if (-not [guid]::TryParse($ReportId.Trim(), [ref]$parsedId)) {
+        return [pscustomobject]@{ Found = $false; Valid = $false; Report = $null }
+    }
+    if (-not (Test-Path -LiteralPath $Dir)) {
+        return [pscustomobject]@{ Found = $false; Valid = $false; Report = $null }
+    }
+    $targetId = $parsedId.ToString()
+    $utf8 = [System.Text.Encoding]::UTF8
+    $files = Get-ChildItem -LiteralPath $Dir -Filter 'vga-report-*.json' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending
+    foreach ($f in @($files)) {
+        if ($f.Name -like '*.pending.json' -or $f.Name -like '*-timeseries.json') { continue }
+        try {
+            $raw = [System.IO.File]::ReadAllText($f.FullName, $utf8)
+            $obj = $raw | ConvertFrom-Json
+            if ($null -eq $obj) { continue }
+            $repId = [string](Get-ObjProp $obj 'report_id')
+            if ([string]::IsNullOrWhiteSpace($repId) -or ($repId.Trim() -ine $targetId)) { continue }
+            if (Test-ReportBasicValidity -Report $obj) {
+                return [pscustomobject]@{ Found = $true; Valid = $true; Report = $obj }
+            }
+            return [pscustomobject]@{ Found = $true; Valid = $false; Report = $null }
+        } catch {
+            continue
+        }
+    }
+    return [pscustomobject]@{ Found = $false; Valid = $false; Report = $null }
+}
+
+function Get-ReportPrimaryGpuTuple {
+    param($Report)
+    if ($null -eq $Report) { return $null }
+    $gpus = @(Get-ObjProp $Report 'gpus')
+    $tBdf = [string](Get-ObjProp $Report 'target_bdf')
+    $matchGpu = $null
+    foreach ($g in $gpus) {
+        $gb = Get-ObjProp $g 'bdf'
+        $gbVal = if ($gb -and $gb.status -eq 'ok') { [string]$gb.value } else { '' }
+        if ($tBdf -and ($gbVal -ieq $tBdf)) { $matchGpu = $g; break }
+    }
+    if ($null -eq $matchGpu -and $gpus.Count -gt 0) { $matchGpu = $gpus[0] }
+    if ($null -eq $matchGpu) { return $null }
+    $getOk = {
+        param($fld)
+        if ($fld -and (Get-ObjProp $fld 'status') -eq 'ok' -and $null -ne (Get-ObjProp $fld 'value')) {
+            return ([string](Get-ObjProp $fld 'value')).Trim().ToUpperInvariant()
+        }
+        return ''
+    }
+    return [pscustomobject]@{
+        Bdf    = (& $getOk (Get-ObjProp $matchGpu 'bdf'))
+        Vendor = (& $getOk (Get-ObjProp $matchGpu 'vendor_id'))
+        Device = (& $getOk (Get-ObjProp $matchGpu 'device_id'))
+        Subsys = (& $getOk (Get-ObjProp $matchGpu 'subsystem_id'))
+        Rev    = (& $getOk (Get-ObjProp $matchGpu 'revision'))
+        Driver = (& $getOk (Get-ObjProp $matchGpu 'driver_version'))
+    }
+}
+
+function Get-ExperimentComparison {
+    param(
+        [Parameter(Mandatory = $true)]$CurrentReport,
+        [AllowNull()][string]$PreviousReportId,
+        [Parameter(Mandatory = $true)][string]$ExperimentId,
+        [AllowNull()][string]$ExperimentDir,
+        [AllowNull()]$Inventory
+    )
+    $trunc = {
+        param([string]$Txt, [int]$MaxLen = 200)
+        $clean = Remove-Pii -Text ([string]$Txt)
+        if ($clean.Length -gt $MaxLen) { return $clean.Substring(0, $MaxLen) }
+        return $clean
+    }
+    $resolvedDir = if (-not [string]::IsNullOrWhiteSpace($ExperimentDir)) { $ExperimentDir } else { $env:VGA_BAT_DIR }
+    $lookup = Find-PreviousReportInDir -Dir $resolvedDir -ReportId $PreviousReportId
+    if (-not $lookup.Found) {
+        return [pscustomobject]@{
+            Comparison = [ordered]@{
+                status                 = 'missing_previous'
+                previous_report_id     = $PreviousReportId
+                previous_experiment_id = $null
+                experiment_matched     = $false
+                gpu_identity_matched   = $false
+                stage_transition       = $null
+                stage_order_valid      = $false
+                intentional_changes    = @()
+                confounders            = @('previous_report_not_found_locally')
+                deltas                 = @()
+                reason                 = (& $trunc "Không tìm thấy tệp báo cáo trước ($PreviousReportId) trong thư mục cục bộ." 300)
+            }
+            Complete   = $false
+            CompStatus = 'partial'
+            Missing    = @('previous_report_file')
+            Reason     = 'Không tìm thấy tệp JSON báo cáo trước trong thư mục cục bộ'
+        }
+    }
+    if (-not $lookup.Valid -or $null -eq $lookup.Report) {
+        return [pscustomobject]@{
+            Comparison = [ordered]@{
+                status                 = 'invalid_previous'
+                previous_report_id     = $PreviousReportId
+                previous_experiment_id = $null
+                experiment_matched     = $false
+                gpu_identity_matched   = $false
+                stage_transition       = $null
+                stage_order_valid      = $false
+                intentional_changes    = @()
+                confounders            = @('previous_report_invalid')
+                deltas                 = @()
+                reason                 = (& $trunc "Tệp báo cáo trước ($PreviousReportId) không hợp lệ theo schema cơ bản." 300)
+            }
+            Complete   = $false
+            CompStatus = 'partial'
+            Missing    = @('valid_previous_report')
+            Reason     = 'Báo cáo trước không hợp lệ nên không thể đối chứng'
+        }
+    }
+
+    $prev = $lookup.Report
+    $prevExpRaw = [string](Get-ObjProp $prev 'experiment_id')
+    $expGuid = [guid]::Empty
+    $prevExpId = if ([guid]::TryParse($prevExpRaw, [ref]$expGuid)) { $expGuid.ToString() } else { $null }
+    $expMatched = ($null -ne $prevExpId -and ($prevExpId -ieq $ExperimentId))
+
+    $intentional = New-Object 'System.Collections.Generic.List[string]'
+    $confounders = New-Object 'System.Collections.Generic.List[string]'
+    $addIntentional = { param([string]$s) if ($intentional.Count -lt 20 -and -not [string]::IsNullOrWhiteSpace($s)) { [void]$intentional.Add((& $trunc $s 200)) } }
+    $addConfounder = { param([string]$s) if ($confounders.Count -lt 20 -and -not [string]::IsNullOrWhiteSpace($s)) { [void]$confounders.Add((& $trunc $s 200)) } }
+
+    if (-not $expMatched) {
+        & $addConfounder "experiment_id_mismatch: $prevExpId -> $ExperimentId"
+    }
+
+    $prevCtx = Get-ObjProp $prev 'context'
+    $curCtx = Get-ObjProp $CurrentReport 'context'
+    $prevStage = if ($prevCtx -and (Get-ObjProp $prevCtx 'stage')) { [string](Get-ObjProp $prevCtx 'stage') } else { 'unknown' }
+    $curStage = if ($curCtx -and (Get-ObjProp $curCtx 'stage')) { [string](Get-ObjProp $curCtx 'stage') } else { 'unknown' }
+    $stageTransition = "$prevStage -> $curStage"
+    $stageOrderValid = $false
+    switch ($prevStage) {
+        'baseline'      { $stageOrderValid = ($curStage -in @('before_unlock', 'after_unlock', 'troubleshooting')) }
+        'before_unlock' { $stageOrderValid = ($curStage -in @('after_unlock', 'troubleshooting')) }
+        'after_unlock'  { $stageOrderValid = ($curStage -in @('after_unlock', 'troubleshooting')) }
+        default         { $stageOrderValid = $false }
+    }
+    if (-not $stageOrderValid) {
+        & $addConfounder "stage_order_invalid: $stageTransition"
+    }
+
+    $prevModState = if ($prevCtx -and (Get-ObjProp $prevCtx 'mod_state')) { [string](Get-ObjProp $prevCtx 'mod_state') } else { 'unknown' }
+    $curModState = if ($curCtx -and (Get-ObjProp $curCtx 'mod_state')) { [string](Get-ObjProp $curCtx 'mod_state') } else { 'unknown' }
+    if ($prevModState -ne $curModState) { & $addIntentional "mod_state: $prevModState -> $curModState" }
+    $prevModType = if ($prevCtx -and (Get-ObjProp $prevCtx 'mod_type')) { [string](Get-ObjProp $prevCtx 'mod_type') } else { 'unknown' }
+    $curModType = if ($curCtx -and (Get-ObjProp $curCtx 'mod_type')) { [string](Get-ObjProp $curCtx 'mod_type') } else { 'unknown' }
+    if ($prevModType -ne $curModType) { & $addIntentional "mod_type: $prevModType -> $curModType" }
+
+    $prevRiser = if ($prevCtx -and (Get-ObjProp $prevCtx 'riser')) { [string](Get-ObjProp $prevCtx 'riser') } else { 'unknown' }
+    $curRiser = if ($curCtx -and (Get-ObjProp $curCtx 'riser')) { [string](Get-ObjProp $curCtx 'riser') } else { 'unknown' }
+    if ($prevRiser -ne $curRiser) { & $addConfounder "riser_changed: $prevRiser -> $curRiser" }
+    $prevSlot = if ($prevCtx -and (Get-ObjProp $prevCtx 'slot')) { [string](Get-ObjProp $prevCtx 'slot') } else { 'unknown' }
+    $curSlot = if ($curCtx -and (Get-ObjProp $curCtx 'slot')) { [string](Get-ObjProp $curCtx 'slot') } else { 'unknown' }
+    if ($prevSlot -ne $curSlot) { & $addConfounder "slot_changed: $prevSlot -> $curSlot" }
+
+    $prevGpu = Get-ReportPrimaryGpuTuple -Report $prev
+    $curGpu = Get-ReportPrimaryGpuTuple -Report $CurrentReport
+    $gpuMatched = $false
+    if ($null -ne $prevGpu -and $null -ne $curGpu -and $prevGpu.Vendor -and $curGpu.Vendor -and $prevGpu.Vendor -eq $curGpu.Vendor -and $prevGpu.Device -eq $curGpu.Device) {
+        $sameSubsys = (-not $prevGpu.Subsys -or -not $curGpu.Subsys -or $prevGpu.Subsys -eq $curGpu.Subsys)
+        $sameRev = (-not $prevGpu.Rev -or -not $curGpu.Rev -or $prevGpu.Rev -eq $curGpu.Rev)
+        if ($sameSubsys -and $sameRev) {
+            if ($prevGpu.Bdf -and $curGpu.Bdf -and $prevGpu.Bdf -eq $curGpu.Bdf) {
+                $gpuMatched = $true
+            } else {
+                $matchCount = 0
+                foreach ($ig in @($Inventory)) {
+                    $iv = if ($ig.vendor_id -and $ig.vendor_id.status -eq 'ok') { ([string]$ig.vendor_id.value).Trim().ToUpperInvariant() } else { '' }
+                    $id = if ($ig.device_id -and $ig.device_id.status -eq 'ok') { ([string]$ig.device_id.value).Trim().ToUpperInvariant() } else { '' }
+                    $isub = if ($ig.subsystem_id -and $ig.subsystem_id.status -eq 'ok') { ([string]$ig.subsystem_id.value).Trim().ToUpperInvariant() } else { '' }
+                    $irev = if ($ig.revision -and $ig.revision.status -eq 'ok') { ([string]$ig.revision.value).Trim().ToUpperInvariant() } else { '' }
+                    if ($iv -eq $curGpu.Vendor -and $id -eq $curGpu.Device -and (-not $curGpu.Subsys -or -not $isub -or $isub -eq $curGpu.Subsys) -and (-not $curGpu.Rev -or -not $irev -or $irev -eq $curGpu.Rev)) {
+                        $matchCount += 1
+                    }
+                }
+                if ($matchCount -ge 2) {
+                    $gpuMatched = $false
+                    & $addConfounder 'ambiguous_multi_gpu_bdf_shift'
+                } elseif ($prevSlot -ne 'unknown' -and $curSlot -ne 'unknown' -and $prevSlot -ne $curSlot) {
+                    $gpuMatched = $false
+                    & $addConfounder "bdf_shifted_with_slot_change: $($prevGpu.Bdf) -> $($curGpu.Bdf)"
+                } else {
+                    $gpuMatched = $true
+                    & $addIntentional "bdf_shifted_same_gpu: $($prevGpu.Bdf) -> $($curGpu.Bdf)"
+                }
+            }
+        } else {
+            & $addConfounder 'gpu_subsys_or_rev_changed'
+        }
+    } else {
+        & $addConfounder 'gpu_pci_identity_changed'
+    }
+
+    $getNvFieldOk = {
+        param($Rep, [string]$FieldName)
+        $nv = Get-ObjProp $Rep 'nvidia'
+        $flds = if ($nv) { Get-ObjProp $nv 'fields' } else { $null }
+        $f = if ($flds) { Get-ObjProp $flds $FieldName } else { $null }
+        if ($f -and (Get-ObjProp $f 'status') -eq 'ok' -and $null -ne (Get-ObjProp $f 'value')) {
+            return ([string](Get-ObjProp $f 'value')).Trim()
+        }
+        return $null
+    }
+    $prevDrv = & $getNvFieldOk $prev 'driver_version'
+    if (-not $prevDrv -and $prevGpu) { $prevDrv = $prevGpu.Driver }
+    $curDrv = & $getNvFieldOk $CurrentReport 'driver_version'
+    if (-not $curDrv -and $curGpu) { $curDrv = $curGpu.Driver }
+    if ($prevDrv -and $curDrv -and $prevDrv -ne $curDrv) {
+        if ($curModType -in @('driver', 'software_aio', 'multi')) {
+            & $addIntentional "driver_version: $prevDrv -> $curDrv"
+        } else {
+            & $addConfounder "driver_version_changed: $prevDrv -> $curDrv"
+        }
+    }
+
+    $prevVbios = & $getNvFieldOk $prev 'vbios_version'
+    $curVbios = & $getNvFieldOk $CurrentReport 'vbios_version'
+    if ($prevVbios -and $curVbios -and $prevVbios -ne $curVbios) {
+        if ($curModType -in @('vbios', 'multi')) {
+            & $addIntentional "vbios_version: $prevVbios -> $curVbios"
+        } else {
+            & $addConfounder "vbios_version_changed: $prevVbios -> $curVbios"
+        }
+    }
+
+    $getPlatOk = {
+        param($Rep, [string]$Key)
+        $pl = Get-ObjProp $Rep 'platform'
+        $f = if ($pl) { Get-ObjProp $pl $Key } else { $null }
+        if ($f -and (Get-ObjProp $f 'status') -eq 'ok' -and $null -ne (Get-ObjProp $f 'value')) {
+            return ([string](Get-ObjProp $f 'value')).Trim()
+        }
+        return $null
+    }
+    $prevBios = & $getPlatOk $prev 'bios_version'
+    $curBios = & $getPlatOk $CurrentReport 'bios_version'
+    if ($prevBios -and $curBios -and $prevBios -ne $curBios) {
+        & $addConfounder "bios_version_changed: $prevBios -> $curBios"
+    }
+
+    $prevLt = Get-ObjProp $prev 'load_test'
+    $curLt = Get-ObjProp $CurrentReport 'load_test'
+    $prevBw = if ($prevLt) { Get-ObjProp $prevLt 'pcie_bandwidth' } else { $null }
+    $curBw = if ($curLt) { Get-ObjProp $curLt 'pcie_bandwidth' } else { $null }
+    $bwCompatible = $gpuMatched
+    if ($prevBw -and $curBw) {
+        $pm = [string](Get-ObjProp $prevBw 'method'); $cm = [string](Get-ObjProp $curBw 'method')
+        $pp = [bool](Get-ObjProp $prevBw 'pinned_host'); $cp = [bool](Get-ObjProp $curBw 'pinned_host')
+        $ps = [int](Get-ObjProp $prevBw 'transfer_size_mb'); $cs = [int](Get-ObjProp $curBw 'transfer_size_mb')
+        $pi = [int](Get-ObjProp $prevBw 'iterations'); $ci = [int](Get-ObjProp $curBw 'iterations')
+        if ($pm -ne $cm) { $bwCompatible = $false; & $addConfounder "bandwidth_method_changed: $pm -> $cm" }
+        if ($pp -ne $cp) { $bwCompatible = $false; & $addConfounder "pinned_host_changed: $pp -> $cp" }
+        if ($ps -ne $cs) { $bwCompatible = $false; & $addConfounder "transfer_size_mb_changed: $ps -> $cs" }
+        if ($pi -ne $ci) { & $addConfounder "iterations_changed: $pi -> $ci" }
+    } else {
+        $bwCompatible = $false
+    }
+
+    $deltas = New-Object 'System.Collections.Generic.List[object]'
+    $getNumField = {
+        param($Field)
+        if ($null -eq $Field) { return $null }
+        if ((Get-ObjProp $Field 'status') -ne 'ok') { return $null }
+        $v = Get-ObjProp $Field 'value'
+        if ($null -eq $v) { return $null }
+        $dv = 0.0
+        if ([double]::TryParse([string]$v, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$dv) -and -not [double]::IsNaN($dv) -and -not [double]::IsInfinity($dv)) {
+            return $dv
+        }
+        return $null
+    }
+    $addDelta = {
+        param([string]$Metric, [string]$Unit, $BeforeField, $AfterField, [bool]$Compatible, [string]$IncompatNote)
+        if ($deltas.Count -ge 20) { return $false }
+        $b = & $getNumField $BeforeField
+        $a = & $getNumField $AfterField
+        if ($null -eq $b -and $null -eq $a) { return $false }
+        $dVal = if ($Compatible -and $null -ne $b -and $null -ne $a) { [math]::Round(($a - $b), 4) } else { $null }
+        $noteTxt = if ($null -eq $b -or $null -eq $a) {
+            'Thiếu giá trị trước hoặc sau để tính delta'
+        } elseif (-not $Compatible) {
+            $IncompatNote
+        } else {
+            'Tương thích để đối chứng'
+        }
+        [void]$deltas.Add([ordered]@{
+            metric     = $Metric
+            unit       = $Unit
+            before     = $b
+            after      = $a
+            delta      = $dVal
+            compatible = $Compatible
+            note       = (& $trunc $noteTxt 200)
+        })
+        return ($Compatible -and $null -ne $dVal)
+    }
+
+    $pPcie = Get-ObjProp $prev 'pcie'; $cPcie = Get-ObjProp $CurrentReport 'pcie'
+    [void](& $addDelta 'pcie_gen_idle' 'gen' (Get-ObjProp $pPcie 'current_gen') (Get-ObjProp $cPcie 'current_gen') $gpuMatched 'Không tương thích do danh tính GPU không khớp')
+    $h2dOk = & $addDelta 'h2d_median_gbps' 'GB/s' (Get-ObjProp $prevBw 'h2d_median_gbps') (Get-ObjProp $curBw 'h2d_median_gbps') $bwCompatible 'Không tương thích do khác phương pháp/pinned/transfer_size hoặc GPU'
+    $d2hOk = & $addDelta 'd2h_median_gbps' 'GB/s' (Get-ObjProp $prevBw 'd2h_median_gbps') (Get-ObjProp $curBw 'd2h_median_gbps') $bwCompatible 'Không tương thích do khác phương pháp/pinned/transfer_size hoặc GPU'
+    $pCt = if ($prevLt) { Get-ObjProp $prevLt 'compute_test' } else { $null }
+    $cCt = if ($curLt) { Get-ObjProp $curLt 'compute_test' } else { $null }
+    [void](& $addDelta 'fp32_gflops' 'GFLOPS' (Get-ObjProp $pCt 'fp32_gflops') (Get-ObjProp $cCt 'fp32_gflops') $gpuMatched 'Không tương thích do danh tính GPU không khớp')
+    $pRb = if (Get-ObjProp $prev 'topology') { Get-ObjProp (Get-ObjProp $prev 'topology') 'rebar' } else { $null }
+    $cRb = if (Get-ObjProp $CurrentReport 'topology') { Get-ObjProp (Get-ObjProp $CurrentReport 'topology') 'rebar' } else { $null }
+    [void](& $addDelta 'bar1_total_mib' 'MiB' (Get-ObjProp $pRb 'bar1_total_mib') (Get-ObjProp $cRb 'bar1_total_mib') $gpuMatched 'Không tương thích do danh tính GPU không khớp')
+    $getNvF = { param($Rep, [string]$Key) $nv = Get-ObjProp $Rep 'nvidia'; $f = if ($nv) { Get-ObjProp $nv 'fields' } else { $null }; if ($f) { Get-ObjProp $f $Key } else { $null } }
+    [void](& $addDelta 'enforced_power_limit_w' 'W' (& $getNvF $prev 'enforced.power.limit') (& $getNvF $CurrentReport 'enforced.power.limit') $gpuMatched 'Không tương thích do danh tính GPU không khớp')
+
+    $hasCompatibleLoadDeltas = ($h2dOk -and $d2hOk)
+    $cmpStatus = 'partial'
+    $compComplete = $false
+    $compStatus = 'partial'
+    $compMiss = New-Object 'System.Collections.Generic.List[string]'
+    if (-not $hasCompatibleLoadDeltas) { [void]$compMiss.Add('paired_load_metrics') }
+    if ($expMatched -and $gpuMatched -and $stageOrderValid -and $hasCompatibleLoadDeltas -and $confounders.Count -eq 0) {
+        $cmpStatus = 'ok'
+        $compComplete = $true
+        $compStatus = 'ok'
+        $compMiss.Clear()
+        $cmpReason = "Đối chứng hợp lệ ($stageTransition): đã khớp experiment, GPU và băng thông PCIe dưới tải."
+    } elseif ((-not $expMatched) -or (-not $gpuMatched) -or (-not $stageOrderValid)) {
+        $cmpStatus = 'mismatched'
+        if (-not $expMatched) { [void]$compMiss.Add('matching_experiment_id') }
+        if (-not $gpuMatched) { [void]$compMiss.Add('matching_gpu_identity') }
+        if (-not $stageOrderValid) { [void]$compMiss.Add('valid_stage_transition') }
+        $cmpReason = "Đối chứng không khớp điều kiện ($stageTransition): $(($confounders.ToArray()) -join '; ')."
+    } else {
+        $cmpStatus = 'partial'
+        if ($confounders.Count -gt 0) { [void]$compMiss.Add('confounder_free_pair') }
+        $cmpReason = "Đã liên kết báo cáo trước ($stageTransition) nhưng chưa đủ cặp đo tải tương thích hoặc có yếu tố gây nhiễu."
+    }
+
+    return [pscustomobject]@{
+        Comparison = [ordered]@{
+            status                 = $cmpStatus
+            previous_report_id     = $PreviousReportId
+            previous_experiment_id = $prevExpId
+            experiment_matched     = $expMatched
+            gpu_identity_matched   = $gpuMatched
+            stage_transition       = $stageTransition
+            stage_order_valid      = $stageOrderValid
+            intentional_changes    = $intentional.ToArray()
+            confounders            = $confounders.ToArray()
+            deltas                 = $deltas.ToArray()
+            reason                 = (& $trunc $cmpReason 300)
+        }
+        Complete   = $compComplete
+        CompStatus = $compStatus
+        Missing    = $compMiss.ToArray()
+        Reason     = (& $trunc $cmpReason 200)
     }
 }
 
@@ -2608,6 +2999,8 @@ function New-Report {
         [void]$stabMissing.Add('tdr_events')
     }
 
+    $experimentId = Get-OrCreateExperimentId -BaseDir $ExperimentDir -KeepHistory:$KeepHistory
+
     $completeness = [ordered]@{
         inventory  = (& $newCompEntry ($invMissing.Count -eq 0) $(if ($invMissing.Count -eq 0) { 'ok' } elseif ($invArray.Count -gt 0) { 'partial' } else { 'error' }) $invMissing.ToArray() $(if ($invMissing.Count -eq 0) { '' } else { 'Một hoặc nhiều GPU lỗi đọc thuộc tính PnP' }))
         topology   = (& $newCompEntry $topoOk $(if ($topoOk) { 'ok' } else { 'partial' }) $topoMissing.ToArray() $topoReason)
@@ -2632,7 +3025,7 @@ function New-Report {
             nvidia_smi_utc = $nvTs
             security_utc   = $secTs
         }
-        experiment_id           = Get-OrCreateExperimentId -BaseDir $ExperimentDir -KeepHistory:$KeepHistory
+        experiment_id           = $experimentId
         target_bdf              = $resolvedTargetBdf
         evidence_level          = $evidenceLevel
         consent                 = $true
@@ -2658,6 +3051,16 @@ function New-Report {
     }
     if ($null -ne $stabObj) {
         $resultReport['stability'] = $stabObj
+    }
+    if (-not [string]::IsNullOrWhiteSpace($prevReportId)) {
+        $cmpRes = Get-ExperimentComparison -CurrentReport $resultReport -PreviousReportId $prevReportId -ExperimentId $experimentId -ExperimentDir $ExperimentDir -Inventory $invArray
+        if ($null -ne $cmpRes -and $null -ne $cmpRes.Comparison) {
+            $resultReport['comparison'] = $cmpRes.Comparison
+            $resultReport['completeness']['comparison'] = (& $newCompEntry ([bool]$cmpRes.Complete) ([string]$cmpRes.CompStatus) ([string[]]$cmpRes.Missing) ([string]$cmpRes.Reason))
+            if ($cmpRes.Comparison.status -eq 'ok' -and $resultReport['evidence_level'] -eq 'observed') {
+                $resultReport['evidence_level'] = 'compared'
+            }
+        }
     }
     return $resultReport
 }
@@ -2910,6 +3313,22 @@ function Format-VietnameseSummary {
         [void]$sb.AppendLine("Truy vấn     : $($st.query_status) | WHEA(in=$($st.whea.total_in_window), PCIe=$($st.whea.pcie_matched_count), out=$($st.whea.out_of_window_count)) | TDR(in=$($st.tdr.total_in_window), cand=$($st.tdr.candidate_tdr_count), Display4101=$($st.tdr.display_reset_count))")
     }
 
+    if ($Report.comparison) {
+        $cmp = $Report.comparison
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine('--- Đối chứng cùng chuỗi thử nghiệm (Comparison) ---')
+        [void]$sb.AppendLine("Trạng thái   : $($cmp.status) | prev=$($cmp.previous_report_id) | stage=$($cmp.stage_transition) (valid=$($cmp.stage_order_valid)) | gpu_match=$($cmp.gpu_identity_matched)")
+        foreach ($dl in @($cmp.deltas)) {
+            if ($dl.compatible -and $null -ne $dl.delta) {
+                $sign = if ($dl.delta -ge 0) { '+' } else { '' }
+                [void]$sb.AppendLine("  Delta $($dl.metric): $($dl.before) -> $($dl.after) ($sign$($dl.delta) $($dl.unit))")
+            }
+        }
+        if (@($cmp.confounders).Count -gt 0) {
+            [void]$sb.AppendLine("  Yếu tố nhiễu : $((@($cmp.confounders)) -join '; ')")
+        }
+    }
+
     if ($Report.completeness) {
         [void]$sb.AppendLine('')
         [void]$sb.AppendLine('--- Mức độ đầy đủ theo nhóm bằng chứng ---')
@@ -2958,9 +3377,9 @@ function Save-LocalReport {
         $tsFullText = Remove-Pii -Text (@($FullSamples) | ConvertTo-Json -Depth 6)
         [System.IO.File]::WriteAllText($tsFullPath, $tsFullText, $utf8NoBom)
     }
-    Save-LastReportId -BaseDir $Dir -ReportId ([string]$Report.report_id) -KeepHistory:$KeepHistory
 
     $stageDir = Join-Path -Path ([System.IO.Path]::GetTempPath()) ("vga-zip-" + [guid]::NewGuid().ToString())
+    $savedOk = $false
     try {
         [void][System.IO.Directory]::CreateDirectory($stageDir)
         [System.IO.File]::Copy($jsonPath, (Join-Path -Path $stageDir -ChildPath 'report.json'), $true)
@@ -2973,8 +3392,12 @@ function Save-LocalReport {
         }
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         [System.IO.Compression.ZipFile]::CreateFromDirectory($stageDir, $zipPath)
+        $savedOk = $true
     } finally {
         Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ($savedOk) {
+        Save-LastReportId -BaseDir $Dir -ReportId ([string]$Report.report_id) -KeepHistory:$KeepHistory
     }
 
     return [pscustomobject]@{
@@ -3110,7 +3533,8 @@ function Send-Report {
         [Parameter(Mandatory = $false)][long]$NowUnix = 0,
         [Parameter(Mandatory = $false)][switch]$AllowLoopbackHttp,
         [Parameter(Mandatory = $false)][AllowNull()][string]$ExistingPendingPath = $null,
-        [Parameter(Mandatory = $false)][switch]$KeepHistory
+        [Parameter(Mandatory = $false)][switch]$KeepHistory,
+        [Parameter(Mandatory = $false)]$FullSamples = $null
     )
 
     $parsedUri = $null
@@ -3142,7 +3566,7 @@ function Send-Report {
     } else {
         [void](Redact-ReportObject -InputObject $Report)
         if (-not [string]::IsNullOrWhiteSpace($ReportDir)) {
-            $saved = Save-LocalReport -Report $Report -Dir $ReportDir -KeepHistory:$KeepHistory
+            $saved = Save-LocalReport -Report $Report -Dir $ReportDir -KeepHistory:$KeepHistory -FullSamples $FullSamples
             $bodyText = $saved.JsonText
             if ([string]::IsNullOrWhiteSpace($pendingPath)) {
                 $pendingPath = Join-Path -Path $ReportDir -ChildPath "$($saved.BaseName).pending.json"
@@ -3449,7 +3873,7 @@ function Start-CollectorInteractive {
         Write-Host "  JSON: $($saved.JsonPath)"
         Write-Host "  ZIP : $($saved.ZipPath)"
     } elseif ($action -eq '2') {
-        $sendRes = Send-Report -Report $report -ReportDir $outDir -KeepHistory:$useKeepHistory
+        $sendRes = Send-Report -Report $report -ReportDir $outDir -KeepHistory:$useKeepHistory -FullSamples $fullTsSamples
         if ($sendRes.Status -in @('sent', 'duplicate') -and -not [string]::IsNullOrWhiteSpace($sendRes.IssueUrl)) {
             $label = if ($sendRes.Status -eq 'duplicate') { 'Báo cáo đã tồn tại (trùng lặp)' } else { 'Đã gửi báo cáo thành công' }
             Write-Host "${label}: $($sendRes.IssueUrl)"

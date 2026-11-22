@@ -2044,6 +2044,118 @@ Invoke-TestCase 'p2_load_test_workflow_samples_idle_load_recovery_and_stops_on_t
     }
 }
 
+# =========================================================================
+# Phase 3 Task 4 RED Tests: Local Report Comparison, Deltas, Confounders, Atomic Pointer
+# =========================================================================
+
+Invoke-TestCase 'p3_comparison_pairs_valid_experiment_detects_confounders_rejects_bad_order_or_gpu_and_updates_pointer_atomically' {
+    $expDir = Join-Path ([IO.Path]::GetTempPath()) ("vga-cmp-" + [guid]::NewGuid())
+    try {
+        [void][IO.Directory]::CreateDirectory($expDir)
+        $origKeep = $env:VGA_KEEP_HISTORY
+        $env:VGA_KEEP_HISTORY = '1'
+
+        $inv = @([pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:02:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = [pscustomobject]@{ value = '10DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            device_id = [pscustomobject]@{ value = '1F0B'; source = 'pnp'; unit = $null; status = 'ok' }
+            subsystem_id = [pscustomobject]@{ value = '000010DE'; source = 'pnp'; unit = $null; status = 'ok' }
+            revision = [pscustomobject]@{ value = 'A1'; source = 'pnp'; unit = $null; status = 'ok' }
+            name = [pscustomobject]@{ value = 'NVIDIA CMP 40HX'; source = 'cim'; unit = $null; status = 'ok' }
+            pnp_status = [pscustomobject]@{ value = 'OK'; source = 'pnp'; unit = $null; status = 'ok' }
+            driver_version = [pscustomobject]@{ value = '32.0.15.6094'; source = 'cim'; unit = $null; status = 'ok' }
+            pcie = [ordered]@{
+                max_gen = [pscustomobject]@{ value = 3; source = 'pnp'; unit = 'gen'; status = 'ok' }
+                current_gen = [pscustomobject]@{ value = 1; source = 'pnp'; unit = 'gen'; status = 'ok' }
+                max_width = [pscustomobject]@{ value = 16; source = 'pnp'; unit = 'lanes'; status = 'ok' }
+                current_width = [pscustomobject]@{ value = 16; source = 'pnp'; unit = 'lanes'; status = 'ok' }
+            }
+        })
+
+        $mkLt = {
+            param([double]$h2d, [double]$d2h, [double]$gf, [bool]$pinned = $true, [int]$sz = 64)
+            return [ordered]@{
+                status = 'ok'; reason = 'ok'; helper_name = 'vgabench'; helper_version = '1.0.0'; target_bdf = '0000:02:00.0'
+                started_utc = '2026-11-22T02:00:00Z'; finished_utc = '2026-11-22T02:00:10Z'; stop_reason = 'completed'
+                schedule = [ordered]@{ idle_sec = 1; load_sec = 2; recovery_sec = 1; sample_interval_ms = 1000; warmup_included = $true }
+                actual_duration_ms = 4000; thresholds = [ordered]@{ max_temp_c = 85; max_power_w = 250; timeout_ms = 15000 }
+                pcie_bandwidth = [ordered]@{
+                    method = $(if ($pinned) { 'nvcuda_pinned_host' } else { 'nvcuda_pageable_host' }); pinned_host = $pinned; transfer_size_mb = $sz; iterations = 5
+                    h2d_median_gbps = New-ReportField $h2d 'vgabench' 'GB/s'; h2d_min_gbps = New-ReportField $h2d 'vgabench' 'GB/s'; h2d_max_gbps = New-ReportField $h2d 'vgabench' 'GB/s'
+                    d2h_median_gbps = New-ReportField $d2h 'vgabench' 'GB/s'; d2h_min_gbps = New-ReportField $d2h 'vgabench' 'GB/s'; d2h_max_gbps = New-ReportField $d2h 'vgabench' 'GB/s'
+                }
+                compute_test = [ordered]@{
+                    driver_api_version = 13050; compute_capability = '7.5'; fp32_kernel_name = 'fp32_saxpy'; fp32_kernel_ok = $true
+                    fp32_gflops = New-ReportField $gf 'vgabench' 'GFLOPS'; tensor_check_status = 'skipped'; tensor_reason = 'Chưa thử Tensor'
+                }
+                timeseries = [ordered]@{ total_samples = 1; included_samples = 1; truncated_to_local = $false; samples = @([ordered]@{ phase = 'load'; rel_ms = 0; utc = '2026-11-22T02:00:01Z'; pcie_gen = 1; pcie_width = 16; temp_c = 40.0; power_w = 50.0; clocks_sm_mhz = 1200; clocks_mem_mhz = 7000; util_gpu_pct = 50; pstate = 'P0' }) }
+            }
+        }
+        $benchBase = [pscustomobject]@{ status = 'ok'; bdf = '0000:02:00.0'; compute_capability = '7.5'; transfer_size_mb = 64; pinned_host = $true; h2d_bandwidth_gbps = 3.1; d2h_bandwidth_gbps = 3.2; fp32_kernel_ok = $true; fp32_gflops = 50.0; has_timeseries = $true }
+        $ctxBefore = [pscustomobject]@{ mod_state = 'stock'; mod_type = 'none'; riser = 'direct'; slot = 'cpu_x16'; stage = 'before_unlock'; notes = '' }
+        $rep1 = New-Report -Inventory $inv -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctxBefore -ExperimentDir $expDir -KeepHistory -LoadBench $benchBase -LoadTest (& $mkLt 3.1 3.2 50.0 $true 64)
+        [void](Save-LocalReport -Report $rep1 -Dir $expDir -KeepHistory)
+
+        # Case 1: Valid forward after_unlock with BDF shift 0000:02:00.0 -> 0000:03:00.0
+        $inv2 = @([pscustomobject]@{
+            bdf = [pscustomobject]@{ value = '0000:03:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+            vendor_id = $inv[0].vendor_id; device_id = $inv[0].device_id; subsystem_id = $inv[0].subsystem_id; revision = $inv[0].revision
+            name = $inv[0].name; pnp_status = $inv[0].pnp_status; driver_version = $inv[0].driver_version
+            pcie = [ordered]@{ max_gen = New-ReportField 3 'pnp' 'gen'; current_gen = New-ReportField 2 'pnp' 'gen'; max_width = New-ReportField 16 'pnp' 'lanes'; current_width = New-ReportField 16 'pnp' 'lanes' }
+        })
+        $benchAfter = [pscustomobject]@{ status = 'ok'; bdf = '0000:03:00.0'; compute_capability = '7.5'; transfer_size_mb = 64; pinned_host = $true; h2d_bandwidth_gbps = 6.1; d2h_bandwidth_gbps = 6.2; fp32_kernel_ok = $true; fp32_gflops = 55.0; has_timeseries = $true }
+        $ctxAfter = [pscustomobject]@{ mod_state = 'modded'; mod_type = 'efi'; riser = 'direct'; slot = 'cpu_x16'; stage = 'after_unlock'; notes = '' }
+        $rep2 = New-Report -Inventory $inv2 -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctxAfter -ExperimentDir $expDir -KeepHistory -LoadBench $benchAfter -LoadTest (& $mkLt 6.1 6.2 55.0 $true 64)
+        Assert-Equal $rep2.evidence_level 'compared' 'valid paired load comparison elevates evidence_level to compared'
+        Assert-Equal $rep2.completeness.comparison.status 'ok' 'comparison completeness ok'
+        Assert-Equal $rep2.comparison.status 'ok' 'comparison object status ok'
+        Assert-True ($rep2.comparison.gpu_identity_matched) 'BDF shift matched via PCI IDs and slot'
+        $h2dDelta = $rep2.comparison.deltas | Where-Object { $_.metric -eq 'h2d_median_gbps' } | Select-Object -First 1
+        Assert-Equal $h2dDelta.delta 3.0 'H2D delta 6.1 - 3.1 = 3.0 GB/s'
+        $tmp2 = Join-Path $expDir 'validate-cmp.json'
+        [IO.File]::WriteAllText($tmp2, ($rep2 | ConvertTo-Json -Depth 12), (New-Object Text.UTF8Encoding($false)))
+        $nodeOut = & node -e "const fs=require('fs'), r=require(process.argv[1]), d=JSON.parse(fs.readFileSync(process.argv[2],'utf8')); const v=r.validateReport(d), p=r.findPii(d); if(!v.ok || p.length){ console.log(JSON.stringify({v,p})); process.exit(1); }" $reportCjsPath $tmp2
+        Assert-Equal $LASTEXITCODE 0 "Compared v2 report passes Node validation: $nodeOut"
+
+        # Case 2: Wrong stage order (after_unlock -> before_unlock) stays partial
+        [void](Save-LocalReport -Report $rep2 -Dir $expDir -KeepHistory)
+        $repRev = New-Report -Inventory $inv2 -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctxBefore -ExperimentDir $expDir -KeepHistory -LoadBench $benchAfter -LoadTest (& $mkLt 6.1 6.2 55.0 $true 64)
+        Assert-True ($repRev.completeness.comparison.status -ne 'ok') 'reverse stage order keeps comparison partial'
+        Assert-Equal $repRev.comparison.stage_order_valid $false 'stage_order_valid=false on reverse transition'
+
+        # Case 3: Method/size mismatch marks bandwidth delta incompatible and confounder
+        $repMismatch = New-Report -Inventory $inv2 -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctxAfter -ExperimentDir $expDir -KeepHistory -LoadBench $benchAfter -LoadTest (& $mkLt 6.1 6.2 55.0 $false 16)
+        Assert-True ($repMismatch.completeness.comparison.status -ne 'ok') 'incompatible transfer size/method cannot complete comparison'
+        Assert-True ($repMismatch.comparison.confounders.Count -ge 1) 'method/size difference flagged as confounder'
+
+        # Case 4: Ambiguous two identical GPUs when BDF shifted (previous was 0000:03:00.0)
+        $invTwoSame = @(
+            [pscustomobject]@{
+                bdf = [pscustomobject]@{ value = '0000:04:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+                vendor_id = $inv[0].vendor_id; device_id = $inv[0].device_id; subsystem_id = $inv[0].subsystem_id; revision = $inv[0].revision
+                name = $inv[0].name; pnp_status = $inv[0].pnp_status; driver_version = $inv[0].driver_version
+            },
+            [pscustomobject]@{
+                bdf = [pscustomobject]@{ value = '0000:05:00.0'; source = 'pnp'; unit = $null; status = 'ok' }
+                vendor_id = $inv[0].vendor_id; device_id = $inv[0].device_id; subsystem_id = $inv[0].subsystem_id; revision = $inv[0].revision
+                name = $inv[0].name; pnp_status = $inv[0].pnp_status; driver_version = $inv[0].driver_version
+            }
+        )
+        $repAmb = New-Report -Inventory $invTwoSame -Nvidia (New-EmptyNvidiaBlock -Status 'skipped') -Context $ctxAfter -ExperimentDir $expDir -KeepHistory -LoadBench $benchAfter -LoadTest (& $mkLt 6.1 6.2 55.0 $true 64)
+        Assert-Equal $repAmb.comparison.gpu_identity_matched $false 'two identical GPUs with shifted BDF require explicit confirmation'
+
+        # Case 5: Atomic pointer points to last successfully saved report and leaves no tmp files
+        $ptrPath = Join-Path $expDir 'last_report_id.txt'
+        Assert-True (Test-Path -LiteralPath $ptrPath) 'last_report_id.txt exists after Save-LocalReport'
+        Assert-Equal ([IO.File]::ReadAllText($ptrPath, [Text.Encoding]::UTF8).Trim()) $rep2.report_id 'pointer updated to rep2 after ZIP succeeded'
+        $tmpPtrs = @(Get-ChildItem -LiteralPath $expDir -Filter 'last_report_id.tmp.*' -File -ErrorAction SilentlyContinue)
+        Assert-Equal $tmpPtrs.Count 0 'no leftover atomic temp pointer files'
+    } finally {
+        $env:VGA_KEEP_HISTORY = $origKeep
+        Remove-Item -LiteralPath $expDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Host "Summary: Passed=$script:Passed Failed=$script:Failed"
 if ($script:Failed -gt 0) { exit 1 }
 exit 0
